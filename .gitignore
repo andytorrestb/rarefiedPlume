@@ -12,3 +12,7 @@ constant/polyMesh/*
 !constant/polyMesh/blockMeshDict
 constant/cellToRegion
 *.OpenFOAM
+*.csv
+
+images/
+img/
