@@ -106,12 +106,12 @@ dsmcGeneralBoundaries
 			      typeIds				                (Ar);
 			      numberDensities
 			      {
-				         Ar		1e22;
+				         Ar		1.3e22;
 			      }
 			      
 			      translationalTemperature			300;
 			      rotationalTemperature			    300;
-			      velocity			                (227 227 0);
+			      velocity			                (82.5 82.5 0);
 	      }
     }
      
