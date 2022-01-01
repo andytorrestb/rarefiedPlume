@@ -13,6 +13,5 @@ constant/polyMesh/*
 constant/cellToRegion
 *.OpenFOAM
 *.csv
-
 images/
 img/
