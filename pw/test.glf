@@ -190,11 +190,25 @@ proc makeConnector { } {
     $seg setShoulderPoint $point(4)
     $con2 addSegment $seg
 
+    set con3 [pw::Connector create]
+    set seg [pw::SegmentSpline create]
+    $seg addPoint $point(0)
+    $seg addPoint $point(3)
+    $con3 addSegment $seg
+
+    set con4 [pw::Connector create]
+    set seg [pw::SegmentSpline create]
+    $seg addPoint $point(2)
+    $seg addPoint $point(5)
+    $con4 addSegment $seg
+
     if { $dim >= 4 } {
       set dim1 [expr {1 + ($dim)/2}]
       set dim2 [expr {$dim + 2 - $dim1}]
       $con1 setDimension $dim1
       $con2 setDimension $dim2
+      $con3 setDimension $dim
+      $con4 setDimension $dim
     }
   } msg] } {
     tk_messageBox -icon error -title "Could not create connectors" \
@@ -202,6 +216,11 @@ proc makeConnector { } {
     $mode abort
     return 0
   }
+
+  # Create domain
+  set connectors [list $con1 $con2 $con3 $con4]
+  set dom [pw::DomainStructured createFromConnectors $connectors]]
+
   $mode end
   return 1
 }
