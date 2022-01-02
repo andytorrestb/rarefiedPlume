@@ -125,10 +125,9 @@ proc makeConnector { } {
     return 0
   }
 
-  set point(0) [pwu::Vector3 set 0.0 $r 0.0]
-  set point(1) [pwu::Vector3 set [expr -1 * $r] 0.0 0.0]
-  set point(2) [pwu::Vector3 set 0 [expr -1 * $r] 0.0]
-  set point(3) [pwu::Vector3 set $r 0 0]
+  set point(0) [pwu::Vector3 set $r 0.0 0.0]
+  set point(1) [pwu::Vector3 set  [expr 0.717* $r] [expr 0.717* $r] 0.0]
+  set point(2) [pwu::Vector3 set 0.0 $r 0.0]
 
   # create the semi-circle connectors in the the selected plane
   switch $opt(Plane) {
@@ -160,8 +159,7 @@ proc makeConnector { } {
   set point(0) [pwu::Vector3 add [pwu::Transform apply $xform $point(0)] $c]
   set point(1) [pwu::Vector3 add [pwu::Transform apply $xform $point(1)] $c]
   set point(2) [pwu::Vector3 add [pwu::Transform apply $xform $point(2)] $c]
-  set point(3) [pwu::Vector3 add [pwu::Transform apply $xform $point(3)] $c]
-
+  
   set mode [pw::Application begin Create]
 
   if { [catch {
@@ -172,18 +170,10 @@ proc makeConnector { } {
     $seg setShoulderPoint $point(1)
     $con1 addSegment $seg
 
-    set con2 [pw::Connector create]
-    set seg [pw::SegmentCircle create]
-    $seg addPoint $point(2)
-    $seg addPoint $point(0)
-    $seg setShoulderPoint $point(3)
-    $con2 addSegment $seg
-
     if { $dim >= 4 } {
       set dim1 [expr {1 + ($dim)/2}]
       set dim2 [expr {$dim + 2 - $dim1}]
       $con1 setDimension $dim1
-      $con2 setDimension $dim2
     }
   } msg] } {
     tk_messageBox -icon error -title "Could not create connectors" \
