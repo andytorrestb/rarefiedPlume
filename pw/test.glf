@@ -26,8 +26,9 @@ package require PWI_Glyph 2
 pw::Script loadTk
 
 set opt(Center)    [pwu::Vector3 set 0 0 0]
-set opt(Radius)     1
-set opt(Dimension) ""
+set opt(Radius1)     1
+set opt(Radius2)     10
+set opt(Dimension) 20
 set opt(Plane)     view
 
 if { ! [pw::Application isInteractive] } {
@@ -114,8 +115,12 @@ proc makeConnector { } {
     focus .inputs.entcoord
     return 0
   }
-  if { [catch { expr double($opt(Radius)) } r] || $r <= 0.0 } {
-    focus .inputs.entrad
+  if { [catch { expr double($opt(Radius1)) } r1] || $r1 <= 0.0 } {
+    focus .inputs.entrad1
+    return 0
+  }
+  if { [catch { expr double($opt(Radius2)) } r2] || $r2 <= 0.0 } {
+    focus .inputs.entrad2
     return 0
   }
   set dim $opt(Dimension)
@@ -125,9 +130,13 @@ proc makeConnector { } {
     return 0
   }
 
-  set point(0) [pwu::Vector3 set $r 0.0 0.0]
-  set point(1) [pwu::Vector3 set  [expr 0.717* $r] [expr 0.717* $r] 0.0]
-  set point(2) [pwu::Vector3 set 0.0 $r 0.0]
+  set point(0) [pwu::Vector3 set $r1 0.0 0.0]
+  set point(1) [pwu::Vector3 set  [expr 0.717* $r1] [expr 0.717* $r1] 0.0]
+  set point(2) [pwu::Vector3 set 0.0 $r1 0.0]
+
+  set point(3) [pwu::Vector3 set $r2 0.0 0.0]
+  set point(4) [pwu::Vector3 set  [expr 0.717* $r2] [expr 0.717* $r2] 0.0]
+  set point(5) [pwu::Vector3 set 0.0 $r2 0.0]
 
   # create the semi-circle connectors in the the selected plane
   switch $opt(Plane) {
@@ -160,6 +169,10 @@ proc makeConnector { } {
   set point(1) [pwu::Vector3 add [pwu::Transform apply $xform $point(1)] $c]
   set point(2) [pwu::Vector3 add [pwu::Transform apply $xform $point(2)] $c]
   
+  set point(3) [pwu::Vector3 add [pwu::Transform apply $xform $point(3)] $c]
+  set point(4) [pwu::Vector3 add [pwu::Transform apply $xform $point(4)] $c]
+  set point(5) [pwu::Vector3 add [pwu::Transform apply $xform $point(5)] $c]
+  
   set mode [pw::Application begin Create]
 
   if { [catch {
@@ -170,10 +183,18 @@ proc makeConnector { } {
     $seg setShoulderPoint $point(1)
     $con1 addSegment $seg
 
+    set con2 [pw::Connector create]
+    set seg [pw::SegmentCircle create]
+    $seg addPoint $point(3)
+    $seg addPoint $point(5)
+    $seg setShoulderPoint $point(4)
+    $con2 addSegment $seg
+
     if { $dim >= 4 } {
       set dim1 [expr {1 + ($dim)/2}]
       set dim2 [expr {$dim + 2 - $dim1}]
       $con1 setDimension $dim1
+      $con2 setDimension $dim2
     }
   } msg] } {
     tk_messageBox -icon error -title "Could not create connectors" \
@@ -190,7 +211,8 @@ proc makeConnector { } {
 
 proc updateButtons { } {
   set ok [expr [string equal [.inputs.entcoord cget -bg] $::color(Valid)] && \
-    [string equal [.inputs.entrad cget -bg] $::color(Valid)] && \
+    [string equal [.inputs.entrad1 cget -bg] $::color(Valid)] && \
+    [string equal [.inputs.entrad2 cget -bg] $::color(Valid)] && \
     [string equal [.inputs.entdim cget -bg] $::color(Valid)]]
     
   if { $ok } {
@@ -239,7 +261,9 @@ proc makeWindow { } {
 
   makeInputField .inputs coord "Center Coordinate:" opt(Center) 20 \
     "validateVec3 %W %P %d"
-  makeInputField .inputs rad "Radius:" opt(Radius) 20 \
+  makeInputField .inputs rad1 "Radius1:" opt(Radius1) 20 \
+    "validateRadius %W %P %d"
+  makeInputField .inputs rad2 "Radius2:" opt(Radius2) 20 \
     "validateRadius %W %P %d"
   makeInputField .inputs dim "Dimension:" opt(Dimension) 20 \
     "validateDim %W %P %d"
