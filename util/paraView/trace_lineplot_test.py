@@ -44,6 +44,6 @@ UpdatePipeline(time=0.2, proxy=plotOverLine1)
 
 UpdatePipeline(time=0.2, proxy=plotOverLine1)
 
-# Maybe this will work? 
+# Maybe this will work?
 # kind of skeptical bc points are added after????
-# SaveData('test2.csv', plotOverLine1)
+SaveData('test.csv', plotOverLine1)
