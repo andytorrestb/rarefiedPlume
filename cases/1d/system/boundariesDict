@@ -110,11 +110,32 @@ dsmcGeneralBoundaries
 			      }
 			      
 			      translationalTemperature			1000;
-			      rotationalTemperature			    0;
 			      velocity			                (117.716 0 0);
 	      }
     }
      
+    boundary
+    {
+        generalBoundaryProperties
+        {
+            patchName                vacuum;
+        }
+
+        boundaryModel   dsmcFreeStreamInflowPatch;
+        // boundaryModel   dsmcLiouFangPressureOutletCalculatedMolarFraction;
+
+        dsmcFreeStreamInflowPatchProperties
+        {
+			    typeIds				                (Ar);
+			    numberDensities
+			    {
+				         Ar		8.377e15;
+			    }
+			      
+			      translationalTemperature			10;
+			      velocity			         (200 0 0);
+	      }
+    }
 );
 
 
