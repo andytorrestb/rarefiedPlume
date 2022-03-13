@@ -106,36 +106,36 @@ dsmcGeneralBoundaries
 			      typeIds				                (Ar);
 			      numberDensities
 			      {
-				         Ar		8.377e20;
+				         Ar		6.0201e20;
 			      }
 			      
-			      translationalTemperature			1000;
-			      velocity			                (117.716 0 0);
+			      translationalTemperature			802.2867;
+			      velocity			                (743.397 0 0);
 	      }
     }
      
-    boundary
-    {
-        generalBoundaryProperties
-        {
-            patchName                vacuum;
-        }
+    // boundary
+    // {
+    //     generalBoundaryProperties
+    //     {
+    //         patchName                vacuum;
+    //     }
 
-        boundaryModel   dsmcFreeStreamInflowPatch;
-        // boundaryModel   dsmcLiouFangPressureOutletCalculatedMolarFraction;
+    //     // boundaryModel   dsmcFreeStreamInflowPatch;
+    //     boundaryModel   dsmcLiouFangPressureOutletCalculatedMolarFraction;
 
-        dsmcFreeStreamInflowPatchProperties
-        {
-			    typeIds				                (Ar);
-			    numberDensities
-			    {
-				         Ar		8.377e15;
-			    }
+    //     dsmcLiouFangPressureOutletCalculatedMolarFractionProperties
+    //     {
+	// 		    typeIds				                (Ar);
+	// 		    numberDensities
+	// 		    {
+	// 			         Ar		8.377e15;
+	// 		    }
 			      
-			      translationalTemperature			10;
-			      velocity			         (200 0 0);
-	      }
-    }
+	// 		      outletTemperature			10;
+	// 		      outletPressure        10000;
+	//       }
+    // }
 );
 
 

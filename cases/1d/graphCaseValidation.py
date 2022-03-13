@@ -33,7 +33,7 @@ digi_T = pd.read_csv(
     )
 
 sim = pd.read_csv(
-    curr_dir_path + '/postProcessing/sampleDict/0.3/horizontalLine_Ttra_Ar_rhoN_Ar.csv'
+    curr_dir_path + '/postProcessing/sampleDict/0.300012/horizontalLine_Ttra_Ar_rhoN_Ar.csv'
     )
 
 print(sim['Ttra_Ar'])

@@ -1,3 +1,3 @@
 #!/bin/bash
 
-rm -r 0* boundaries fieldMeasurements
+rm -r 0* boundaries fieldMeasurements postProcessing
