@@ -108,13 +108,13 @@ dsmcGeneralBoundaries
 			      {
 				         Ar		6.0201e20;
 			      }
-			      
-			      translationalTemperature			802.2867;
-			      velocity			                (743.397 0 0);
+	
+                  translationalTemperature         802.2867;
+                  velocity                    (743.397 0 0);
 	      }
     }
      
-    // boundary
+    
     // {
     //     generalBoundaryProperties
     //     {
