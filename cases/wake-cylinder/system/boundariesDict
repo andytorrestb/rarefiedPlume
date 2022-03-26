@@ -17,7 +17,22 @@ FoamFile
 
 dsmcPatchBoundaries
 ( 
-    // Symmetry Plane
+    // Desfualt faces
+    // boundary
+    // {
+    //     patchBoundaryProperties
+    //     {
+    //         patchName            noSolution;
+    //     }
+
+    //     boundaryModel        dsmcSpecularWallPatch;
+
+    //     dsmcSpecularWallPatchProperties
+    //     {
+    //     }
+    // }
+
+    // Symmetry Face
     // boundary
     // {
     //     patchBoundaryProperties
@@ -31,6 +46,39 @@ dsmcPatchBoundaries
     //     {
     //     }
     // }
+
+    // Obstacles
+    boundary
+    {
+        patchBoundaryProperties
+        {
+            patchName            cylinder;
+        }
+
+        boundaryModel        dsmcDiffuseWallPatch;
+
+        dsmcDiffuseWallPatchProperties
+        {
+            velocity            (0 0 0);
+            temperature         300; 
+        }
+    }
+
+    boundary
+    {
+        patchBoundaryProperties
+        {
+            patchName            plate;
+        }
+
+        boundaryModel        dsmcDiffuseWallPatch;
+
+        dsmcDiffuseWallPatchProperties
+        {
+            velocity            (0 0 0);
+            temperature         300; 
+        }
+    }
 
     // Inlet
     boundary
@@ -113,29 +161,6 @@ dsmcGeneralBoundaries
                   velocity                    (743.397 0 0);
 	      }
     }
-     
-    
-    // {
-    //     generalBoundaryProperties
-    //     {
-    //         patchName                vacuum;
-    //     }
-
-    //     // boundaryModel   dsmcFreeStreamInflowPatch;
-    //     boundaryModel   dsmcLiouFangPressureOutletCalculatedMolarFraction;
-
-    //     dsmcLiouFangPressureOutletCalculatedMolarFractionProperties
-    //     {
-	// 		    typeIds				                (Ar);
-	// 		    numberDensities
-	// 		    {
-	// 			         Ar		8.377e15;
-	// 		    }
-			      
-	// 		      outletTemperature			10;
-	// 		      outletPressure        10000;
-	//       }
-    // }
 );
 
 
