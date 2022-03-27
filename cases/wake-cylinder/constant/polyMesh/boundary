@@ -12,37 +12,37 @@ FoamFile
     cylinder
     {
         type patch;
-        nFaces 49;
-        startFace 27423;
+        nFaces 99;
+        startFace 105791;
     }
     inflow
     {
         type patch;
-        nFaces 49;
-        startFace 27472;
+        nFaces 99;
+        startFace 105890;
     }
     noSolution
     {
         type empty;
-        nFaces 36940;
-        startFace 27521;
+        nFaces 142072;
+        startFace 105989;
     }
     plate
     {
         type patch;
-        nFaces 47;
-        startFace 64461;
+        nFaces 164;
+        startFace 248061;
     }
     sym
     {
         type symmetry;
-        nFaces 127;
-        startFace 64508;
+        nFaces 327;
+        startFace 248225;
     }
     vacuum
     {
         type patch;
-        nFaces 292;
-        startFace 64635;
+        nFaces 837;
+        startFace 248552;
     }
 )
