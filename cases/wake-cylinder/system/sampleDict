@@ -16,25 +16,22 @@ object sampleDict;
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 
-type sets;
+type surfaces;
 
 
 interpolationScheme cellPointFace;
 
 
-setFormat csv;
+surfaceFormat raw;
 
 
-sets
+surfaces
 (
-horizontalLine
-{
-type midPointAndFace;
-axis x;
-start ( 0.0 0.0 0.0 );
-end ( 20.0 0.0 0.0 );
-}
+    inflow
+    {
+        type patch;
+        patches (".*inflow.*");
+    }
 );
 
-
-fields (rhoN_Ar Ttra_Ar);
+fields (boundaryU);
