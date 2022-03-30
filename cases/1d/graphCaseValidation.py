@@ -33,7 +33,7 @@ digi_T = pd.read_csv(
     )
 
 sim = pd.read_csv(
-    curr_dir_path + '/postProcessing/sampleDict/0.36/horizontalLine_Ttra_Ar_rhoN_Ar.csv'
+    curr_dir_path + '/postProcessing/sampleDict/0.3/horizontalLine_Ttra_Ar_rhoN_Ar.csv'
     )
 
 print(sim['Ttra_Ar'])
@@ -50,15 +50,17 @@ plt.xlabel('r', fontdict = font_axis_publish)
 plt.plot(digi_n['r'], digi_n['n_nstar'], label = 'digitized (DAC)')
 plt.plot(sim['x'], sim['rhoN_Ar'], label = 'simulated (DSMC)')
 plt.legend()
+plt.yscale('log')
 plt.savefig(curr_dir_path + '/digitized_vs_analytical_n.png')
 plt.close()
 
 plt.title('DSMC vs DAC', fontdict = font_axis_publish)
-plt.ylabel('T', fontdict = font_axis_publish)
+plt.ylabel('T/T*', fontdict = font_axis_publish)
 plt.xlabel('r', fontdict = font_axis_publish)
 
 plt.plot(digi_T['r'], digi_T['T_Tstar'], label = 'digitized (DAC)')
 plt.plot(sim['x'], sim['Ttra_Ar'], label = 'simulated (DSMC)')
 plt.legend()
+plt.yscale('log')
 plt.savefig(curr_dir_path + '/digitized_vs_analytical_T.png')
 plt.close()
