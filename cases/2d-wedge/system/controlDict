@@ -24,11 +24,11 @@ stopAt          endTime;
 
 endTime         3.0E-01;
 
-deltaT          1.0E-07;
+deltaT          1.0E-05;
 
 writeControl    adjustableRunTime;
 
-writeInterval   9.0E-04;
+writeInterval   2.5E-02;
 
 //purgeWrite      10;
 

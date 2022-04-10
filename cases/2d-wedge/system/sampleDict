@@ -14,18 +14,22 @@ location "system";
 object sampleDict;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+type sets;
+
 interpolationScheme cellPoint;
-setFormat raw;
+
+setFormat csv;
+
 sets
 (
 horizontalLine
 {
 type uniform;
 axis distance;
-start ( 0.1 0.0 0.005 );
-end ( 0.1 0.0 1.995 );
+start ( 1.0 1.0 0.0 );
+end ( 14.14 14.14 0.0 );
 nPoints 100;
 }
 );
-fields ( p U T);
+fields (U_Ar Ttra_Ar rhoN_Ar);
 // ************************************************************************* //

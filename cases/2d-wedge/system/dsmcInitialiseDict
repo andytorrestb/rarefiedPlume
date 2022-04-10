@@ -23,15 +23,15 @@ configurations
 
         numberDensities
         {
-            Ar          1e10;
+            Ar          0;
 		};
 
-		    translationalTemperature     	    300;
-		    rotationalTemperature			    300;
+		    translationalTemperature     	    1;
+		    rotationalTemperature			    ;
 		    vibrationalTemperature                0;
             electronicTemperature                 0;
 
-		    velocity        (300 0 0);
+		    velocity        (0 0 0);
     } 
 );
 
