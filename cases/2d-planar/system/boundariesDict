@@ -1,0 +1,149 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v1706                                 |
+|   \\  /    A nd           | Web:      http://www.openfoam.org               |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      boundariesDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dsmcPatchBoundaries
+( 
+    // Symmetry Plane
+    // boundary
+    // {
+    //     patchBoundaryProperties
+    //     {
+    //         patchName            sym;
+    //     }
+
+    //     boundaryModel        dsmcSpecularWallPatch;
+
+    //     dsmcSpecularWallPatchProperties
+    //     {
+    //     }
+    // }
+
+    // Inlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           inflow;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+    // Outlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           vacuum;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+);
+
+
+dsmcCyclicBoundaries
+(
+    // boundary
+    // {
+    //     cyclicBoundaryProperties
+    //     {
+    //         patchName   sym;
+    //     }
+
+    //     boundaryModel   dsmcReflectiveParticleMembranePatch;
+
+    //     dsmcReflectiveParticleMembranePatchProperties
+    //     {
+    //         typeIds (Ar);
+
+    //         reflectionProbabilities
+    //         {
+    //             Ar   0;
+    //         }
+    //     }
+    //  }
+);
+
+dsmcGeneralBoundaries
+(
+    boundary
+    {
+        generalBoundaryProperties
+        {
+            patchName                inflow;
+        }
+
+        boundaryModel   dsmcFreeStreamInflowPatch;
+
+        dsmcFreeStreamInflowPatchProperties
+        {
+			      typeIds				                (Ar);
+			      numberDensities
+			      {
+				         Ar		8.377e20;
+			      }
+			      
+			      translationalTemperature			        1000;
+			      velocity			                (117.26 0 0);
+	      }
+    }
+     
+    boundary
+    {
+        generalBoundaryProperties
+        {
+            patchName                vacuum;
+        }
+
+        // boundaryModel   dsmcFreeStreamInflowPatch;
+        // boundaryModel   dsmcLiouFangPressureOutletCalculatedMolarFraction;
+        // boundaryModel dsmcNewPressureOutletCalculatedMolarFraction;
+        
+        
+        boundaryModel dsmcIsothermalPressureOutletSpecifiedMolarFraction;
+
+
+
+        dsmcIsothermalPressureOutletSpecifiedMolarFractionProperties
+        {
+            typeIds (Ar);
+            moleFractions
+            {
+                Ar 1;
+            }
+
+            outletPressure 1;
+            outletTemperature 1;
+        }
+
+    }
+);
+
+
+// ************************************************************************* //
