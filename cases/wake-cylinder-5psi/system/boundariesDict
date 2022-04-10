@@ -1,0 +1,167 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v1706                                 |
+|   \\  /    A nd           | Web:      http://www.openfoam.org               |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      boundariesDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dsmcPatchBoundaries
+( 
+    // Desfualt faces
+    // boundary
+    // {
+    //     patchBoundaryProperties
+    //     {
+    //         patchName            noSolution;
+    //     }
+
+    //     boundaryModel        dsmcSpecularWallPatch;
+
+    //     dsmcSpecularWallPatchProperties
+    //     {
+    //     }
+    // }
+
+    // Symmetry Face
+    // boundary
+    // {
+    //     patchBoundaryProperties
+    //     {
+    //         patchName            sym;
+    //     }
+
+    //     boundaryModel        dsmcSpecularWallPatch;
+
+    //     dsmcSpecularWallPatchProperties
+    //     {
+    //     }
+    // }
+
+    // Obstacles
+    boundary
+    {
+        patchBoundaryProperties
+        {
+            patchName            cylinder;
+        }
+
+        boundaryModel        dsmcDiffuseWallPatch;
+
+        dsmcDiffuseWallPatchProperties
+        {
+            velocity            (0 0 0);
+            temperature         300; 
+        }
+    }
+
+    boundary
+    {
+        patchBoundaryProperties
+        {
+            patchName            plate;
+        }
+
+        boundaryModel        dsmcDiffuseWallPatch;
+
+        dsmcDiffuseWallPatchProperties
+        {
+            velocity            (0 0 0);
+            temperature         300; 
+        }
+    }
+
+    // Inlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           inflow;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+    // Outlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           vacuum;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+);
+
+
+dsmcCyclicBoundaries
+(
+    // boundary
+    // {
+    //     cyclicBoundaryProperties
+    //     {
+    //         patchName   sym;
+    //     }
+
+    //     boundaryModel   dsmcReflectiveParticleMembranePatch;
+
+    //     dsmcReflectiveParticleMembranePatchProperties
+    //     {
+    //         typeIds (Ar);
+
+    //         reflectionProbabilities
+    //         {
+    //             Ar   0;
+    //         }
+    //     }
+    //  }
+);
+
+dsmcGeneralBoundaries
+(
+    boundary
+    {
+        generalBoundaryProperties
+        {
+            patchName                inflow;
+        }
+
+        boundaryModel   dsmcFreeStreamInflowFieldPatch;
+
+        dsmcFreeStreamInflowFieldPatchProperties
+        {
+			      typeIds				                (Ar);
+			      numberDensities
+			      {
+				         Ar		0;
+			      }
+	
+                  translationalTemperature         1;
+                  velocity                    (0 0 0);
+	      }
+    }
+);
+
+
+// ************************************************************************* //
