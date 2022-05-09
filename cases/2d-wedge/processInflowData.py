@@ -8,12 +8,18 @@ import numpy as np
 
 # Declare input data, angles from 0 to 90 degrees
 theta = np.linspace(0, 1.57, 33)
-print(theta)
+# print(theta)
 
 p = 4 # Precision for rounding
 radius = 1.05 # inflow radius
 
-# Coordinates accoring to range of thera
+# Check for proper arguments before processing
+if (len(sys.argv) < 3):
+    print("Please enter 3 arguments")
+    print("processInflowData.py U_mag T rhoN")
+    sys.exit()
+
+# Co-ordinates according to range of theta
 x = np.round(radius * np.cos(theta), p)
 print(x)
 y = np.round(radius * np.sin(theta), p)
