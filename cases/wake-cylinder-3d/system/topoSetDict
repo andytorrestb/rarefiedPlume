@@ -1,21 +1,29 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v1706                                 |
+|  \\    /   O peration     | Version:  plus                                  |
 |   \\  /    A nd           | Web:      www.OpenFOAM.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
+
 FoamFile
 {
     version     2.0;
     format      ascii;
-    class       regIOobject;
-    location    "1e-05/polyMesh";
-    object      faceZones;
+    class       dictionary;
+    object      topoSetDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-0
-()
-
-// ************************************************************************* //
+actions
+(
+    {
+        name        inflow;
+        type        faceSet;
+        action      new;
+        source      patchToFace;
+        sourceInfo
+        {
+            name        inflow;
+        }
+    }
+);

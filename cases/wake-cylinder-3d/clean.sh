@@ -1,3 +1,1 @@
-rm -r *-*
-rm -r constant/polyMesh
-rm -r constant/extendedFeatureEdgeMesh
+rm -r 0*
