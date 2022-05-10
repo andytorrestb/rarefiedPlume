@@ -24,8 +24,22 @@ def update_sampleDict(direction):
         }
     elif (direction == 'diagonol'):
         print(direction)
+        start = 'start ( 1.05 0.0 0.0 );'
+        end = 'end ( 20.0 0.0 0.0 );'
+        return {
+            'system/sampleDict': {'#!stringManipulation':
+                                    {'start ( 0.0 1.05 0.0 );': '%s' %start,
+                                     'end ( 0.0 20.0 0.0 );': '%s' %end}}
+        }
     elif (direction == 'vertical'):
         print(direction)
+        start = 'start ( 1.05 0.0 0.0 );'
+        end = 'end ( 20.0 0.0 0.0 );'
+        return {
+            'system/sampleDict': {'#!stringManipulation':
+                                    {'start ( 0.0 1.05 0.0 );': '%s' %start,
+                                     'end ( 0.0 20.0 0.0 );': '%s' %end}}
+        }
     else:
         print("No Valid input")
         return
@@ -34,8 +48,8 @@ caseData = {
     'nEquivalentParticles_01': update_nEquivalentParticles('2e16'),
     'nEquivalentParticles_02': update_nEquivalentParticles('1e16'),
     'nEquivalentParticles_03': update_nEquivalentParticles('5e15'),
-    'vertical':  update_sampleDict('horizontal'),
-    'diagonol':  update_sampleDict('horizontal'),
+    'vertical':  update_sampleDict('vertical'),
+    'diagonol':  update_sampleDict('diagonol'),
     'horizontal':  update_sampleDict('horizontal')
 }
 

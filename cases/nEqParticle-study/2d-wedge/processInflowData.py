@@ -57,8 +57,12 @@ print(velo_data)
 # Create necessary OpenFOAM config files for the required inlet conditions. 
 original_stdout = sys.stdout # Save console as an output stream.
 
+curr_dir_path = os.path.dirname(os.path.realpath(__file__))
+
+print(curr_dir_path)
+
 # =============== Printing boundaryU =======================================
-with open("0/boundaryU", 'w') as f:
+with open(curr_dir_path + "/0/boundaryU", 'w') as f:
     sys.stdout = f # print to file. 
     print("/*--------------------------------*- C++ -*----------------------------------*\\")
     print("| =========                 |                                                 |")
@@ -137,7 +141,7 @@ with open("0/boundaryU", 'w') as f:
     f.close()
 
 # =============== Printing boundaryT =======================================
-with open("0/boundaryT", 'w') as f:
+with open(curr_dir_path + "/0/boundaryT", 'w') as f:
     sys.stdout = f
     print("/*--------------------------------*- C++ -*----------------------------------*\\")
     print("| =========                 |                                                 |")
@@ -218,7 +222,7 @@ with open("0/boundaryT", 'w') as f:
     f.close()
 
 # =============== Printing boundaryNumberDensity_Ar =======================================
-with open("0/boundaryNumberDensity_Ar", 'w') as f:
+with open(curr_dir_path + "/0/boundaryNumberDensity_Ar", 'w') as f:
     sys.stdout = f
     print("/*--------------------------------*- C++ -*----------------------------------*\\")
     print("| =========                 |                                                 |")
