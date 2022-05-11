@@ -24,8 +24,8 @@ def update_sampleDict(direction):
         }
     elif (direction == 'diagonol'):
         print(direction)
-        start = 'start ( 1.05 0.0 0.0 );'
-        end = 'end ( 20.0 0.0 0.0 );'
+        start = 'start ( 0.7425 0.7425 0.0 );'
+        end = 'end ( 14.1421 14.1421 0.0 );'
         return {
             'system/sampleDict': {'#!stringManipulation':
                                     {'start ( 0.0 1.05 0.0 );': '%s' %start,
@@ -33,8 +33,8 @@ def update_sampleDict(direction):
         }
     elif (direction == 'vertical'):
         print(direction)
-        start = 'start ( 1.05 0.0 0.0 );'
-        end = 'end ( 20.0 0.0 0.0 );'
+        start = 'start ( 0.0 1.05 0.0 );'
+        end = 'end ( 0.0 20.0 0.0 );'
         return {
             'system/sampleDict': {'#!stringManipulation':
                                     {'start ( 0.0 1.05 0.0 );': '%s' %start,
