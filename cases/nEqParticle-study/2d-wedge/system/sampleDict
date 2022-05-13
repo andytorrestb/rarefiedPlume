@@ -22,14 +22,14 @@ setFormat csv;
 
 sets
 (
-horizontalLine
-{
-type uniform;
-axis distance;
-start ( 0.0 1.05 0.0 );
-end ( 0.0 20.0 0.0 );
-nPoints 100;
-}
+    radialLine
+    {
+        type uniform;
+        axis distance;
+        start ( 0.0 1.05 0.0 );
+        end ( 0.0 20.0 0.0 );
+        nPoints 100;
+    }
 );
 fields (U_Ar Ttra_Ar rhoN_Ar);
 // ************************************************************************* //

@@ -40,13 +40,15 @@ collisionPartnerSelectionModel   		noTimeCounter;
 
 
 // Coordinate System Selection
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// coordinateSystem   dsmcAxisymmetric;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+coordinateSystem   dsmcAxisymmetric;
 
-// axisymmetricProperties
-// {
-//     maxRadialWeightingFactor    20;
-// }
+axisymmetricProperties
+{
+    revolutionAxis  "x";
+    polarAxis       "z";
+    maxRadialWeightingFactor    20;
+}
 
 // Molecular species
 // ~~~~~~~~~~~~~~~~~
