@@ -34,8 +34,10 @@ def printPoints():
     p = 3 # precision
 
     x0 = str(0)
-    x1 = str(round(r_inlet * math.cos(alpha), p))
-    x2 = str(round(r_outlet * math.cos(alpha), p))
+    # x1 = str(round(r_inlet * math.cos(alpha), p))
+    # x2 = str(round(r_outlet * math.cos(alpha), p))
+    x1 = str(round(r_inlet, p))
+    x2 = str(round(r_outlet, p))
 
     y0 = str(round(-1 * r_outlet * math.sin(alpha), p))
     y1 = str(round(-1 * r_inlet * math.sin(alpha), p))
@@ -84,16 +86,45 @@ def printEdges():
     print()
 
 def printBoundary():
-    print("patches")
+    print("boundary")
     print("(")
+    print("     inflow")
+    print("     {")
+    print("         type patch;")
+    print("         faces")
+    print("         (")
+    print("             (0 3 4 7)")
+    print("         );")
+    print("     }")
+    print()
+    print("     vacuum")
+    print("     {")
+    print("         type patch;")
+    print("         faces")
+    print("         (")
+    print("             (1 2 6 5)")
+    print("         );")
+    print("     }")
+    print()
+    print("     sides")
+    print("     {")
+    print("         type symmetry;")
+    print("         faces")
+    print("         (")
+    print("             (4 5 6 7)")
+    print("             (0 1 4 5)")
+    print("             (3 2 6 7)")
+    print("             (1 2 3 0)")
+    print("         );")
+    print("     }")
     print(");")
     print()
 
 def printMergePatchPairs():
     print("mergePatchPairs")
     print("(")
+    print()
     print(");")
-
     
 # Find path for cases
 curr_dir_path = os.path.dirname(os.path.realpath(__file__))
