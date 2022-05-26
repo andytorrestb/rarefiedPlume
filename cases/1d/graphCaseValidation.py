@@ -26,7 +26,7 @@ digi_n = pd.read_csv(
     )
 
 digi_T = pd.read_csv(
-    curr_dir_path + '/T_Tstar_radius.dat',
+    curr_dir_path + '/T_Tstar_radius_DAC.dat',
     header = 0,
     sep = '\t',
     names = ['r', 'T_Tstar']
@@ -60,35 +60,38 @@ def nnt_Ma(Ma, ga = 1.4):
 def a(T, ga = 1.4, R = 287):
     return np.sqrt(ga * R * T)
 
-Ma_domain = np.linspace(1, 10.5, 100)
-TTt = TTt_Ma(Ma_domain)
-rrt = rrt_Ma(Ma_domain)
-nnt = nnt_Ma(Ma_domain)
+Ma_domain = np.linspace(1, 25, 100) 
+ga = 1.67
+TTt = TTt_Ma(Ma_domain, ga = ga)
+rrt = rrt_Ma(Ma_domain, ga = ga)
+nnt = nnt_Ma(Ma_domain, ga = ga)
 
 print("Printing rrt")
 print(rrt)
 
 # Graph Results
-plt.title('DSMC vs DAC', fontdict = font_axis_publish)
+plt.title('OpenFOAM vs DAC', fontdict = font_axis_publish)
 plt.ylabel('n/n*', fontdict = font_axis_publish)
-plt.xlabel('r', fontdict = font_axis_publish)
+plt.xlabel('Radial distance, r (m)', fontdict = font_axis_publish)
 
-plt.plot(digi_n['r'], digi_n['n_nstar'], label = 'digitized (DAC)')
-plt.plot(sim['x'], sim['rhoN_Ar'], label = 'simulated (DSMC)')
-plt.plot(rrt, nnt, label = 'analytical (Isentropic Expansion)')
+plt.plot(sim['x'], sim['rhoN_Ar'], label = 'OpenFOAM (Torres, Pitt, Kinzel)')
+plt.plot(digi_n['r'], digi_n['n_nstar'], label = 'DAC (Lumpkin, Stewart)')
+plt.plot(rrt, nnt, label = 'Analytical Solution')
 plt.legend()
 plt.yscale('log')
+plt.ylim(bottom = 1e-4, top = 1)
 plt.savefig(curr_dir_path + '/digitized_vs_analytical_n.png')
 plt.close()
 
-plt.title('DSMC vs DAC', fontdict = font_axis_publish)
+plt.title('OpenFOAM vs DAC', fontdict = font_axis_publish)
 plt.ylabel('T/T*', fontdict = font_axis_publish)
-plt.xlabel('r', fontdict = font_axis_publish)
+plt.xlabel('Radial distance, r (m)', fontdict = font_axis_publish)
 
-plt.plot(digi_T['r'], digi_T['T_Tstar'], label = 'digitized (DAC)')
-plt.plot(sim['x'], sim['Ttra_Ar'], label = 'simulated (DSMC)')
-plt.plot(rrt, TTt, label = 'analytical (Isentropic Expansion)')
+plt.plot(sim['x'], sim['Ttra_Ar'], label = 'OpenFOAM (Torres, Pitt, Kinzel)')
+plt.plot(digi_T['r'], digi_T['T_Tstar'], label = 'DAC (Lumpkin, Stewart)')
+plt.plot(rrt, TTt, label = 'Analytical Solution')
 plt.legend()
 plt.yscale('log')
+plt.ylim(bottom = 1e-3, top = 1)
 plt.savefig(curr_dir_path + '/digitized_vs_analytical_T.png')
 plt.close()
