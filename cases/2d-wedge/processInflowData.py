@@ -34,21 +34,24 @@ print(v)
 
 # Temperature Values according to user input. 
 temperature = float(sys.argv[2])
-T = np.linspace(temperature, temperature, 33)
-print(T)
+Tx = np.round(temperature * np.cos(0), p)
+Ty = np.round(temperature * np.sin(0), p)
+print(Tx)
+print(Ty)
 
 rhoN = float(sys.argv[3])
 Nd = np.linspace(rhoN, rhoN, 33)
 print(Nd)
 
 # Save produced data in a dataframe (table of values)
-velo_data = pd.DataFrame(columns = ['theta','x', 'y', 'u', 'v', 'T', 'Nd'])
+velo_data = pd.DataFrame(columns = ['theta','x', 'y', 'u', 'v', 'Tx', 'Ty', 'Nd'])
 velo_data['theta'] = theta
 velo_data['x'] = x
 velo_data['y'] = y
 velo_data['u'] = u
 velo_data['v'] = v
-velo_data['T'] = T
+velo_data['Tx'] = Tx
+velo_data['Ty'] = Ty
 velo_data['Nd'] = Nd
 
 # Print to confirm values are reasonable.
@@ -178,7 +181,7 @@ with open("0/boundaryT", 'w') as f:
         # print(type(row[0]), type(row[1]))
         data = row[1]
         # print(data.name, data[0], data[1])
-        print("            ( " + str(data[5]) + " 0.0 0.0 )")
+        print("            ( " + str(data[5]) + " " + str(data[6]) + " 0.0 )")
         # print()
     print("        );")
     print("    }")
@@ -259,7 +262,7 @@ with open("0/boundaryNumberDensity_Ar", 'w') as f:
         # print(type(row[0]), type(row[1]))
         data = row[1]
         # print(data.name, data[0], data[1])
-        print("              " + str(data[6]))
+        print("              " + str(data[7]))
         # print()
     print("        );")
     print("    }")
