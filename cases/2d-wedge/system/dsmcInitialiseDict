@@ -27,7 +27,7 @@ configurations
 		};
 
 		    translationalTemperature     	    1;
-		    rotationalTemperature			    ;
+		    rotationalTemperature			    0;
 		    vibrationalTemperature                0;
             electronicTemperature                 0;
 

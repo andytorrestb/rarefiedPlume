@@ -26,8 +26,8 @@ horizontalLine
 {
 type uniform;
 axis distance;
-start ( 0.0 1.05 0.0 );
-end ( 0.0 20.0 0.0 );
+start ( 0.7424 0.7424 0.0 );
+end ( 14.142 14.142 0.0 );
 nPoints 100;
 }
 );

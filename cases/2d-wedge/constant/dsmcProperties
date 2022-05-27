@@ -19,7 +19,7 @@ FoamFile
 // General Properties
 // ~~~~~~~~~~~~~~~~~~
 
-nEquivalentParticles            2e16;
+nEquivalentParticles            2e17;
 
 
 // Binary Collision Model
@@ -41,12 +41,15 @@ collisionPartnerSelectionModel   		noTimeCounter;
 
 // Coordinate System Selection
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// coordinateSystem   dsmcAxisymmetric;
+coordinateSystem   dsmcAxisymmetric;
 
-// axisymmetricProperties
-// {
-//     maxRadialWeightingFactor    20;
-// }
+axisymmetricProperties
+{
+    maxRadialWeightingFactor    1000;
+    revolutionAxis              "x";
+    polarAxis                   "z";
+    // rwMethod                    "particleAverage";
+}
 
 // Molecular species
 // ~~~~~~~~~~~~~~~~~
@@ -61,7 +64,7 @@ moleculeProperties
         diameter                              4.17e-10;
         omega                                     0.74;
         alpha                                     1.36;
-        rotationalDegreesOfFreedom                   2;
+        rotationalDegreesOfFreedom                   0;
     }
 }
 
