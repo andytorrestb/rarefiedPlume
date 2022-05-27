@@ -41,8 +41,8 @@ sim = pd.read_csv(
 print(sim['Ttra_Ar'])
 
 sim = sim[['x', 'rhoN_Ar', 'Ttra_Ar']].dropna()
-sim['rhoN_Ar'] = sim['rhoN_Ar'] / 6.02e20
-sim['Ttra_Ar'] = sim['Ttra_Ar'] / 800.0
+sim['rhoN_Ar'] = sim['rhoN_Ar'] / 8.377e20
+sim['Ttra_Ar'] = sim['Ttra_Ar'] / 1000.0
     
 
 # Producde Analytical Data
