@@ -16,7 +16,7 @@ clc
 % Note, the domain is in the x-y plane with z being the wedge direction
 rstar = 1.05;   % Radius of the inflow surface,  [m]
 L = 20.0;         % Radius of the exterior of the domain, [m]
-thetaW = 5.0;   % Wedge angle thickness, [deg]
+thetaW = 2.0;   % Wedge angle thickness, [deg]
 
 % The mesh parameters - there are only 3
 dr = 0.5;        % Radial grid spacing [m]

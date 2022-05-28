@@ -8,8 +8,9 @@
 FoamFile
 {
     version     2.0;
-    format      ascii;
+    format      binary;
     class       polyBoundaryMesh;
+    arch        "LSB;label=32;scalar=64";
     location    "constant/polyMesh";
     object      boundary;
 }
@@ -38,15 +39,15 @@ FoamFile
     }
     front
     {
-        type            symmetry;
-        inGroups        1(symmetry);
+        type            wedge;
+        inGroups        1(wedge);
         nFaces          1353;
         startFace       2739;
     }
     back
     {
-        type            symmetry;
-        inGroups        1(symmetry);
+        type            wedge;
+        inGroups        1(wedge);
         nFaces          1353;
         startFace       4092;
     }
