@@ -19,7 +19,7 @@ FoamFile
 // General Properties
 // ~~~~~~~~~~~~~~~~~~
 
-nEquivalentParticles            2e17;
+nEquivalentParticles            4e15;
 
 
 // Binary Collision Model
