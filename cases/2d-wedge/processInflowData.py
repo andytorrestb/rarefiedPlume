@@ -6,8 +6,11 @@ import os
 import sys
 import numpy as np
 
+# resolution
+r = 132
+
 # Declare input data, angles from 0 to 90 degrees
-theta = np.linspace(0, 1.57, 33)
+theta = np.linspace(0, 1.57, r)
 # print(theta)
 
 p = 4 # Precision for rounding
@@ -40,7 +43,7 @@ print(Tx)
 print(Ty)
 
 rhoN = float(sys.argv[3])
-Nd = np.linspace(rhoN, rhoN, 33)
+Nd = np.linspace(rhoN, rhoN, r)
 print(Nd)
 
 # Save produced data in a dataframe (table of values)
@@ -111,12 +114,12 @@ with open("0/boundaryU", 'w') as f:
     print()
     print("    front")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    back")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    sym")
@@ -182,6 +185,7 @@ with open("0/boundaryT", 'w') as f:
         data = row[1]
         # print(data.name, data[0], data[1])
         print("            ( " + str(data[5]) + " " + str(data[6]) + " 0.0 )")
+        # print("            " + str(data[5]))
         # print()
     print("        );")
     print("    }")
@@ -192,12 +196,12 @@ with open("0/boundaryT", 'w') as f:
     print()
     print("    front")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    back")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    sym")
@@ -273,12 +277,12 @@ with open("0/boundaryNumberDensity_Ar", 'w') as f:
     print()
     print("    front")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    back")
     print("    {")
-    print("         type symmetry;")
+    print("         type wedge;")
     print("    }")
     print()
     print("    sym")
