@@ -34,7 +34,7 @@ digi_T = pd.read_csv(
 
 # Read in simulated data. 
 sim = pd.read_csv(
-    curr_dir_path + '/postProcessing/sampleDict/0.3/horizontalLine_Ttra_Ar_rhoN_Ar.csv'
+    curr_dir_path + '/postProcessing/sampleDict/0.05/line7_Ttra_Ar_rhoN_Ar.csv'
     )
 
 # Used to see what the values trend to. 
