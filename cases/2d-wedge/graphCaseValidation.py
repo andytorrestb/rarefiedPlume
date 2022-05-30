@@ -41,6 +41,8 @@ sim = pd.read_csv(
 print(sim['Ttra_Ar'])
 
 sim = sim[['distance', 'rhoN_Ar', 'Ttra_Ar']].dropna()
+
+sim['distance'] = sim['distance'] + 1.005
 sim['rhoN_Ar'] = sim['rhoN_Ar'] / 8.377e20
 sim['Ttra_Ar'] = sim['Ttra_Ar'] / 1000.0
     
