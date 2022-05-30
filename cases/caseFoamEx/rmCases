@@ -1,0 +1,20 @@
+# Script to remove all cases and bring folder to original structure
+rm -rf Cases/nEquivalentParticles_01*
+rm -rf Cases/nEquivalentParticles_02*
+rm -rf Cases/nEquivalentParticles_03*
+rm -rf Cases/nEquivalentParticles_04*
+rm -rf Cases/nEquivalentParticles_05*
+rm -rf Cases/nEquivalentParticles_06*
+
+mv Cases/baseCase/* Cases/
+rm -rf Cases/baseCase
+rm Allrun Allclean rmCases
+while true; do
+    read -p "Delete Cases directory? All changes in Cases will be lost. [y/N] " yn
+    case $yn in
+        [Yy]* ) rm -rf Cases; break;;
+        [Nn]* ) exit;;
+        * ) exit;;
+    esac
+done
+rm -rf Cases

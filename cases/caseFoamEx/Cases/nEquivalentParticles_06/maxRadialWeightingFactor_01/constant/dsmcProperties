@@ -1,0 +1,71 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v1706                                 |
+|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      dsmcProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+// General Properties
+// ~~~~~~~~~~~~~~~~~~
+
+nEquivalentParticles            6e14;
+
+
+// Binary Collision Model
+// ~~~~~~~~~~~~~~~~~~~~~~
+
+BinaryCollisionModel            LarsenBorgnakkeVariableHardSphere;
+
+LarsenBorgnakkeVariableHardSphereCoeffs
+{
+    rotationalRelaxationCollisionNumber     5.0;
+}
+
+
+// Collision Partner Selection Model
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+collisionPartnerSelectionModel   		noTimeCounter;  
+
+
+// Coordinate System Selection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+coordinateSystem   dsmcAxisymmetric;
+
+axisymmetricProperties
+{
+    revolutionAxis  "x";
+    polarAxis       "z";
+    maxRadialWeightingFactor            125;
+}
+
+// Molecular species
+// ~~~~~~~~~~~~~~~~~
+
+typeIdList                      (Ar);
+
+moleculeProperties
+{
+    Ar
+    {
+        mass                                  6.63e-26;
+        diameter                              4.17e-10;
+        omega                                     0.74;
+        alpha                                     1.36;
+        rotationalDegreesOfFreedom                   2;
+    }
+}
+
+
+// ************************************************************************* //
