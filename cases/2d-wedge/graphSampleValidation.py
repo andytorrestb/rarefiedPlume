@@ -72,7 +72,7 @@ degree_sign = u'\N{DEGREE SIGN}'
 
 # Plot simulated data
 plt.title('OpenFOAM Samples vs DAC', fontdict = font_axis_publish)
-plt.ylabel('n/n*', fontdict = font_axis_publish)
+plt.ylabel('T/T**', fontdict = font_axis_publish)
 plt.xlabel('Radial distance, r (m)', fontdict = font_axis_publish)
 plt.plot(digi_T['r'], digi_T['T_Tstar'], label = 'DAC')
 plt.plot(rrt, TTt, label = 'Analytical')
