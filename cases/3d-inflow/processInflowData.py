@@ -41,7 +41,9 @@ def readFaceLabels(patch):
 
         for i in range(nFaces):
             # face_labels.append(int(f.readline()))
-            face_labels[str(i)] = int(f.readline())
+            label = f.readline().split('\n')[0]
+
+            face_labels[label] = int(label)
         f.close()
 
     return face_labels
