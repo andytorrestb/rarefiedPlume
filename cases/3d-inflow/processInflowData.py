@@ -232,8 +232,31 @@ def graphNorm(face_norms, face_centroids):
     # Plot data
     ax = plt.figure().add_subplot(projection = '3d')
     ax.quiver(x_c, y_c, z_c, x_n, y_n, z_n, length = 0.1, normalize = True)
+    ax.set_xlim([0.0, 1.0])
     plt.show()
     # print(centroids)
+
+def graphCentroid(face_centroids):
+    centroids = []
+
+    # Convert data from dict to lists
+    for face in face_centroids:
+        centroids.append(face_centroids[str(face)])
+
+    # Extract coordinate data, save to unique lists
+    x_c = []
+    y_c = []
+    z_c = []
+    for point in centroids:
+        x_c.append(point[0])
+        y_c.append(point[1])
+        z_c.append(point[2])
+
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.scatter3D(x_c, y_c, z_c)
+    ax.set_xlim([0.0, 1.0])
+    plt.show()
 
 patch = 'inflow'
 mesh_stats = readMeshStats()
@@ -244,3 +267,4 @@ point_cooordinates = processPointCoordinates(mesh_stats['points'])
 face_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
 face_norms = processNorms(face_labels, point_labels, point_cooordinates)
 graphNorm(face_norms, face_centroids)
+graphCentroid(face_centroids)
