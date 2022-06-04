@@ -1,5 +1,6 @@
 from meshStats import readMeshStats
 import numpy as np
+import matplotlib.pyplot as plt
 
 def readNfaces(patch):
 
@@ -198,18 +199,46 @@ def processNorms(face_labels, point_labels, point_cooordinates):
 
     return norm
 
+def graphNorm(face_norms, face_centroids):
+    centroids = []
+    norms = []
+
+    # Convert data from dict to lists
+    for face in face_centroids:
+        centroids.append(face_centroids[str(face)])
+
+    for face in face_norms:
+        norms.append(face_norms[face])
+
+    # Extract coordinate data, save to unique lists
+    x_c = []
+    y_c = []
+    z_c = []
+    for point in centroids:
+        x_c.append(point[0])
+        y_c.append(point[1])
+        z_c.append(point[2])
+
+    x_n = []
+    y_n = []
+    z_n = []
+    for point in norms:
+        x_n.append(point[0])
+        y_n.append(point[1])
+        z_n.append(point[2])
+
+    # Plot data
+    ax = plt.figure().add_subplot(projection = '3d')
+    ax.quiver(x_c, y_c, z_c, x_n, y_n, z_n, length = 0.1, normalize = True)
+    plt.show()
+    # print(centroids)
 
 patch = 'inflow'
 mesh_stats = readMeshStats()
 face_labels = readFaceLabels(patch)
-# print(face_labels)
 face_points = readFacePoints(face_labels, mesh_stats)
 point_labels = readPointLabels(mesh_stats['faces'])
 point_cooordinates = processPointCoordinates(mesh_stats['points'])
 face_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
-# print(point_centroids)
-face_norm = processNorms(face_labels, point_labels, face_cooordinates)
-
-
-# processCentroids(face_labels, point_labels, point_cooordinates)/
-# print(face_points)
+face_norms = processNorms(face_labels, point_labels, point_cooordinates)
+graphNorm(face_norms, face_centroids)
