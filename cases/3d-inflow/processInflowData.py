@@ -28,21 +28,22 @@ def readFaceLabels(patch):
     nFaces = readNfaces(patch)
     face_labels = {}
 
-    # print(path)
     with open(path, 'r') as f:
         # print(f.read())
 
+        # Look for line containing nFaces
         line = f.readline()
         while str(nFaces) not in line:
             # print(str(nFaces))
             line = f.readline()
 
+        # Skip a line
         line = f.readline()
 
+        # Read the labeled IDs for each face in the patch.
         for i in range(nFaces):
             # face_labels.append(int(f.readline()))
             label = f.readline().split('\n')[0]
-
             face_labels[label] = int(label)
         f.close()
 
@@ -67,22 +68,20 @@ def readFacePoints(face_labels, mesh_stats):
         # print(len(face_dict))
         # print(len(face_labels))
 
+        # Use created dict to save labels for patch of interest to a seperate dict.
         for face in face_labels:
             # print(face)
             # print(face, face_dict[str(face)])
             # print(face_dict[str(face)].split("(")[1].split(")")[0].split(' '))
             face_points[str(face)] = face_dict[str(face)].split("(")[1].split(")")[0].split(' ')
 
+    # Return faces for patch of interest.
     return face_points
-    # for i in range(len(face_labels)):
-    #     print(i, face_labels[i])
-
 
 def readPointLabels(tNFaces):
     path = 'constant/polyMesh/faces'
 
     # nFaces for the entire mesh.
-    # tNFaces = 204717
     point_labels = {}
     with open(path, 'r') as f:
         line = f.readline()
@@ -101,10 +100,11 @@ def readPointLabels(tNFaces):
             line[-1] = line[-1].split(')')[0]
             # print(line)
             point_labels[str(i)] = line
-
+    # Retrurn a dict that maps each label ID (str) to the correct coordinates.
     return point_labels
 
 def processPointCoordinates(nPoints):
+    # Read coordinates for all th points in the mesh.
     path = 'constant/polyMesh/points'
     point_cooordinates = {}
 
@@ -119,34 +119,33 @@ def processPointCoordinates(nPoints):
             line = f.readline().strip("(").strip('\n').strip(")").split(" ")
             # print(line)
             point_cooordinates[str(i)] = line
-
+    # Retrurn a dict that maps each label ID (str) to the correct coordinates.
     return point_cooordinates
 
 def processCentroids(face_labels, point_labels, point_cooordinates):
-
+    # Calculates centroids for each face in patch of interest.
     centroid = {}
     for face in face_labels:
 
         face = str(face)
-        print('face', face)
-        print('face_points[face]', face_points[face])
-        print('point_labels[face]', point_labels[face])
-        # p
-
-        print(len(face_points[face]))
+        # print('face', face)
+        # print('face_points[face]', face_points[face])
+        # print('point_labels[face]', point_labels[face])
+        # print(len(face_points[face]))
 
         # for i in range(len(face_points[face])):
         #     # print(point_cooordinates[str(face)])
         #     coordinate = str(face_points[face][i])
         #     print(coordinate, point_cooordinates[coordinate])
 
-        print()
+        # print()
 
         centroid[face] = calculateCentroid(face, face_points, point_cooordinates)
+    # Return centroids as a dict that maps ID labels to the centroid vector.
     return centroid
 
 def calculateCentroid(face, face_points, point_cooordinates):
-
+    # Calculate and return the centroid vector for a given face
     x_c = 0
     y_c = 0
     z_c = 0
@@ -192,12 +191,12 @@ def calculateNorm(face, point_labels, point_cooordinates):
     return np.cross(B, A)
 
 def processNorms(face_labels, point_labels, point_cooordinates):
+    # Wrapper function for calcuteNorms
     norm = {}
-
     for face in face_labels:
         face = str(face)
         norm[face] = calculateNorm(face, point_labels, point_cooordinates)
-        print(norm[face])
+        # print(norm[face])
 
     return norm
 
@@ -266,5 +265,13 @@ point_labels = readPointLabels(mesh_stats['faces'])
 point_cooordinates = processPointCoordinates(mesh_stats['points'])
 face_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
 face_norms = processNorms(face_labels, point_labels, point_cooordinates)
+
+print('len(face_points)', len(face_points))
+print('len(face_labels)', len(face_labels))
+print('len(point_labels)', len(point_labels))
+print('len(point_cooordinates)', len(point_cooordinates))
+print('len(face_centroids)', len(face_centroids))
+print('len(face_norms)', len(face_norms))
+
 graphNorm(face_norms, face_centroids)
 graphCentroid(face_centroids)
