@@ -189,7 +189,7 @@ def calculateNorm(face, point_labels, point_cooordinates):
 
     A = np.array([Ax, Ay, Az])
     B = np.array([Bx, By, Bz])
-    return np.cross(A, B)
+    return np.cross(B, A)
 
 def processNorms(face_labels, point_labels, point_cooordinates):
     norm = {}
