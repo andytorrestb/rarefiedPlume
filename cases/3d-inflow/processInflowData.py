@@ -1,4 +1,5 @@
 from meshStats import readMeshStats
+import numpy as np
 
 def readNfaces(patch):
 
@@ -155,13 +156,47 @@ def calculateCentroid(face, face_points, point_cooordinates):
         y_c = y_c + float(point_cooordinates[coordinate][1])
         z_c = z_c + float(point_cooordinates[coordinate][2])
 
-
     x_c = x_c / 3.0
     y_c = y_c / 3.0
     z_c = z_c / 3.0
 
-    print(x_c, y_c, z_c)
+    # print(x_c, y_c, z_c)
     return [x_c, y_c, z_c]
+
+
+def calculateNorm(face, point_labels, point_cooordinates):
+    # Save needed cooridantes in a 2D list.
+    face_vectors = []
+    for i in range(len(point_labels[face])):
+        coordinate = str(face_points[face][i])
+        # print(coordinate, point_cooordinates[coordinate])
+        position_vector = point_cooordinates[coordinate]
+        face_vectors.append(position_vector)
+        # print()
+        # print()
+
+    # Save relative poition vectors.
+    Ax = float(face_vectors[0][0]) - float(face_vectors[1][0])
+    Ay = float(face_vectors[0][1]) - float(face_vectors[1][1])
+    Az = float(face_vectors[0][2]) - float(face_vectors[1][2])
+
+    Bx = float(face_vectors[0][0]) - float(face_vectors[2][0])
+    By = float(face_vectors[0][1]) - float(face_vectors[2][1])
+    Bz = float(face_vectors[0][2]) - float(face_vectors[2][2])
+
+    A = np.array([Ax, Ay, Az])
+    B = np.array([Bx, By, Bz])
+    return np.cross(A, B)
+
+def processNorms(face_labels, point_labels, point_cooordinates):
+    norm = {}
+
+    for face in face_labels:
+        face = str(face)
+        norm[face] = calculateNorm(face, point_labels, point_cooordinates)
+        print(norm[face])
+
+    return norm
 
 
 patch = 'inflow'
@@ -171,7 +206,10 @@ face_labels = readFaceLabels(patch)
 face_points = readFacePoints(face_labels, mesh_stats)
 point_labels = readPointLabels(mesh_stats['faces'])
 point_cooordinates = processPointCoordinates(mesh_stats['points'])
-point_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
-print(point_centroids)
+face_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
+# print(point_centroids)
+face_norm = processNorms(face_labels, point_labels, face_cooordinates)
+
+
 # processCentroids(face_labels, point_labels, point_cooordinates)/
 # print(face_points)
