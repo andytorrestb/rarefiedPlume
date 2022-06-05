@@ -1,6 +1,7 @@
 # from meshStats import readMeshStats
 import numpy as np
 import math
+import scipy as sc
 import matplotlib.pyplot as plt
 import os
 
