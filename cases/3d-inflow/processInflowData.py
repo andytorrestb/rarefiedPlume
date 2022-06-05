@@ -1,5 +1,6 @@
 from meshStats import readMeshStats
 import numpy as np
+import math
 import matplotlib.pyplot as plt
 
 def readNfaces(patch):
@@ -257,6 +258,57 @@ def graphCentroid(face_centroids):
     ax.set_xlim([0.0, 1.0])
     plt.show()
 
+def findSymmetryTheta(face_centroids):
+
+    theta = {}
+
+    for face in face_centroids:
+        # print(type(face))
+        print(face_centroids[face])
+        y = float(face_centroids[face][1])
+        z = float(face_centroids[face][2])
+        theta[face] = math.atan(abs(y/z))
+
+    return theta
+
+def graphSymmetryTheta(face_centroids, face_thetas):
+    centroids = []
+    thetas = []
+
+    # Convert data from dict to lists
+    for face in face_centroids:
+        centroids.append(face_centroids[str(face)])
+
+    for face in face_thetas:
+        thetas.append(face_thetas[str(face)])
+
+    max_theta = max(thetas)
+
+    for theta in thetas:
+        print(theta)
+        print()
+        # theta = theta / max_theta
+    # thetas = thetas / max(thetas)
+
+    # Extract coordinate data, save to unique lists
+    x_c = []
+    y_c = []
+    z_c = []
+    for point in centroids:
+        x_c.append(point[0])
+        y_c.append(point[1])
+        z_c.append(point[2])
+
+
+
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.scatter3D(x_c, y_c, z_c, c = thetas)
+    ax.set_xlim([0.0, 1.0])
+    plt.show()
+
+
+
 patch = 'inflow'
 mesh_stats = readMeshStats()
 face_labels = readFaceLabels(patch)
@@ -273,5 +325,8 @@ print('len(point_cooordinates)', len(point_cooordinates))
 print('len(face_centroids)', len(face_centroids))
 print('len(face_norms)', len(face_norms))
 
-graphNorm(face_norms, face_centroids)
-graphCentroid(face_centroids)
+# graphNorm(face_norms, face_centroids)
+# graphCentroid(face_centroids
+
+face_thetas = findSymmetryTheta(face_centroids)
+graphSymmetryTheta(face_centroids, face_thetas)
