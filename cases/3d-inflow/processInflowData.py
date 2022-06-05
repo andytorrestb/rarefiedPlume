@@ -123,7 +123,7 @@ def processPointCoordinates(nPoints):
     # Retrurn a dict that maps each label ID (str) to the correct coordinates.
     return point_cooordinates
 
-def processCentroids(face_labels, point_labels, point_cooordinates):
+def processCentroids(face_labels, point_labels, face_points, point_cooordinates):
     # Calculates centroids for each face in patch of interest.
     centroid = {}
     for face in face_labels:
@@ -167,7 +167,7 @@ def calculateCentroid(face, face_points, point_cooordinates):
     return [x_c, y_c, z_c]
 
 
-def calculateNorm(face, point_labels, point_cooordinates):
+def calculateNorm(face, point_labels, face_points, point_cooordinates):
     # Save needed cooridantes in a 2D list.
     face_vectors = []
     for i in range(len(point_labels[face])):
@@ -191,12 +191,12 @@ def calculateNorm(face, point_labels, point_cooordinates):
     B = np.array([Bx, By, Bz])
     return np.cross(B, A)
 
-def processNorms(face_labels, point_labels, point_cooordinates):
+def processNorms(face_labels, point_labels, face_points, point_cooordinates):
     # Wrapper function for calcuteNorms
     norm = {}
     for face in face_labels:
         face = str(face)
-        norm[face] = calculateNorm(face, point_labels, point_cooordinates)
+        norm[face] = calculateNorm(face, point_labels, face_points, point_cooordinates)
         # print(norm[face])
 
     return norm
@@ -308,25 +308,28 @@ def graphSymmetryTheta(face_centroids, face_thetas):
     plt.show()
 
 
+def plumeSourceFlowModel():
+    patch = 'inflow'
+    mesh_stats = readMeshStats()
+    face_labels = readFaceLabels(patch)
+    face_points = readFacePoints(face_labels, mesh_stats)
+    point_labels = readPointLabels(mesh_stats['faces'])
+    point_cooordinates = processPointCoordinates(mesh_stats['points'])
+    face_centroids = processCentroids(face_labels, point_labels, face_points, point_cooordinates)
+    face_norms = processNorms(face_labels, point_labels, face_points, point_cooordinates)
 
-patch = 'inflow'
-mesh_stats = readMeshStats()
-face_labels = readFaceLabels(patch)
-face_points = readFacePoints(face_labels, mesh_stats)
-point_labels = readPointLabels(mesh_stats['faces'])
-point_cooordinates = processPointCoordinates(mesh_stats['points'])
-face_centroids = processCentroids(face_labels, point_labels, point_cooordinates)
-face_norms = processNorms(face_labels, point_labels, point_cooordinates)
+    print('len(face_points)', len(face_points))
+    print('len(face_labels)', len(face_labels))
+    print('len(point_labels)', len(point_labels))
+    print('len(point_cooordinates)', len(point_cooordinates))
+    print('len(face_centroids)', len(face_centroids))
+    print('len(face_norms)', len(face_norms))
 
-print('len(face_points)', len(face_points))
-print('len(face_labels)', len(face_labels))
-print('len(point_labels)', len(point_labels))
-print('len(point_cooordinates)', len(point_cooordinates))
-print('len(face_centroids)', len(face_centroids))
-print('len(face_norms)', len(face_norms))
+    # graphNorm(face_norms, face_centroids)
+    # graphCentroid(face_centroids
 
-# graphNorm(face_norms, face_centroids)
-# graphCentroid(face_centroids
+    face_thetas = findSymmetryTheta(face_centroids)
+    graphSymmetryTheta(face_centroids, face_thetas)
 
-face_thetas = findSymmetryTheta(face_centroids)
-graphSymmetryTheta(face_centroids, face_thetas)
+
+plumeSourceFlowModel()
