@@ -337,6 +337,81 @@ def graphSymmetryTheta(face_centroids, face_thetas):
     ax.set_xlim([0.0, 1.0])
     plt.show()
 
+def processMagnitudes(face_labels, face_centroids):
+    magnitudes = {}
+
+    for face in face_centroids:
+        # r: position vector
+        r = face_centroids[face]
+        x = r[0]
+        y = r[1]
+        z = r[2]
+        magnitudes[face] = np.sqrt(x**2 + y**2 + z**2)
+    return magnitudes
+
+def calculateLimitingTheta(ga):
+    pi = math.pi
+    return 0.5 * pi * (np.sqrt((ga+1)/(ga-1) - 1))
+
+def calculateLimitingVelo(ga, To, m):
+    k = 1
+    return np.sqrt(((2*ga) / (ga - 1) * ((k * To) / m)))
+
+def angularDependence(ga, theta):
+    theta_l = calculateLimitingTheta(ga)
+    pi = math.pi
+    return math.cos(0.5 * pi * theta / theta_l)
+
+def calculeNormCoeff(ga, theta):
+    f_theta = angularDependence(ga, theta)
+    theta_l = calculateLimitingTheta(ga)
+    denom = sc.integrate(lambda x: sin(x)*f_theta, 0, theta_l)
+    return (0.5 * np.sqrt((ga - 1) + (ga + 1))) / denom
+
+def calculateRhoN(face_data, physical_props):
+    # pi = math.pi()
+    # f1 = (2 * A * Po) / (vel_l**2)
+    # f2 = (2 / (ga + 1)) ** (1 / (ga - 1))
+    # f3 = (r_e / r) **2
+    # f4 = angularDependence(ga, theta)
+    print(face_data[0])
+    print(face_data[1])
+    print(face_data[2])
+
+def calculateU(face_data, physical_props):
+    return
+
+def calculateT(face_data, physical_props):
+    return
+
+def processSourceFlowModel(mesh_data, physical_props):
+    ga = physical_props['ga']
+    To = physical_props['To']
+    m = physical_props['m']
+    theta_l = calculateLimitingTheta(ga)
+    vel_l = calculateLimitingVelo(ga, To, m)
+
+    face_centroids = mesh_data[0]
+    face_norms = mesh_data[1]
+    face_thetas = mesh_data[2]
+
+    face_rhoN = {}
+    face_U = {}
+    face_T = {}
+
+    for face in face_thetas:
+        print(face)
+
+        face_data = [
+            face_centroids[face],
+            face_norms[face],
+            face_thetas[face]
+            ]
+
+        face_rhoN[face] = calculateRhoN(face_data, physical_props)
+        face_U[face] = calculateU(face_data, physical_props)
+        face_T[face] = calculateT(face_data, physical_props)
+    return
 
 def plumeSourceFlowModel():
     patch = 'inflow'
@@ -348,18 +423,33 @@ def plumeSourceFlowModel():
     face_centroids = processCentroids(face_labels, point_labels, face_points, point_cooordinates)
     face_norms = processNorms(face_labels, point_labels, face_points, point_cooordinates)
 
-    print('len(face_points)', len(face_points))
-    print('len(face_labels)', len(face_labels))
-    print('len(point_labels)', len(point_labels))
-    print('len(point_cooordinates)', len(point_cooordinates))
-    print('len(face_centroids)', len(face_centroids))
-    print('len(face_norms)', len(face_norms))
+    # face_magnitudes = processMagnitudes(face_labels, point_labels, face_points, point_cooordinates)
+    face_magnitudes = processMagnitudes(face_labels, face_centroids)
+    # print(face_magnitudes)
+    # graphMagnitudes(face_magnitudes)
 
+    face_norms = processNorms(face_labels, point_labels, face_points, point_cooordinates)
     # graphNorm(face_norms, face_centroids)
     # graphCentroid(face_centroids
 
     face_thetas = findSymmetryTheta(face_centroids)
-    graphSymmetryTheta(face_centroids, face_thetas)
+    # # graphSymmetryTheta(face_centroids, face_thetas)
+
+    mesh_data = [face_centroids, face_norms, face_thetas]
+
+    # ======================================= #
+    # || Implement plume source flow model || #
+    # ======================================= #
+
+    # physical properties
+    physical_props = {}
+    physical_props['ga'] = 1.67
+    physical_props['To'] = 1
+    physical_props['m'] = 1
+    physical_props['Po'] = 5
+
+    inflow = processSourceFlowModel(mesh_data, physical_props)
+    # face_nRhos = processNRho()
 
 
 plumeSourceFlowModel()
