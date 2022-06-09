@@ -1,11 +1,13 @@
 # from meshStats import readMeshStats
+import sys
+import os
 import numpy as np
 import math
 import scipy.integrate as integrate
 # from scipy import integrate as I
 import matplotlib.pyplot as plt
 import os
-
+from printInflow import printInflowSurface
 def readMeshStats():
     # Run check mesh, dump output in to a log file.
     os.system("checkMesh > log.checkMesh")
@@ -535,8 +537,12 @@ def plumeSourceFlowModel():
 
     inflow = processSourceFlowModel(mesh_data, physical_props)
     # print(inflow[0])
-    print(inflow[1])
+    # print(inflow[1])
     # print(inflow[2])
+
+    # Print boundaryT, boundaryU, and boundaryRhoN
+    printInflowSurface(inflow)
+
 
 
 plumeSourceFlowModel()
