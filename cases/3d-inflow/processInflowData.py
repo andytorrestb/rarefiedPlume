@@ -436,10 +436,24 @@ def calculateRhoN(face_data, physical_props):
     # return np.format_float_scientific(4e15)
 
 def calculateU(face_data, physical_props):
-    return 743
+    norm = face_data[1]
+    theta = face_data[2]
+    phi = face_data[3]
+    To = 300
+    Mwt = 28.0134
+    Na = 6.023e23
+    Mmass = Mwt * 1.66605e-27
+    ga = 1.4
+    v_l = calculateLimitingVelo(ga, To, Mmass)
+    Ux = v_l * np.cos(phi) * np.sin(theta)
+    Uy = v_l * np.sin(phi) * np.sin(theta)
+    Uz = v_l * np.cos(theta)
+    # mag = np.sqrt(Ux**2 + Uy**2 + Uz**2)
+    return [Ux, Uy, Uz]
+    # return mag
 
 def calculateT(face_data, physical_props):
-    return 800
+    return 300
 
 def processSourceFlowModel(mesh_data, physical_props):
     face_centroids = mesh_data[0]
@@ -520,8 +534,8 @@ def plumeSourceFlowModel():
     physical_props['Po'] = 34500 # 5psi in Pa
 
     inflow = processSourceFlowModel(mesh_data, physical_props)
-    print(inflow[0])
-    # print(inflow[1])
+    # print(inflow[0])
+    print(inflow[1])
     # print(inflow[2])
 
 
