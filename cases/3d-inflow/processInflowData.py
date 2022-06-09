@@ -1,12 +1,13 @@
 # from meshStats import readMeshStats
 import numpy as np
 import math
-import scipy as sc
+import scipy.integrate as integrate
+# from scipy import integrate as I
 import matplotlib.pyplot as plt
 import os
 
 def readMeshStats():
-    # Run check mesh, dump output inta log file. 
+    # Run check mesh, dump output in to a log file.
     os.system("checkMesh > log.checkMesh")
 
     mesh_stats = {}
@@ -295,12 +296,26 @@ def findSymmetryTheta(face_centroids):
 
     for face in face_centroids:
         # print(type(face))
-        print(face_centroids[face])
+        # print(face_centroids[face])
         y = float(face_centroids[face][1])
         z = float(face_centroids[face][2])
         theta[face] = math.atan(abs(y/z))
 
     return theta
+
+def findSymmetryPhi(face_centroids):
+
+    phi = {}
+
+    for face in face_centroids:
+        # print(type(face))
+        # print(face_centroids[face])
+        y = float(face_centroids[face][1])
+        x = float(face_centroids[face][0])
+        phi[face] = math.atan(abs(y/x))
+
+    return phi
+
 
 def graphSymmetryTheta(face_centroids, face_thetas):
     centroids = []
@@ -316,7 +331,7 @@ def graphSymmetryTheta(face_centroids, face_thetas):
     max_theta = max(thetas)
 
     for theta in thetas:
-        print(theta)
+        # print(theta)
         print()
         # theta = theta / max_theta
     # thetas = thetas / max(thetas)
@@ -329,8 +344,6 @@ def graphSymmetryTheta(face_centroids, face_thetas):
         x_c.append(point[0])
         y_c.append(point[1])
         z_c.append(point[2])
-
-
 
     fig = plt.figure()
     ax = plt.axes(projection='3d')
@@ -352,77 +365,134 @@ def processMagnitudes(face_labels, face_centroids):
 
 def calculateLimitingTheta(ga):
     pi = math.pi
-    return 0.5 * pi * (np.sqrt((ga+1)/(ga-1) - 1))
+    return 0.5 * pi * (np.sqrt((ga+1)/(ga-1)) - 1)
 
 def calculateLimitingVelo(ga, To, m):
-    k = 1
-    return np.sqrt(((2*ga) / (ga - 1) * ((k * To) / m)))
+    k = 1.3806e-23
+    # return np.sqrt(((2*ga) / (ga - 1) * ((k * To) / m)))
+    return np.sqrt((2*ga*k*To) / ((ga-1)*(m)))
 
-def angularDependence(ga, theta):
+def angularDependenceA(ga, theta):
     theta_l = calculateLimitingTheta(ga)
     pi = math.pi
-    return math.cos(0.5 * pi * theta / theta_l)
+    return np.cos(0.5 * pi * theta / theta_l) ** ((ga+0.41)/(ga-1))
+    
 
-def calculeNormCoeff(ga, theta):
-    f_theta = angularDependence(ga, theta)
+def angularDependence(ga, theta, phi):
     theta_l = calculateLimitingTheta(ga)
-    denom = sc.integrate(lambda x: sin(x)*f_theta, 0, theta_l)
-    return (0.5 * np.sqrt((ga - 1) + (ga + 1))) / denom
+    pi = math.pi
+    f_theta = np.cos(0.5 * pi * theta / theta_l) ** ((ga+0.41)/(ga-1))
+    print(type(phi))
+    f_phi = np.cos(0.5 * pi * phi / theta_l) ** ((ga+0.41)/(ga-1))
+    return f_theta * f_phi
+
+def f(x):
+    return np.sin(x) * angularDependenceA(1.4, x)
+
+def calculateNormCoeff(ga, theta_l):
+    print(type(f))
+    print(type(theta_l))
+
+    theta = np.linspace(0, theta_l, 500)
+    y = f(theta)
+    print('theta.shape', theta.shape[0])
+    print('y.shape', y.shape)
+    denom = integrate.trapezoid(y, theta)
+    print('denom', denom)
+    return (0.5 * np.sqrt((ga - 1) / (ga + 1))) / denom
 
 def calculateRhoN(face_data, physical_props):
-    # pi = math.pi()
-    # f1 = (2 * A * Po) / (vel_l**2)
-    # f2 = (2 / (ga + 1)) ** (1 / (ga - 1))
-    # f3 = (r_e / r) **2
-    # f4 = angularDependence(ga, theta)
     print(face_data[0])
     print(face_data[1])
     print(face_data[2])
+    # ga = physical_props['ga']
+    ga = 1.4
+    To = 300
+    Mwt = 28.0134
+    Na = 6.023e23
+    Mmass = Mwt * 1.66605e-27
+    # To = physical_props['To']
+    # m = physical_props['m']
+    theta = face_data[2]
+    phi = face_data[3]
+    r_e = 0.8255e-3/2.0
+    r = 0.5
+    theta_l = calculateLimitingTheta(ga)
+    print('theta_l', theta_l)
+    vel_l = calculateLimitingVelo(ga, To, Mmass)
+    print('vel_l', vel_l)
+    # Po = physical_props['Po']
+    Po = 475*6894.75729
+    pi = math.pi
+    A = calculateNormCoeff(ga, theta_l)
+    print('A', A)
+    f1 = (2 * A * Po) / (vel_l**2)
+    f2 = (2 / (ga + 1)) ** (1 / (ga - 1))
+    f3 = (r_e / r) ** 2
+    f4 = angularDependence(ga, theta, phi)
+    conv = (Na*1000) / Mwt
+    return (f1*f2*f3*f4*conv)
+    # return 4e15
+    # return np.format_float_scientific(4e15)
 
 def calculateU(face_data, physical_props):
-    return
+    return 743
 
 def calculateT(face_data, physical_props):
-    return
+    return 800
 
 def processSourceFlowModel(mesh_data, physical_props):
-    ga = physical_props['ga']
-    To = physical_props['To']
-    m = physical_props['m']
-    theta_l = calculateLimitingTheta(ga)
-    vel_l = calculateLimitingVelo(ga, To, m)
-
     face_centroids = mesh_data[0]
     face_norms = mesh_data[1]
     face_thetas = mesh_data[2]
+    face_phis = mesh_data[3]
 
     face_rhoN = {}
     face_U = {}
     face_T = {}
 
     for face in face_thetas:
-        print(face)
+        # print(face)
 
         face_data = [
             face_centroids[face],
             face_norms[face],
-            face_thetas[face]
+            face_thetas[face],
+            face_phis[face],
             ]
 
         face_rhoN[face] = calculateRhoN(face_data, physical_props)
         face_U[face] = calculateU(face_data, physical_props)
         face_T[face] = calculateT(face_data, physical_props)
-    return
+    
+    return [face_rhoN, face_U, face_T]
 
 def plumeSourceFlowModel():
-    patch = 'inflow'
+    # ======================================================= #
+    # || parse through polyMesh files for needed mesh info || #
+    # ======================================================= #
+
+    # Process basic mesh information
     mesh_stats = readMeshStats()
-    face_labels = readFaceLabels(patch)
+
+    # Read ID labels for each face in patch
+    face_labels = readFaceLabels('inflow')
+
+    # Read ID labels for the points of each face in patch
     face_points = readFacePoints(face_labels, mesh_stats)
+
+    # Read ID labels for all the points in the mesh.
     point_labels = readPointLabels(mesh_stats['faces'])
+
+    # Read coordinate data for all the points in the mesh.
     point_cooordinates = processPointCoordinates(mesh_stats['points'])
+
+    # ============================================================ #
+    # || Calculate needed mesh properties for source flow model ||
+    # ============================================================ #
+
     face_centroids = processCentroids(face_labels, point_labels, face_points, point_cooordinates)
-    face_norms = processNorms(face_labels, point_labels, face_points, point_cooordinates)
+    # graphCentroid(face_centroids)
 
     # face_magnitudes = processMagnitudes(face_labels, point_labels, face_points, point_cooordinates)
     face_magnitudes = processMagnitudes(face_labels, face_centroids)
@@ -431,26 +501,28 @@ def plumeSourceFlowModel():
 
     face_norms = processNorms(face_labels, point_labels, face_points, point_cooordinates)
     # graphNorm(face_norms, face_centroids)
-    # graphCentroid(face_centroids
 
     face_thetas = findSymmetryTheta(face_centroids)
-    # # graphSymmetryTheta(face_centroids, face_thetas)
+    # graphSymmetryTheta(face_centroids, face_thetas)
 
-    mesh_data = [face_centroids, face_norms, face_thetas]
+    face_phis = findSymmetryPhi(face_centroids)
 
-    # ======================================= #
+    mesh_data = [face_centroids, face_norms, face_thetas, face_phis]
+  # ======================================= #
     # || Implement plume source flow model || #
     # ======================================= #
 
     # physical properties
     physical_props = {}
     physical_props['ga'] = 1.67
-    physical_props['To'] = 1
-    physical_props['m'] = 1
-    physical_props['Po'] = 5
+    physical_props['To'] = 300 # K
+    physical_props['m'] = 6.63e-26 # kg / M
+    physical_props['Po'] = 34500 # 5psi in Pa
 
     inflow = processSourceFlowModel(mesh_data, physical_props)
-    # face_nRhos = processNRho()
+    print(inflow[0])
+    # print(inflow[1])
+    # print(inflow[2])
 
 
 plumeSourceFlowModel()
