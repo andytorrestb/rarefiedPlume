@@ -15,7 +15,7 @@ FoamFile
         nFaces 2044;
         startFace 192243;
     }
-    symmetry
+    sym
     {
         type symmetry;
         nFaces 2444;

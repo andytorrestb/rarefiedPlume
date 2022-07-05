@@ -119,19 +119,19 @@ dsmcGeneralBoundaries
             patchName                inflow;
         }
 
-        boundaryModel   dsmcFreeStreamInflowPatch;
+        boundaryModel   dsmcFreeStreamInflowFieldPatch;
 
-        dsmcFreeStreamInflowPatchProperties
+        dsmcFreeStreamInflowFieldPatchProperties
         {
 			      typeIds				                (Ar);
 			      numberDensities
 			      {
-				         Ar		6e20;
+				         Ar		0;
 			      }
 			      
-			      translationalTemperature			800;
+			      translationalTemperature		    0;
 			      rotationalTemperature			    0;
-			      velocity			                (700 0 0);
+			      velocity			                (0 0 0);
 	      }
     }
      
