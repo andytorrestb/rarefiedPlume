@@ -301,7 +301,10 @@ def findSymmetryTheta(face_centroids):
         # print(face_centroids[face])
         y = float(face_centroids[face][1])
         z = float(face_centroids[face][2])
-        theta[face] = math.atan(abs(y/z))
+        r =0.5
+        # theta[face] = math.atan(abs(z/y))
+        theta[face] = math.acos(z/r)
+        # theta[face] = np.arctan2(y, z)
 
     return theta
 
@@ -314,7 +317,7 @@ def findSymmetryPhi(face_centroids):
         # print(face_centroids[face])
         y = float(face_centroids[face][1])
         x = float(face_centroids[face][0])
-        phi[face] = math.atan(abs(y/x))
+        phi[face] = np.arctan2(y, x)
 
     return phi
 
@@ -378,14 +381,14 @@ def angularDependenceA(ga, theta):
     theta_l = calculateLimitingTheta(ga)
     pi = math.pi
     return np.cos(0.5 * pi * theta / theta_l) ** ((ga+0.41)/(ga-1))
-    
 
 def angularDependence(ga, theta, phi):
     theta_l = calculateLimitingTheta(ga)
     pi = math.pi
-    f_theta = np.cos(0.5 * pi * theta / theta_l) ** ((ga+0.41)/(ga-1))
-    print(type(phi))
+    f_theta = np.abs(np.cos(0.5 * pi * np.abs(theta -0.5*pi )/ theta_l)) ** ((ga+0.41)/(ga-1))
+    # print(type(phi))
     f_phi = np.cos(0.5 * pi * phi / theta_l) ** ((ga+0.41)/(ga-1))
+    # f_phi = 1
     return f_theta * f_phi
 
 def f(x):
@@ -413,11 +416,10 @@ def calculateRhoN(face_data, physical_props):
     Mwt = 28.0134
     Na = 6.023e23
     Mmass = Mwt * 1.66605e-27
+    print('Mmass', Mmass)
     # To = physical_props['To']
     # m = physical_props['m']
-    theta = face_data[2]
-    phi = face_data[3]
-    r_e = 0.8255e-3/2.0
+    r_e = 8.255e-3/2.0
     r = 0.5
     theta_l = calculateLimitingTheta(ga)
     print('theta_l', theta_l)
@@ -425,13 +427,19 @@ def calculateRhoN(face_data, physical_props):
     print('vel_l', vel_l)
     # Po = physical_props['Po']
     Po = 475*6894.75729
+    print('Po', Po)
     pi = math.pi
     A = calculateNormCoeff(ga, theta_l)
     print('A', A)
+
+    theta = face_data[2]
+    phi = face_data[3]
+
     f1 = (2 * A * Po) / (vel_l**2)
     f2 = (2 / (ga + 1)) ** (1 / (ga - 1))
     f3 = (r_e / r) ** 2
     f4 = angularDependence(ga, theta, phi)
+    # f4 = 1
     conv = (Na*1000) / Mwt
     return (f1*f2*f3*f4*conv)
     # return 4e15
@@ -536,7 +544,7 @@ def plumeSourceFlowModel():
     physical_props['Po'] = 34500 # 5psi in Pa
 
     inflow = processSourceFlowModel(mesh_data, physical_props)
-    # print(inflow[0])
+    print(inflow[0])
     # print(inflow[1])
     # print(inflow[2])
 
