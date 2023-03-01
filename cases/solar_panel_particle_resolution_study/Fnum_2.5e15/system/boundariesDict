@@ -1,0 +1,141 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v1706                                 |
+|   \\  /    A nd           | Web:      http://www.openfoam.org               |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      boundariesDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dsmcPatchBoundaries
+( 
+    // Solar Panel
+    // boundary
+    // {
+    //     patchBoundaryProperties
+    //     {
+    //         patchName            panel;
+    //     }
+
+    //     boundaryModel        dsmcSpecularWallPatch;
+
+    //     dsmcSpecularWallPatchProperties
+    //     {
+    //     }
+    // }
+
+    // Inlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           inflow;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+    // Outlet
+    boundary
+    {
+        patchBoundaryProperties
+        {
+         patchName                           vacuum;
+        }
+
+        boundaryModel   dsmcDeletionPatch;
+
+        dsmcDeletionPatchProperties
+        {
+            allSpecies		yes;
+        }
+    }
+
+);
+
+
+dsmcCyclicBoundaries
+(
+    // boundary
+    // {
+    //     cyclicBoundaryProperties
+    //     {
+    //         patchName   sym;
+    //     }
+
+    //     boundaryModel   dsmcReflectiveParticleMembranePatch;
+
+    //     dsmcReflectiveParticleMembranePatchProperties
+    //     {
+    //         typeIds (Ar);
+
+    //         reflectionProbabilities
+    //         {
+    //             Ar   0;
+    //         }
+    //     }
+    //  }
+);
+
+dsmcGeneralBoundaries
+(
+    boundary
+    {
+        // generalBoundaryProperties
+        // {
+        //     patchName                inflow;
+        // }
+
+        // boundaryModel   dsmcFreeStreamInflowFieldPatch;
+
+        // dsmcFreeStreamInflowFieldPatchProperties
+        // {
+		// 	      typeIds				                (Ar);
+		// 	      numberDensities
+		// 	      {
+		// 		         Ar		0;
+		// 	      }
+			      
+		// 	      translationalTemperature			0;
+		// 	      rotationalTemperature			    0;
+		// 	      velocity			                (0 0 0);
+	    //   }
+
+        generalBoundaryProperties
+        {
+            patchName                inflow;
+        }
+
+        boundaryModel   dsmcFreeStreamInflowFieldPatch;
+
+        dsmcFreeStreamInflowFieldPatchProperties
+        {
+			      typeIds				                (Ar);
+			      numberDensities
+			      {
+				         Ar		0;
+			      }
+			      
+			      translationalTemperature		    0;
+			      rotationalTemperature			    0;
+			      velocity			                (0 0 0);
+	      }
+    }
+     
+);
+
+
+// ************************************************************************* //
