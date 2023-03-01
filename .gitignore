@@ -16,3 +16,4 @@ constant/cellToRegion
 *.csv
 images/
 img/
+__pycache__/
