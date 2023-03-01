@@ -1,0 +1,383 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v1706                                 |
+|   \\  /    A nd           | Web:      www.OpenFOAM.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : v1706
+Arch   : "LSB;label=32;scalar=64"
+Exec   : postProcess -func sampleDict
+Date   : Apr 01 2022
+Time   : 21:37:06
+Host   : "andy-VirtualBox"
+PID    : 32441
+Case   : /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+Reading surface description:
+    plane
+
+Time = 0
+
+Reading fields:
+
+Executing functionObjects
+--> FOAM Warning : 
+    From function Foam::label Foam::sampledSurfaces::classifyFields()
+    in file sampledSurface/sampledSurfaces/sampledSurfacesGrouping.C at line 68
+    
+Cannot find registered field matching 1(U_Ar)
+
+Time = 0.005
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.01
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.015
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.02
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.025
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.03
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.035
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.04
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.045
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.05
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.055
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.06
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.065
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.07
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.075
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.08
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.085
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.09
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.095
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.1
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.105
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.11
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.115
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.12
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.125
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.13
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.135
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.14
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.145
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.15
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.155
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.16
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.165
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.17
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.175
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.18
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+
+Time = 0.185
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.185/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar)
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.185/U_Ar_plane.raw at line 10395.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.19
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.19/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar))
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.19/U_Ar_plane.raw at line 3.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.195
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.195/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar)
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.195/U_Ar_plane.raw at line 3.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.2
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.2/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar)r)
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.2/U_Ar_plane.raw at line 3.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.205
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.205/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar)
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.205/U_Ar_plane.raw at line 3.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.21
+
+Reading fields:
+    volVectorFields: U_Ar
+
+Executing functionObjects
+--> FOAM Warning : 
+--> FOAM FATAL IO ERROR: 
+error in IOstream "/home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.21/U_Ar_plane.raw" for operation Foam::Ostream& Foam::operator<<(Foam::Ostream&, Foam::doubleScalar))
+
+file: /home/andy/OpenFOAM/andy-v1706/run/rarefiedPlume/cases/wake-cylinder/postProcessing/sampleDict/0.21/U_Ar_plane.raw at line 3.
+
+    From function virtual bool Foam::IOstream::check(const char*) const
+    in file db/IOstreams/IOstreams/IOstream.C at line 96.
+
+Time = 0.215
+

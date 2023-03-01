@@ -1,0 +1,48 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       polyBoundaryMesh;
+    location    "constant/polyMesh";
+    object      boundary;
+}
+
+6         
+(
+    cylinder
+    {
+        type patch;
+        nFaces 99;
+        startFace 105791;
+    }
+    inflow
+    {
+        type patch;
+        nFaces 99;
+        startFace 105890;
+    }
+    noSolution
+    {
+        type empty;
+        nFaces 142072;
+        startFace 105989;
+    }
+    plate
+    {
+        type patch;
+        nFaces 164;
+        startFace 248061;
+    }
+    sym
+    {
+        type symmetry;
+        nFaces 327;
+        startFace 248225;
+    }
+    vacuum
+    {
+        type patch;
+        nFaces 837;
+        startFace 248552;
+    }
+)
