@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# Regenerate constant/polyMesh from case.yaml via blockMesh.
+#
+# ============================ WARNING =========================================
+# This OVERWRITES constant/polyMesh.
+#
+# The committed mesh is the ORIGINAL Pointwise V18.5R2 export -- 99 240
+# tetrahedra with 2044 triangular inflow faces. It is the only copy: the .pw
+# project files under mesh/ are binary and cannot be regenerated without an
+# interactive licensed Pointwise session. It is also the substrate the
+# regression golden in tests/regression/golden is bound to.
+#
+# blockMesh produces a DIFFERENT mesh: hexahedra, with quadrilateral inflow
+# faces, at whatever resolution case.yaml asks for. It is an equivalent
+# geometry, not the same mesh, and it cannot reproduce the golden.
+#
+# Run this only deliberately, and only on a clean checkout or a copy.
+# ./Allrun never calls it.
+#
+# To restore the Pointwise mesh afterwards:
+#     git checkout -- constant/polyMesh
+# ==============================================================================
+
+set -euo pipefail
+cd "${0%/*}" || exit 1
+
+if [ "${1:-}" != "--yes" ]; then
+    echo "This overwrites constant/polyMesh (the committed Pointwise mesh)."
+    echo "Re-run as:  ./Allmesh --yes"
+    exit 1
+fi
+
+echo "==> generating system/blockMeshDict from case.yaml"
+python -c "import sys; from plumetools.config import load_case_config; \
+from plumetools.foamio.blockmesh import write_block_mesh_dict; \
+print('   ', write_block_mesh_dict('.', load_case_config('.')))"
+
+echo "==> blockMesh"
+blockMesh 2>&1 | tee log.blockMesh
+
+echo "==> checkMesh"
+checkMesh 2>&1 | tee log.checkMesh
+
+echo "==> verifying the mesh matches case.yaml"
+python -m plumetools.verify_mesh .
+
+echo
+echo "Done. The inflow patch is now quadrilateral; re-run runInflow.py to"
+echo "regenerate 0/ for it. The regression golden will NOT match -- it is bound"
+echo "to the Pointwise mesh. See docs/mesh.md."
