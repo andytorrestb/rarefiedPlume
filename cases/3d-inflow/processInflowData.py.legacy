@@ -1,3 +1,14 @@
+"""SUPERSEDED -- DO NOT RUN.
+
+Replaced by runInflow.py + case.yaml + the plumetools package. Kept unmodified
+for provenance: tests/regression/golden was captured from this file, and
+tests/regression/capture_golden.py imports it to regenerate that snapshot.
+
+Running it directly still works but will shell out to `checkMesh`, overwrite 0/,
+and re-apply every frozen defect (SM-01 through SM-10) with no configuration.
+See README.md and docs/source-flow-model.md.
+"""
+
 # from meshStats import readMeshStats
 import sys
 import os

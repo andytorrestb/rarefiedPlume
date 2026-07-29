@@ -1,0 +1,94 @@
+# cases/3d-inflow -- plume source-flow inflow model + mesh generation.
+#
+# Units are in every key name. See docs/source-flow-model.md for the equations and
+# docs/mesh.md for the geometry.
+#
+# Values marked LEGACY reproduce the pre-refactor behaviour bit-for-bit and are
+# annotated with the finding that explains them. Several are known to be wrong;
+# they are frozen here so the extraction could be proven behaviour-preserving.
+# Read docs/source-flow-model.md#open-questions before changing any of them.
+
+model: source_flow
+
+# --- mesh generation (plumetools/foamio/blockmesh.py) -------------------------
+# Measured from the committed Pointwise mesh: a 5 x 5 x 5 m box with a
+# hemispherical inflow cavity of radius exactly 0.5 m at the origin, on the x = 0
+# symmetry plane, opening toward +x.
+mesh:
+  type: block_mesh_ogrid       # 5-block hemispherical O-grid
+  sphere_radius_m: 0.5         # must equal geometry.sphere_radius_m (validated)
+  box_half_width_m: 2.5        # y, z extent -> [-2.5, 2.5]
+  box_length_m: 5.0            # x extent    -> [0, 5]
+  n_tangential: 20             # -> 5 * 20^2 = 2000 inflow quads (Pointwise had 2044 tris)
+  n_radial: 24                 # -> 5 * 20^2 * 24 = 48 000 cells
+  radial_grading: 10.0         # cluster toward the sphere
+  projection: none             # 'searchable_sphere' is not implemented; see docs/mesh.md
+  patch_names: {inflow: inflow, outer: vacuum, symmetry: sym}
+
+# --- inflow surface -----------------------------------------------------------
+geometry:
+  patch: inflow                # constant/polyMesh/sets/<patch>, else the patch's face range
+  sphere_radius_m: 0.5         # CONFIRMED exact for the committed mesh; the 0.4990-0.4997
+                               # spread in face centroids is faceting, not error (SM-09)
+  plume_axis: [1, 0, 0]        # INFERRED from the one-sided hemisphere + revolutionAxis "x";
+                               # never stated in the original code
+  polar_axis: [0, 0, 1]        # LEGACY: theta = acos(z/r), measured from +z, which is NOT
+                               # the plume axis (SM-04)
+
+# --- gas ----------------------------------------------------------------------
+# SM-03: the model is evaluated for N2 while the solver simulates argon.
+# dsmcProperties declares typeIdList (Ar), mass 6.63e-26, rotationalDegreesOfFreedom 0
+# (so gamma = 5/3), and the generated field is named boundaryNumberDensity_Ar.
+# At 300 K this is v_l = 788.16 m/s instead of 558.89 m/s.
+gas:
+  gamma: 1.4                   # LEGACY: literal 1.4 (N2)
+  molar_mass_g_per_mol: 28.0134  # LEGACY: N2; argon is 39.948
+  species_name: Ar             # matches dsmcProperties typeIdList and the 0/ field suffix
+
+# --- stagnation (chamber) conditions ------------------------------------------
+stagnation:
+  p0_pa: 3275009.71275         # LEGACY: the literal 475 psi hard-coded in calculateRhoN,
+                               # i.e. exactly 475 * 6894.75729. Keep all digits: truncating
+                               # to 3275009.71 shifts every density by 8.4e-10 relative.
+                               # The original set physical_props['Po'] = 34500 (5 psi) here
+                               # and then never read it (SM-01).
+  T0_K: 300.0                  # used by velocity and temperature
+  throat_radius_m: 0.0041275   # LEGACY: r_e = 8.255e-3 / 2. Named "exit" in the original,
+                               # but f2 is the sonic density ratio, implying the throat (SM-10)
+
+# --- angular dependence -------------------------------------------------------
+angular:
+  exponent_offset: 0.41        # LEGACY: the uncited 0.41 in (gamma + 0.41)/(gamma - 1) (SM-07)
+  form: legacy_separable       # LEGACY: separable f(theta)*f(phi) in different planes (SM-04)
+  normalization_gamma: 1.4     # LEGACY: gamma hard-coded inside calculateNormCoeff's
+                               # integrand, so its `ga` argument was ignored (SM-05)
+  quadrature_points: 500
+
+# --- generated 0/ boundary conditions -----------------------------------------
+# AD-03: `cylinder` and `plate` are NOT in this mesh (which has inflow/sym/vacuum),
+# but the original wrote them into every field file. Preserved via
+# legacy.emit_absent_patches; loading this config warns about them.
+output:
+  patches:
+    vacuum:   {type: zeroGradient}
+    sym:      {type: symmetry}
+    cylinder: {type: calculated, value: uniform}
+    plate:    {type: calculated, value: uniform}
+
+# --- post-processing ----------------------------------------------------------
+# RP-17: the shipped system/sampleDict was copied from the archived 2d-wedge case
+# and starts at r = 1.005 m -- outside this case's 0.5 m inflow surface.
+sampling:
+  radial_lines_deg: [0, 45, 90]
+  r_start_m: 0.5
+  r_end_m: 5.0
+  n_points: 1000
+  fields: [U_Ar, Ttra_Ar, rhoN_Ar]
+
+# --- frozen-behaviour switches ------------------------------------------------
+# Flipping any of these changes results. Do it deliberately, one per commit, and
+# record the before/after inflow statistics.
+legacy:
+  rhoN_T0_K: 300.0             # SM-02: T0 used by density only. null = use stagnation.T0_K.
+  clip_beyond_limiting_angle: false  # SM-06: false keeps the folding |cos|**n and the NaN path
+  emit_absent_patches: true    # AD-03: allow cylinder/plate above

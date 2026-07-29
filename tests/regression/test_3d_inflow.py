@@ -46,37 +46,32 @@ def golden():
 
 
 @pytest.fixture(scope="module")
-def computed(no_subprocess):
+def computed():
     """Inflow data from the extracted plumetools path.
 
-    `no_subprocess` is requested so the guard is active during the computation:
-    the extracted code must read constant/polyMesh/boundary directly rather than
-    shelling out to checkMesh the way the legacy readMeshStats() did.
+    Computed with process spawning blocked: the extraction must read
+    constant/polyMesh/boundary directly, where the legacy readMeshStats() shelled
+    out to `checkMesh` and parsed its log (findings RB-01, RB-05).
     """
-    from plumetools.config import load_case_config
-    from plumetools.inflow import compute_inflow
-
-    return compute_inflow(CASE, load_case_config(CASE))
-
-
-@pytest.fixture
-def no_subprocess(monkeypatch):
-    """Fail loudly if anything tries to spawn a process."""
     import os
     import subprocess
 
+    from plumetools.config import load_case_config
+    from plumetools.inflow import compute_inflow
+
     def forbidden(*args, **kwargs):
         raise AssertionError(
-            "the inflow path must not spawn a subprocess "
-            "(legacy readMeshStats() shelled out to checkMesh; the extraction "
-            "reads constant/polyMesh/boundary directly)"
+            "the inflow path must not spawn a subprocess; it reads "
+            "constant/polyMesh/boundary directly"
         )
 
-    monkeypatch.setattr(subprocess, "run", forbidden)
-    monkeypatch.setattr(subprocess, "check_output", forbidden)
-    monkeypatch.setattr(subprocess, "Popen", forbidden)
-    monkeypatch.setattr(os, "system", forbidden)
-    return True
+    with pytest.MonkeyPatch.context() as mp:
+        for target, name in (
+            (subprocess, "run"), (subprocess, "check_output"),
+            (subprocess, "Popen"), (os, "system"),
+        ):
+            mp.setattr(target, name, forbidden)
+        return compute_inflow(CASE, load_case_config(CASE))
 
 
 # --------------------------------------------------------------------------- #
@@ -205,11 +200,15 @@ def test_inflow_vertices_lie_on_the_sphere(computed):
 def test_inflow_centroids_sit_just_inside_the_sphere(computed):
     """Triangle centroids fall inside the circumscribed sphere -- pure faceting.
 
-    This is why the hard-coded r = 0.5 is the correct nominal radius and per-face
-    |c| would be worse: it would inject this faceting spread into f3 = (r_e/r)^2.
+    Measured span is 0.4989640 to 0.4997035 m, i.e. 0.06-0.21% inside the exact
+    0.5 m surface. This is why the hard-coded r = 0.5 is the correct nominal
+    radius and per-face |c| would be worse: using |c| would inject this faceting
+    spread into f3 = (r_e/r)^2 as if it were physics (finding SM-09).
     """
     r = np.linalg.norm(computed.centroids, axis=1)
-    assert 0.4990 <= r.min() <= r.max() <= 0.4997
+    assert 0.4989 <= r.min()
+    assert r.max() <= 0.4998
+    assert (r < 0.5).all()
 
 
 def test_inflow_is_a_hemisphere_opening_toward_plus_x(computed):
@@ -227,11 +226,24 @@ def test_velocity_magnitude_is_the_limiting_velocity(computed):
 
 
 def test_velocity_is_radially_outward(computed):
-    """U is parallel to the centroid position vector, pointing outward (E7)."""
+    """U points outward along the centroid direction (E7) -- to within faceting.
+
+    Not exactly parallel, and the reason is worth recording. E7 builds U from the
+    spherical angles, and those are computed as acos(z / 0.5) using the *nominal*
+    sphere radius applied to the *centroid's* z. Because the centroid sits at
+    |c| ~ 0.4994 rather than 0.5, the recovered polar angle is not the centroid's
+    own polar angle, so U tilts off the radial direction by the faceting offset.
+
+    Measured worst case is 3.1e-4 (0.014 deg) -- negligible physically, but it is
+    a real consequence of mixing a fixed radius with per-face coordinates, and it
+    would grow on a coarser inflow surface. Part of finding SM-09.
+    """
     c = computed.centroids
     c_hat = c / np.linalg.norm(c, axis=1, keepdims=True)
     u_hat = computed.U / np.linalg.norm(computed.U, axis=1, keepdims=True)
-    np.testing.assert_allclose((c_hat * u_hat).sum(axis=1), 1.0, rtol=0, atol=1e-9)
+    alignment = (c_hat * u_hat).sum(axis=1)
+    assert alignment.min() > 0.999, "velocity is not outward-radial"
+    assert (1.0 - alignment).max() < 1e-3, "radial misalignment larger than faceting"
 
 
 def test_number_density_is_finite_and_positive(computed):

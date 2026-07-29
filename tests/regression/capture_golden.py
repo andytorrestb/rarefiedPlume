@@ -69,7 +69,10 @@ def build_mesh_stats() -> dict:
 
 def load_legacy_module():
     """Exec processInflowData.py with its module-scope driver call removed."""
-    source_path = CASE / "processInflowData.py"
+    # Retired to *.legacy in Step 5; still the authority for this snapshot.
+    source_path = CASE / "processInflowData.py.legacy"
+    if not source_path.is_file():
+        source_path = CASE / "processInflowData.py"
     source = source_path.read_text()
 
     marker = "plumeSourceFlowModel()"
