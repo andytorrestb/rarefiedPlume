@@ -1,3 +1,24 @@
+/*----------------------------------------------------------------------------*\
+|  !!  DO NOT USE  -- THIS DICTIONARY DOES NOT DESCRIBE THIS CASE  !!           |
+|                                                                              |
+|  This is the archived 2d-wedge dictionary, copied into cases/3d-inflow by a   |
+|  directory copy and never replaced. It describes a 2D axisymmetric wedge:     |
+|  `front`/`back` patches of type `wedge`, an `axis` patch of type `empty`, a   |
+|  single block `hex (0 1 2 0 5 3 4 5) (132 1 164)`, and an inflow radius of    |
+|  1.05 m expanding to 20 m.                                                    |
+|                                                                              |
+|  cases/3d-inflow is a 5 x 5 x 5 m box (x in [0,5], y,z in [-2.5,2.5]) with a  |
+|  hemispherical inflow cavity of radius 0.5 m at the origin on the x = 0       |
+|  symmetry plane -- 99 240 tetrahedra exported from Pointwise V18.5R2.         |
+|                                                                              |
+|  Running `blockMesh` with this file OVERWRITES constant/polyMesh, destroying  |
+|  the only copy of that mesh and replacing it with an unrelated 2D wedge.      |
+|  blockMesh would succeed silently.                                            |
+|                                                                              |
+|  Renamed (from `blockMeshDict`) so blockMesh cannot pick it up. The real      |
+|  dictionary is generated from case.yaml -- see docs/mesh.md and ./Allmesh.    |
+|  Kept, not deleted, for provenance. Finding FD-08.                            |
+\*----------------------------------------------------------------------------*/
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
