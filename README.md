@@ -14,9 +14,9 @@ pip install -e ".[test]"          # numpy, scipy, pyyaml (+ pytest)
 pytest -m "not needs_openfoam"    # 124 tests, ~2 s, no OpenFOAM required
 
 cd cases/3d-inflow
-topoSet && dsmcInitialise+        # needs OpenFOAM v1706 + dsmcFoam+
-python runInflow.py               # writes 0/boundaryU, boundaryT, boundaryNumberDensity_Ar
-dsmcFoam+
+./Allrun --no-solve               # generates 0/ inflow fields; needs no OpenFOAM
+./Allrun                          # full run; needs OpenFOAM v1706 + dsmcFoam+
+./Allclean                        # reset (--dry-run to preview)
 ```
 
 All physical inputs live in [`cases/3d-inflow/case.yaml`](cases/3d-inflow/case.yaml).

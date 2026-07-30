@@ -27,21 +27,51 @@ stated nowhere in the original code.
 ## Running
 
 ```bash
-topoSet                  # system/topoSetDict -> constant/polyMesh/sets/inflow
-dsmcInitialise+          # system/dsmcInitialiseDict -> 0/
-python runInflow.py      # overwrites 0/boundaryU, 0/boundaryT, 0/boundaryNumberDensity_Ar
-dsmcFoam+                # or: decomposePar && mpirun -np N dsmcFoam+ && reconstructPar
+./Allrun                 # decomposition read from system/decomposeParDict
+./Allrun --serial        # single process
+./Allrun -np 4           # override the subdomain count
+./Allrun --no-solve      # stop after generating 0/ — needs no OpenFOAM
+./Allclean               # remove results; --dry-run to preview
 ```
 
-**The order matters and is load-bearing.** `dsmcInitialise+` creates `0/`;
-`runInflow.py` then overwrites three files inside it. Running them the other way
-round silently discards the inflow conditions.
+`Allrun` performs, in this order:
+
+```
+topoSet                  # -> constant/polyMesh/sets/inflow   (skipped if unavailable)
+dsmcInitialise+          # -> 0/
+python runInflow.py      # overwrites 0/boundaryU, boundaryT, boundaryNumberDensity_Ar
+dsmcFoam+                # or decomposePar -> mpirun -parallel -> reconstructPar
+```
+
+**The order is load-bearing.** `dsmcInitialise+` *creates* `0/`; `runInflow.py`
+then overwrites three files inside it. Reversed, the inflow conditions are
+silently discarded — the commented-out `touch 0/boundary*` lines in the archived
+`caseFoamEx/runCases.py` were an attempt to work around exactly that.
+
+Every command's exit status is checked, so a failed step aborts with the tail of
+its log rather than letting the run continue on stale data. Output goes to
+`log.<application>`, including `log.dsmcFoam+`, which is what the `monitor`
+gnuplot scripts grep — no pre-refactor run script ever created it.
+
+`Allclean` never touches `constant/polyMesh`, and matches time directories by
+parsing their names as numbers rather than globbing `0*`, so a `0.org` cannot be
+caught by accident. It replaces the old `clean.sh`, which ran
+`rm -r 0* boundaries fieldMeasurements postProcessing processor*` with no `cd`
+guard — from the repository root that deleted matching paths *from the repository
+root* (finding RP-01). Recover it with
+`git show pre-refactor-baseline:cases/3d-inflow/clean.sh` if you need it.
 
 All physical inputs live in [`case.yaml`](case.yaml). No Python needs editing to
 change a parameter — that is the point, and it is what broke down in the cases
 copied from here.
 
-Regenerating the mesh is opt-in and destructive; see [docs/mesh.md](../../docs/mesh.md).
+Regenerating the mesh is opt-in and destructive, and `Allrun` never does it; see
+[docs/mesh.md](../../docs/mesh.md).
+
+Post-processing is **not** wired up yet (finding RP-17): the shipped
+`system/sampleDict` was copied from the archived 2d-wedge case and samples from
+r = 1.005 m, outside this case's 0.5 m inflow surface. The `sampling:` block in
+`case.yaml` is validated but not yet consumed.
 
 ## ⚠ Unresolved — needs a DSMC environment
 
@@ -111,6 +141,8 @@ reference in the repository covers the archived 1d/2d-wedge validation case.
 | Path | |
 |---|---|
 | `case.yaml` | all physical and mesh parameters — the only file to edit |
+| `Allrun` / `Allclean` | run the case / reset it |
+| `Allmesh` | regenerate `constant/polyMesh` from `case.yaml`; destructive, opt-in |
 | `runInflow.py` | generates `0/` boundary fields; identical in every case |
 | `constant/polyMesh/` | the Pointwise mesh, deliberately tracked (see docs/mesh.md) |
 | `mesh/*.pw` | binary Pointwise project files; not reproducible |
