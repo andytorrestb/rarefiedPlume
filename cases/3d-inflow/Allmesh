@@ -1,6 +1,14 @@
 #!/bin/bash
 #
-# Regenerate constant/polyMesh from case.yaml via blockMesh.
+# Regenerate constant/polyMesh from case.yaml.
+#
+#   ./Allmesh --yes           # generate, mesh, and verify
+#   ./Allmesh --dict-only     # write the dictionaries and stop (no OpenFOAM needed)
+#
+# The pipeline follows mesh.type in case.yaml:
+#
+#   block_mesh_ogrid    blockMesh                        5-block hexahedral O-grid
+#   snappy_hex_sphere   blockMesh, snappyHexMesh          box carved by a searchableSphere
 #
 # ============================ WARNING =========================================
 # This OVERWRITES constant/polyMesh.
@@ -9,44 +17,108 @@
 # tetrahedra with 2044 triangular inflow faces. It is the only copy: the .pw
 # project files under mesh/ are binary and cannot be regenerated without an
 # interactive licensed Pointwise session. It is also the substrate the
-# regression golden in tests/regression/golden is bound to.
+# regression golden in tests/regression/golden is bound to, so overwriting it
+# makes `pytest tests/regression` fail until you restore it.
 #
-# blockMesh produces a DIFFERENT mesh: hexahedra, with quadrilateral inflow
-# faces, at whatever resolution case.yaml asks for. It is an equivalent
-# geometry, not the same mesh, and it cannot reproduce the golden.
+# A generated mesh is a DIFFERENT mesh -- hexahedra or polyhedra, quadrilateral
+# or polygonal inflow faces, at whatever resolution case.yaml asks for. It is an
+# equivalent geometry, not the same mesh, and it cannot reproduce the golden.
 #
-# Run this only deliberately, and only on a clean checkout or a copy.
-# ./Allrun never calls it.
+# Run this only deliberately. ./Allrun never calls it.
 #
 # To restore the Pointwise mesh afterwards:
 #     git checkout -- constant/polyMesh
 # ==============================================================================
 
-set -euo pipefail
+set -uo pipefail
 SELF=${0##*/}
 cd "${0%/*}" || exit 1
 
-if [ "${1:-}" != "--yes" ]; then
-    echo "This overwrites constant/polyMesh (the committed Pointwise mesh)."
-    echo "Re-run as:  ./Allmesh --yes"
-    exit 1
+DICT_ONLY=0
+case "${1:-}" in
+    --yes)       ;;
+    --dict-only) DICT_ONLY=1 ;;
+    -h|--help)   awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    *)
+        echo "This overwrites constant/polyMesh (the committed Pointwise mesh)."
+        echo "Re-run as:  ./Allmesh --yes        (generate + mesh + verify)"
+        echo "        or: ./Allmesh --dict-only  (write dictionaries only)"
+        exit 1
+        ;;
+esac
+
+die() { echo "" >&2; echo "Allmesh: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2; tail -25 "$log" >&2
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root: pip install -e \".[test]\""
+
+# --------------------------------------------------------------------------- #
+# 1. dictionaries
+# --------------------------------------------------------------------------- #
+
+echo "==> generating mesh dictionaries from case.yaml"
+$PYTHON - <<'PY' || die "dictionary generation failed"
+from plumetools.config import load_case_config
+from plumetools.foamio import write_mesh_setup
+cfg = load_case_config(".")
+print(f"    mesh.type = {cfg.mesh.type}")
+if cfg.mesh.type == "block_mesh_ogrid":
+    print(f"    projection = {cfg.mesh.projection}")
+for p in write_mesh_setup(".", cfg):
+    print(f"    wrote {p}")
+PY
+
+# The pipeline is derived from case.yaml, not hardcoded here, so the two stay in
+# step when a mesh type is added.
+PIPELINE=$($PYTHON -c "
+from plumetools.config import load_case_config
+from plumetools.foamio import mesh_pipeline
+print(' '.join(mesh_pipeline(load_case_config('.'))))
+") || die "could not determine the mesh pipeline"
+
+if [ "$DICT_ONLY" -eq 1 ]; then
+    echo ""
+    echo "Dictionaries written. To mesh:  $PIPELINE"
+    exit 0
 fi
 
-echo "==> generating system/blockMeshDict from case.yaml"
-python -c "import sys; from plumetools.config import load_case_config; \
-from plumetools.foamio.blockmesh import write_block_mesh_dict; \
-print('   ', write_block_mesh_dict('.', load_case_config('.')))"
+# --------------------------------------------------------------------------- #
+# 2. mesh
+# --------------------------------------------------------------------------- #
 
-echo "==> blockMesh"
-blockMesh 2>&1 | tee log.blockMesh
+for cmd in $PIPELINE checkMesh; do
+    have "$cmd" || die "'$cmd' is not on PATH. Source your OpenFOAM environment,
+       or use --dict-only to write the dictionaries without meshing."
+done
 
-echo "==> checkMesh"
-checkMesh 2>&1 | tee log.checkMesh
+for cmd in $PIPELINE; do
+    case "$cmd" in
+        snappyHexMesh) run snappyHexMesh snappyHexMesh -overwrite ;;
+        *)             run "$cmd" "$cmd" ;;
+    esac
+done
 
-echo "==> verifying the mesh matches case.yaml"
-python -m plumetools.verify_mesh .
+run checkMesh checkMesh
 
-echo
-echo "Done. The inflow patch is now quadrilateral; re-run runInflow.py to"
-echo "regenerate 0/ for it. The regression golden will NOT match -- it is bound"
-echo "to the Pointwise mesh. See docs/mesh.md."
+# --------------------------------------------------------------------------- #
+# 3. verify the mesh is the geometry case.yaml declares
+# --------------------------------------------------------------------------- #
+
+echo "==> verifying the mesh against case.yaml"
+$PYTHON -m plumetools.verify_mesh . || die "mesh verification failed (see above)"
+
+echo ""
+echo "Done. Re-run runInflow.py to regenerate 0/ for the new patch."
+echo "The regression golden will NOT match -- it is bound to the Pointwise mesh."
+echo "Restore it with:  git checkout -- constant/polyMesh"

@@ -65,8 +65,21 @@ All physical inputs live in [`case.yaml`](case.yaml). No Python needs editing to
 change a parameter — that is the point, and it is what broke down in the cases
 copied from here.
 
-Regenerating the mesh is opt-in and destructive, and `Allrun` never does it; see
-[docs/mesh.md](../../docs/mesh.md).
+Regenerating the mesh is opt-in and destructive, and `Allrun` never does it:
+
+```bash
+./Allmesh --dict-only     # write mesh dictionaries only, no OpenFOAM needed
+./Allmesh --yes           # generate, mesh, checkMesh, verify -- OVERWRITES constant/polyMesh
+git checkout -- constant/polyMesh    # restore the Pointwise mesh afterwards
+```
+
+`mesh.projection: searchable_sphere` (the default) projects the block edges *and*
+faces onto a `searchableSphere` primitive, so the inflow patch is a true
+hemisphere. With `arc` only the twelve edges are curved and the face interiors
+stay ruled surfaces, dishing the cap face centre to |r| = 0.418 — a **16.3 %
+radial deficit that does not shrink with `n_tangential`**. `mesh.type:
+snappy_hex_sphere` is an alternative using the same primitive via snappyHexMesh.
+See [docs/mesh.md](../../docs/mesh.md).
 
 Post-processing is **not** wired up yet (finding RP-17): the shipped
 `system/sampleDict` was copied from the archived 2d-wedge case and samples from

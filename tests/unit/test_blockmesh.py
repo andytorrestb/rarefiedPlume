@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -202,10 +203,81 @@ def test_dict_never_emits_unspecified(cfg):
     assert "Unspecified" not in render_block_mesh_dict(cfg)
 
 
-def test_dict_has_five_blocks_and_twelve_arcs(cfg):
-    text = render_block_mesh_dict(cfg)
-    assert text.count("hex (") == 5
-    assert text.count("arc ") == 12
+def test_dict_has_five_blocks(cfg):
+    assert render_block_mesh_dict(cfg).count("hex (") == 5
+
+
+# --------------------------------------------------------------------------- #
+# curvature: arc edges vs projection onto a searchableSphere
+# --------------------------------------------------------------------------- #
+
+def test_arc_mode_emits_twelve_arcs_and_no_projection(cfg):
+    text = render_block_mesh_dict(replace(cfg, mesh=replace(cfg.mesh, projection="arc")))
+    # Count directive lines, not substrings: the header comment mentions "arc".
+    assert len(re.findall(r"^\s*arc \d+ \d+ \(", text, re.M)) == 12
+    assert "searchableSphere" not in text
+    assert not re.search(r"^\s*project ", text, re.M)
+
+
+def test_none_is_accepted_as_an_alias_for_arc(cfg):
+    """Earlier configs wrote `projection: none`; they must keep working."""
+    a = render_block_mesh_dict(replace(cfg, mesh=replace(cfg.mesh, projection="arc")))
+    n = render_block_mesh_dict(replace(cfg, mesh=replace(cfg.mesh, projection="none")))
+    assert a == n
+
+
+def test_projection_mode_declares_the_sphere_primitive(cfg):
+    text = render_block_mesh_dict(
+        replace(cfg, mesh=replace(cfg.mesh, projection="searchable_sphere")))
+    assert "geometry" in text
+    assert "type    searchableSphere;" in text
+    assert f"radius  {R}" in text
+    # v1706 spells the centre key 'centre'; 'origin' would be silently ignored.
+    assert "centre  (0 0 0);" in text
+
+
+def test_projection_mode_projects_twelve_edges_and_five_faces(cfg):
+    """Projecting edges alone is not enough.
+
+    With arc edges the twelve block edges are exact but the face interiors remain
+    ruled surfaces, so the patch dips to 16.3% inside the sphere at the cap face
+    centre. The `faces` section is what makes it a true hemisphere.
+    """
+    text = render_block_mesh_dict(
+        replace(cfg, mesh=replace(cfg.mesh, projection="searchable_sphere")))
+    assert text.count("project ") == 17
+    assert len(re.findall(r"^\s*project \d+ \d+ \(inflowSphere\)$", text, re.M)) == 12
+    assert len(re.findall(r"^\s*project \([\d ]+\) inflowSphere$", text, re.M)) == 5
+    assert "arc " not in text
+
+
+def test_projected_faces_are_exactly_the_inflow_faces(cfg, verts):
+    """The projected quads must be the same five the inflow patch declares."""
+    text = render_block_mesh_dict(
+        replace(cfg, mesh=replace(cfg.mesh, projection="searchable_sphere")))
+    projected = {frozenset(int(i) for i in m.split())
+                 for m in re.findall(r"^\s*project \(([\d ]+)\) inflowSphere$", text, re.M)}
+    inflow, _, _ = classify_boundary_faces(verts, R, H, L)
+    assert projected == {frozenset(f) for f in inflow}
+
+
+def test_arc_mode_face_interiors_miss_the_sphere(verts):
+    """Quantifies why projection exists, and pins the number in the docs.
+
+    blockMesh fills an unprojected face by transfinite interpolation of its four
+    edges; at the face centre that reduces to
+    sum(edge midpoints)/2 - sum(corners)/4. The result is 16.3% inside the sphere
+    on the cap face -- and it does NOT improve with n_tangential, because the face
+    interior is determined by the edges alone.
+    """
+    inflow, _, _ = classify_boundary_faces(verts, R, H, L)
+    worst = 0.0
+    for quad in inflow:
+        p = verts[list(quad)]
+        mids = [arc_point(p[i], p[(i + 1) % 4], R) for i in range(4)]
+        centre = np.sum(mids, axis=0) / 2.0 - np.sum(p, axis=0) / 4.0
+        worst = max(worst, (R - np.linalg.norm(centre)) / R)
+    assert worst == pytest.approx(0.1631, abs=1e-3)
 
 
 def test_dict_resolution_follows_config(cfg):
@@ -240,10 +312,8 @@ def test_write_creates_system_directory(tmp_path, cfg):
 # rejected configurations
 # --------------------------------------------------------------------------- #
 
-def test_projection_is_not_implemented():
-    """The project/searchableSphere syntax is unverified against v1706; refuse
-    rather than emit a directive blockMesh might silently ignore."""
-    cfg = CaseConfig(mesh=MeshConfig(projection="searchable_sphere"))
+def test_unknown_projection_is_rejected():
+    cfg = CaseConfig(mesh=MeshConfig(projection="magic"))
     with pytest.raises(NotImplementedError, match="projection"):
         render_block_mesh_dict(cfg)
 
@@ -251,6 +321,14 @@ def test_projection_is_not_implemented():
 def test_unknown_mesh_type_is_rejected():
     cfg = CaseConfig(mesh=MeshConfig(type="something_else"))
     with pytest.raises(NotImplementedError, match="mesh.type"):
+        render_block_mesh_dict(cfg)
+
+
+def test_snappy_type_is_not_rendered_by_this_module():
+    """block_mesh_ogrid and snappy_hex_sphere are separate generators; dispatch
+    goes through plumetools.foamio.write_mesh_setup."""
+    cfg = CaseConfig(mesh=MeshConfig(type="snappy_hex_sphere"))
+    with pytest.raises(NotImplementedError):
         render_block_mesh_dict(cfg)
 
 

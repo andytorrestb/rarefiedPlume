@@ -15,15 +15,24 @@ model: source_flow
 # hemispherical inflow cavity of radius exactly 0.5 m at the origin, on the x = 0
 # symmetry plane, opening toward +x.
 mesh:
-  type: block_mesh_ogrid       # 5-block hemispherical O-grid
+  type: block_mesh_ogrid       # 5-block hemispherical O-grid  (or: snappy_hex_sphere)
   sphere_radius_m: 0.5         # must equal geometry.sphere_radius_m (validated)
   box_half_width_m: 2.5        # y, z extent -> [-2.5, 2.5]
   box_length_m: 5.0            # x extent    -> [0, 5]
   n_tangential: 20             # -> 5 * 20^2 = 2000 inflow quads (Pointwise had 2044 tris)
   n_radial: 24                 # -> 5 * 20^2 * 24 = 48 000 cells
   radial_grading: 10.0         # cluster toward the sphere
-  projection: none             # 'searchable_sphere' is not implemented; see docs/mesh.md
+  # searchable_sphere projects the block edges AND faces onto a searchableSphere
+  # primitive, so every surface point lies on the sphere. With 'arc' only the
+  # twelve edges are curved and the face interiors stay ruled surfaces: the
+  # inflow patch is then NOT a pure hemisphere, dipping to |r| = 0.4184 at the cap
+  # face centre -- a 16.3% deficit that does NOT shrink with n_tangential.
+  projection: searchable_sphere
   patch_names: {inflow: inflow, outer: vacuum, symmetry: sym}
+  # --- snappy_hex_sphere only (ignored by block_mesh_ogrid) -------------------
+  background_cell_size_m: 0.125  # background box cell size; keep <= R/4
+  refinement_level: 3            # octree levels at the sphere
+  n_cells_between_levels: 3
 
 # --- inflow surface -----------------------------------------------------------
 geometry:

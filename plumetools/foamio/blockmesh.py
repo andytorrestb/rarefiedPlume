@@ -31,12 +31,25 @@ The five inner faces tile the hemisphere exactly: the ``+x`` half of a cube's si
 faces is the ``+x`` face whole, half of each of ``+-y`` and ``+-z``, and no ``-x``
 face.
 
-Curvature comes from ``arc`` edges on the twelve inner edges, with interpolation
-points computed analytically as ``R * (P1 + P2) / |P1 + P2|``. ``arc`` is used
-rather than ``project``/``searchableSphere`` because the projection directive
-syntax could not be verified against OpenFOAM v1706 -- see ``docs/mesh.md``. The
-consequence is that block *faces* on the sphere are ruled surfaces, so interior
-surface points bulge very slightly inside the true sphere.
+Curvature
+---------
+Two modes, selected by ``mesh.projection``:
+
+``arc`` (default)
+    ``arc`` edges on the twelve inner edges, with interpolation points computed
+    analytically as ``R * (P1 + P2) / |P1 + P2|``. The twelve *edges* are then
+    exact, but the block *faces* between them are ruled surfaces, so surface
+    points in the face interiors bulge inward -- the inflow patch is not a pure
+    hemisphere. Worst-case sagitta is ``R * (1 - cos(alpha/2))`` where ``alpha``
+    is the angular span of one block face (90 degrees for the cap), i.e. about
+    **7.6% of R** at the face centre for the default topology.
+
+``searchable_sphere``
+    Declares a ``geometry`` block holding a ``searchableSphere`` and projects both
+    the twelve edges and the five inflow faces onto it. blockMesh then places
+    every surface point on the sphere, so the patch is a true hemisphere at any
+    resolution. This is the fix for the sagitta above and costs nothing --
+    same topology, same cell count, same face count.
 
 Block and boundary-face orientation are **derived**, not hand-written: blocks are
 flipped if their inner-to-outer normal points the wrong way, and each boundary
@@ -226,12 +239,13 @@ def render_block_mesh_dict(cfg) -> str:
     mesh = cfg.mesh
     if mesh.type != "block_mesh_ogrid":
         raise NotImplementedError(f"mesh.type {mesh.type!r} is not implemented")
-    if mesh.projection != "none":
+    if mesh.projection not in ("none", "arc", "searchable_sphere"):
         raise NotImplementedError(
-            f"mesh.projection {mesh.projection!r} is not implemented. Only 'none' "
-            f"(arc edges) is supported: the project/searchableSphere directive "
-            f"syntax has not been verified against OpenFOAM v1706. See docs/mesh.md."
+            f"mesh.projection {mesh.projection!r} is not implemented; "
+            f"use 'arc' (exact edges, ruled faces) or 'searchable_sphere' "
+            f"(exact surface). See docs/mesh.md."
         )
+    project = mesh.projection == "searchable_sphere"
 
     R, H, L = float(mesh.sphere_radius_m), float(mesh.box_half_width_m), float(mesh.box_length_m)
     if not 0 < R < H:
@@ -264,6 +278,7 @@ def render_block_mesh_dict(cfg) -> str:
         f"// Box x in [0, {_fmt(L)}], y,z in [{_fmt(-H)}, {_fmt(H)}], with a hemispherical",
         f"// inflow cavity of radius {_fmt(R)} at the origin on the x = 0 symmetry plane.",
         f"// 5-block O-grid -> {5 * nt * nt} inflow quads, {5 * nt * nt * nr} hexahedral cells.",
+        f"// Curvature: {'projected onto a searchableSphere (exact surface)' if project else 'arc edges (exact edges, ruled faces)'}.",
         "FoamFile",
         "{",
         "    version     2.0;",
@@ -275,9 +290,27 @@ def render_block_mesh_dict(cfg) -> str:
         "",
         "scale   1;",
         "",
-        "vertices",
-        "(",
     ]
+
+    if project:
+        lines += [
+            "// The inflow surface as an analytic primitive. Projecting the edges and",
+            "// faces below onto it puts every surface point exactly on the sphere,",
+            "// instead of only the block corners and edges.",
+            "geometry",
+            "{",
+            "    inflowSphere",
+            "    {",
+            "        type    searchableSphere;",
+            f"        centre  ({_fmt(0.0)} {_fmt(0.0)} {_fmt(0.0)});",
+            f"        radius  {_fmt(R)};",
+            "        // v1706 spells this 'centre'; OpenFOAM v2006+ also accepts 'origin'.",
+            "    }",
+            "}",
+            "",
+        ]
+
+    lines += ["vertices", "("]
 
     labels = (["inner cap"] * 4 + ["inner equator"] * 4
               + [f"outer x = {_fmt(L)}"] * 4 + ["outer x = 0"] * 4)
@@ -293,12 +326,31 @@ def render_block_mesh_dict(cfg) -> str:
             f"    hex ({order}) ({nt} {nt} {nr}) simpleGrading (1 1 {grading})"
             f"   // {name}"
         )
-    lines += [");", "",
-              "// Sphere curvature. Without these the inflow surface would be flat.",
-              "edges", "("]
-    for v0, v1 in SPHERE_EDGES:
-        lines.append(f"    arc {v0} {v1} {_vec(arc_point(verts[v0], verts[v1], R))}")
-    lines += [");", "", "boundary", "("]
+    if project:
+        lines += [");", "",
+                  "// Project the twelve sphere edges onto the primitive.",
+                  "edges", "("]
+        for v0, v1 in SPHERE_EDGES:
+            lines.append(f"    project {v0} {v1} (inflowSphere)")
+        lines += [");", "",
+                  "// Project the five inflow faces too. Without this the edges would be",
+                  "// exact but the face interiors would remain ruled surfaces, leaving the",
+                  "// patch short of a true hemisphere by up to R*(1 - cos(alpha/2)).",
+                  "faces", "("]
+        for quad in inflow:
+            lines.append(f"    project ({' '.join(str(i) for i in quad)}) inflowSphere")
+        lines += [");", ""]
+    else:
+        lines += [");", "",
+                  "// Sphere curvature. Exact at the edges; face interiors are ruled",
+                  "// surfaces, so the patch is not a pure hemisphere. Set",
+                  "// mesh.projection: searchable_sphere in case.yaml to fix that.",
+                  "edges", "("]
+        for v0, v1 in SPHERE_EDGES:
+            lines.append(f"    arc {v0} {v1} {_vec(arc_point(verts[v0], verts[v1], R))}")
+        lines += [");", ""]
+
+    lines += ["boundary", "("]
 
     lines += _patch_block(p_inflow, "patch", inflow,
                           "hemispherical plume source surface")

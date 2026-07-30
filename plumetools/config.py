@@ -35,9 +35,44 @@ class ConfigWarning(UserWarning):
     """Emitted for a frozen inconsistency that is preserved rather than fixed."""
 
 
+#: Mesh generators, and which module renders each.
+MESH_TYPES = ("block_mesh_ogrid", "snappy_hex_sphere")
+
+#: How the inflow surface is made curved, for ``block_mesh_ogrid``.
+PROJECTIONS = ("arc", "searchable_sphere", "none")
+
+
 @dataclass(frozen=True)
 class MeshConfig:
-    """Parameters for generating the mesh. See :mod:`plumetools.foamio.blockmesh`."""
+    """Parameters for generating the mesh.
+
+    Attributes:
+        type: ``"block_mesh_ogrid"`` -- a 5-block hexahedral O-grid, rendered by
+            :mod:`plumetools.foamio.blockmesh`; or ``"snappy_hex_sphere"`` -- a
+            background box carved by snappyHexMesh, rendered by
+            :mod:`plumetools.foamio.snappy`.
+        sphere_radius_m: inflow surface radius [m]. Must equal
+            ``geometry.sphere_radius_m``.
+        box_half_width_m: domain half-extent in y and z [m].
+        box_length_m: domain extent in x [m], from 0.
+        n_tangential: O-grid only. Cells across each block face; the inflow patch
+            gets ``5 * n_tangential**2`` faces.
+        n_radial: O-grid only. Cells from the sphere to the box.
+        radial_grading: O-grid only. ``simpleGrading`` expansion outward.
+        projection: O-grid only. ``"arc"`` curves only the twelve block edges, so
+            the face interiors stay ruled surfaces and the patch is **not** a true
+            hemisphere -- the deficit reaches 16.3% of R at the cap face centre and
+            does **not** shrink with ``n_tangential``. ``"searchable_sphere"``
+            projects the edges *and* faces onto a ``searchableSphere`` primitive,
+            giving an exact surface at no extra cost. ``"none"`` is an accepted
+            alias for ``"arc"``, kept because earlier configs used it.
+        background_cell_size_m: snappy only. Background box cell size [m]; must be
+            at most about R/4 or the cavity falls between cells.
+        refinement_level: snappy only. Octree levels at the sphere.
+        n_cells_between_levels: snappy only. Buffer cells between refinement levels.
+        patch_names: maps the roles ``inflow`` / ``outer`` / ``symmetry`` to the
+            patch names written into the mesh.
+    """
 
     type: str = "block_mesh_ogrid"
     sphere_radius_m: float = 0.5
@@ -46,7 +81,10 @@ class MeshConfig:
     n_tangential: int = 20
     n_radial: int = 24
     radial_grading: float = 10.0
-    projection: str = "none"
+    projection: str = "arc"
+    background_cell_size_m: float = 0.125
+    refinement_level: int = 3
+    n_cells_between_levels: int = 3
     patch_names: dict = field(
         default_factory=lambda: {"inflow": "inflow", "outer": "vacuum", "symmetry": "sym"}
     )
@@ -230,6 +268,26 @@ def validate_against_case(cfg: CaseConfig, case_dir: Path, path: Path) -> None:
             f"{path}: mesh.sphere_radius_m ({cfg.mesh.sphere_radius_m}) must equal "
             f"geometry.sphere_radius_m ({cfg.geometry.sphere_radius_m}); the mesh "
             f"generator and the source-flow model would otherwise use different spheres"
+        )
+
+    if cfg.mesh.type not in MESH_TYPES:
+        raise ConfigError(
+            f"{path}: unknown mesh.type {cfg.mesh.type!r}; valid: {list(MESH_TYPES)}"
+        )
+    if cfg.mesh.projection not in PROJECTIONS:
+        raise ConfigError(
+            f"{path}: unknown mesh.projection {cfg.mesh.projection!r}; "
+            f"valid: {list(PROJECTIONS)}"
+        )
+    if cfg.mesh.type == "block_mesh_ogrid" and cfg.mesh.projection in ("arc", "none"):
+        warnings.warn(
+            f"{path}: mesh.projection is {cfg.mesh.projection!r}, so only the twelve "
+            f"block edges are curved and the inflow patch is NOT a true hemisphere -- "
+            f"the radial deficit reaches 16.3% of R at the cap face centre and does "
+            f"not shrink with n_tangential. Set mesh.projection: searchable_sphere "
+            f"for an exact surface. See docs/mesh.md.",
+            ConfigWarning,
+            stacklevel=2,
         )
 
     boundary = case_dir / "constant" / "polyMesh" / "boundary"
