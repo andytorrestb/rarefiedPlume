@@ -37,7 +37,10 @@ cases/3d-inflow/system/blockMeshDict
 *.asv
 *.orig
 
-# Python packaging
+# Python environments and packaging
+.venv/
+venv/
+env/
 *.egg-info/
 build/
 dist/
