@@ -1,0 +1,191 @@
+#!/bin/bash
+#
+# Run this case end to end.
+#
+#   ./Allrun                 # decomposition from system/decomposeParDict
+#   ./Allrun --serial        # force a single-process run
+#   ./Allrun -np 4           # override the subdomain count
+#   ./Allrun --no-solve      # stop after generating 0/ (needs no solver)
+#
+# The step ORDER matters and is load-bearing:
+#
+#   dsmcInitialise+  CREATES 0/
+#   runInflow.py     OVERWRITES three files inside it
+#
+# Reversed, the inflow conditions are silently discarded. The commented-out
+# `touch 0/boundary*` lines in the archived caseFoamEx/runCases.py were an
+# attempt to work around exactly that.
+#
+# This script never calls ./Allmesh. Mesh generation overwrites
+# constant/polyMesh -- the only copy of the historical Pointwise mesh, and the
+# substrate of the regression golden -- so it stays a deliberate, separate act.
+#
+# Every command's exit status is checked. The pre-refactor scripts used bare
+# os.system/unchecked calls, so a failed solver was indistinguishable from a
+# successful one and a sweep would carry on writing plots from stale data
+# (finding RB-05).
+
+set -u
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+CASE_NAME=${PWD##*/}
+NP=""
+SOLVE=1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s|--serial)   NP=1 ;;
+        -np)           shift; NP=${1:?"-np needs a subdomain count"} ;;
+        --no-solve)    SOLVE=0 ;;
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)             echo "Allrun: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# --------------------------------------------------------------------------- #
+# helpers
+# --------------------------------------------------------------------------- #
+
+die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Run a command, tee its output to log.<name>, and fail loudly on a non-zero exit.
+# The log name matters: ./monitor and the archived monitor scripts grep
+# log.dsmcFoam+, which no pre-refactor run script ever created (finding AR-11).
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        tail -25 "$log" >&2
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+# Read an entry from an OpenFOAM dictionary, e.g. `application` or
+# `numberOfSubdomains`. Mirrors what OpenFOAM's own getApplication does.
+foam_entry() {
+    local key=$1 file=$2 value
+    value=$(sed -n "s/^[[:space:]]*$key[[:space:]]\+\([^;]*\);.*/\1/p" "$file" 2>/dev/null | head -1)
+    echo "${value//[[:space:]]/}"
+}
+
+# --------------------------------------------------------------------------- #
+# preflight
+# --------------------------------------------------------------------------- #
+
+echo "### $CASE_NAME"
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a plumetools case?"
+[ -f runInflow.py ] || die "no runInflow.py here"
+
+if [ ! -d constant/polyMesh ]; then
+    die "no constant/polyMesh.
+       Either restore the committed mesh:   git checkout -- constant/polyMesh
+       or generate one from case.yaml:      ./Allmesh --yes"
+fi
+
+have python || have python3 || die "no python on PATH"
+PYTHON=$(have python && echo python || echo python3)
+
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable.
+       Install it from the repository root:  pip install -e \".[test]\""
+
+APP=$(foam_entry application system/controlDict)
+[ -n "$APP" ] || die "no 'application' entry in system/controlDict"
+
+if [ "$SOLVE" -eq 1 ]; then
+    have "$APP" || die "'$APP' is not on PATH.
+       Source your OpenFOAM environment first (this case was built against v1706),
+       or use --no-solve to stop after generating 0/."
+    have dsmcInitialise+ || die "'dsmcInitialise+' is not on PATH"
+fi
+
+if [ -z "$NP" ]; then
+    NP=$(foam_entry numberOfSubdomains system/decomposeParDict)
+    NP=${NP:-1}
+fi
+case "$NP" in
+    ''|*[!0-9]*) die "subdomain count must be a positive integer, got '$NP'" ;;
+esac
+
+echo "    solver=$APP  subdomains=$NP  solve=$SOLVE"
+echo ""
+
+# --------------------------------------------------------------------------- #
+# 1-2. mesh topology and initial fields
+# --------------------------------------------------------------------------- #
+
+# topoSet creates constant/polyMesh/sets/<patch>, which runInflow.py prefers for
+# face ordering. It is optional -- plumetools falls back to the patch's
+# contiguous startFace range, which is the same order -- but running it keeps a
+# freshly generated mesh consistent with a committed one.
+if [ ! -f system/topoSetDict ]; then
+    echo "==> skipping topoSet (no system/topoSetDict)"
+elif ! have topoSet; then
+    echo "==> skipping topoSet (not on PATH); falling back to the patch face range"
+else
+    run topoSet topoSet
+fi
+
+if [ "$SOLVE" -eq 1 ]; then
+    run dsmcInitialise+ dsmcInitialise+
+else
+    [ -d 0 ] || mkdir -p 0
+    echo "==> skipping dsmcInitialise+ (--no-solve); using $PWD/0"
+fi
+
+# --------------------------------------------------------------------------- #
+# 3. analytical inflow conditions  --  the only step needing no OpenFOAM
+# --------------------------------------------------------------------------- #
+
+echo "==> $PYTHON runInflow.py"
+$PYTHON runInflow.py || die "runInflow.py failed"
+
+for f in 0/boundaryU 0/boundaryT; do
+    [ -s "$f" ] || die "$f was not written"
+done
+ls 0/boundaryNumberDensity_* >/dev/null 2>&1 \
+    || die "no 0/boundaryNumberDensity_* was written"
+
+if [ "$SOLVE" -eq 0 ]; then
+    echo ""
+    echo "Stopped after generating 0/ (--no-solve)."
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+# 4. solve
+# --------------------------------------------------------------------------- #
+
+if [ "$NP" -gt 1 ]; then
+    have decomposePar || die "'decomposePar' is not on PATH"
+    have mpirun || die "'mpirun' is not on PATH (use --serial to run in one process)"
+    run decomposePar decomposePar -force
+    run "$APP" mpirun -np "$NP" "$APP" -parallel
+    # reconstructPar is NOT optional. The archived 2d-wedge/run.sh decomposed,
+    # ran in parallel, then called postProcess on the undecomposed case -- so it
+    # read whatever was in the case directory, not the results (finding AR-11).
+    have reconstructPar || die "'reconstructPar' is not on PATH"
+    run reconstructPar reconstructPar
+else
+    run "$APP" "$APP"
+fi
+
+# --------------------------------------------------------------------------- #
+# done
+# --------------------------------------------------------------------------- #
+
+echo ""
+echo "### $CASE_NAME finished"
+echo "    logs:      log.$APP  (./monitor plots against this, if present)"
+echo "    fields:    time directories in $PWD"
+echo ""
+echo "    Post-processing is NOT wired up yet (finding RP-17): the shipped"
+echo "    system/sampleDict was copied from the archived 2d-wedge case and"
+echo "    samples from r = 1.005 m, outside this case's inflow surface. The"
+echo "    sampling: block in case.yaml is validated but not yet consumed."

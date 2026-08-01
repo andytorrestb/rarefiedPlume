@@ -7,13 +7,52 @@ processor*
 [0-9][0-9]/
 [0-9]*.[0-9]*
 !0.org
-constant/extendedFeatureEdgeMesh
+
+# NOTE: constant/polyMesh IS deliberately tracked for every case, and must stay so.
+# The meshes were exported from Pointwise V18.5R2 -- a licensed, interactive tool
+# whose .pw project files are binary and cannot be scripted or regenerated here.
+# The committed polyMesh is therefore the only reproducible artefact, and it is the
+# substrate the regression golden is bound to. See docs/mesh.md.
+#
+# Rules of the form `constant/polyMesh/*` were previously listed here; because they
+# contain a slash they anchor to the repository root and matched nothing under
+# cases/*/, so they never had any effect (verify: `git check-ignore -v
+# cases/3d-inflow/constant/polyMesh/points` exits 1). They have been removed rather
+# than corrected, since the files should be tracked.
+
 *.eMesh
-constant/polyMesh/*
-!constant/polyMesh/blockMeshDict
 constant/cellToRegion
 *.OpenFOAM
 *.csv
 images/
 img/
 __pycache__/
+
+# Generated OpenFOAM dictionaries -- emitted from case.yaml by plumetools, never
+# hand-edited. Listed per active case rather than globbed, so the archived cases'
+# hand-written blockMeshDicts stay visibly tracked. See docs/mesh.md.
+#
+# blockMeshDict is written by both mesh types; snappyHexMeshDict and
+# meshQualityDict only by mesh.type: snappy_hex_sphere.
+cases/3d-inflow/system/blockMeshDict
+cases/3d-inflow/system/snappyHexMeshDict
+cases/3d-inflow/system/meshQualityDict
+
+# NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
+# ./Allmesh does overwrite it, but for most cases it is the only copy of a
+# Pointwise export that cannot be reproduced without an interactive licensed
+# session, and for 3d-inflow it is what the regression golden is bound to.
+# After ./Allmesh, reset with:  git checkout -- constant/polyMesh
+
+# Editor and tool artefacts
+*.asv
+*.orig
+
+# Python environments and packaging
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.pytest_cache/

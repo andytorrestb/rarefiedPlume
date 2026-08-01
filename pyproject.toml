@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plumetools"
+version = "0.1.0"
+description = "Analytical plume source-flow inflow generation for dsmcFoam+ cases"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Andy Torres" }]
+
+dependencies = [
+    "numpy>=1.20",
+    "scipy>=1.6",   # integrate.trapezoid was added in 1.6
+    "pyyaml>=5.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+# Post-processing only. paraview.simple ships with ParaView and is not pip-installable;
+# see docs/environment.md.
+plots = ["matplotlib>=3.4", "pandas>=1.2"]
+
+[tool.setuptools.packages.find]
+include = ["plumetools*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "needs_openfoam: requires a working OpenFOAM + dsmcFoam+ environment (deselect with -m 'not needs_openfoam')",
+]

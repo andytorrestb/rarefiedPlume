@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# Reset this case to a re-runnable state.
+#
+#   ./Allclean              # remove results: 0/, time dirs, logs, processor*, postProcessing
+#   ./Allclean --dry-run    # list what would go, remove nothing
+#   ./Allclean --mesh       # ALSO remove the generated system/blockMeshDict
+#
+# NEVER removed:
+#   constant/polyMesh   the mesh -- for this case the only copy of the historical
+#                       Pointwise export, and the substrate of the regression
+#                       golden. Regenerate deliberately via ./Allmesh, not here.
+#   0.org               a template initial-conditions directory, if one exists.
+#   case.yaml, system/, constant/ (everything else)
+#
+# This replaces clean.sh, which ran
+#
+#     rm -r 0* boundaries fieldMeasurements postProcessing processor*
+#
+# with no `cd` into its own directory and no -f. Invoked from the repository root
+# it deleted matching paths FROM THE REPOSITORY ROOT, and its `0*` glob would
+# also have taken a 0.org (finding RP-01).
+
+set -u
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+CASE_NAME=${PWD##*/}
+DRY=0
+CLEAN_MESH=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|--dry-run) DRY=1 ;;
+        --mesh)       CLEAN_MESH=1 ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "Allclean: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# Guard against ever running outside a case directory, whatever the cd did.
+[ -d system ] && [ -d constant ] \
+    || { echo "Allclean: $PWD is not an OpenFOAM case (no system/ and constant/)" >&2; exit 1; }
+
+targets=()
+
+note() {
+    # Only queue paths that exist, so the dry-run output is exactly what happens.
+    [ -e "$1" ] && targets+=("$1")
+}
+
+# Time directories. Matched by parsing the name as a number rather than globbing
+# `0*`, so `0.org` cannot be caught by accident and `2.5e-05` is still found.
+for d in */; do
+    name=${d%/}
+    case "$name" in
+        0.org) continue ;;
+    esac
+    if [[ $name =~ ^[0-9]+([.][0-9]*)?([eE][-+]?[0-9]+)?$ ]]; then
+        note "$name"
+    fi
+done
+
+# Solver output and run artefacts.
+note boundaries
+note fieldMeasurements
+note postProcessing
+for p in processor*; do note "$p"; done
+for l in log.*; do note "$l"; done
+
+# Generated dictionaries -- only on request, since regenerating needs blockMesh.
+if [ "$CLEAN_MESH" -eq 1 ]; then
+    note system/blockMeshDict
+fi
+
+# Python bytecode from the case-local scripts.
+note __pycache__
+
+if [ ${#targets[@]} -eq 0 ]; then
+    echo "### $CASE_NAME already clean"
+    exit 0
+fi
+
+if [ "$DRY" -eq 1 ]; then
+    echo "### $CASE_NAME -- would remove (dry run):"
+    printf '    %s\n' "${targets[@]}"
+    exit 0
+fi
+
+echo "### $CASE_NAME -- removing:"
+printf '    %s\n' "${targets[@]}"
+rm -rf -- "${targets[@]}"
+
+echo ""
+echo "kept: constant/polyMesh, system/, case.yaml"
+[ -d constant/polyMesh ] || echo "WARNING: constant/polyMesh is missing -- run ./Allmesh --yes or git checkout it"
