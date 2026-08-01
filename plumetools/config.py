@@ -120,8 +120,28 @@ class AngularConfig:
     quadrature_points: int = 500
 
 
+#: Which dsmcFoam the case targets. The two read different boundary field types.
+DIALECTS = ("standard", "mnf")
+
+
 @dataclass(frozen=True)
 class OutputConfig:
+    """How the ``0/`` inflow fields are written.
+
+    Attributes:
+        dialect: ``"standard"`` for OpenFOAM's own ``dsmcFoam`` (v2512 checked),
+            ``"mnf"`` for the micro/nano-flow fork's ``dsmcFoam+``. They differ in
+            one load-bearing way: standard reads ``0/boundaryT`` as a
+            **volScalarField**, while the fork reads a **volVectorField** holding
+            per-component translational temperature as ``(T 0 0)``. Writing the
+            wrong one is a hard read failure, not a silent mis-run.
+
+            Standard also has no per-face number density -- see
+            :mod:`plumetools.foamio.fields` and docs/solver-compatibility.md.
+        patches: non-inflow patch specs, in output order.
+    """
+
+    dialect: str = "standard"
     patches: dict = field(default_factory=dict)
 
 

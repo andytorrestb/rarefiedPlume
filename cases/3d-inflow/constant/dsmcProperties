@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v1706                                 |
-|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -15,11 +15,27 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+// Targets OpenFOAM's own dsmcFoam (checked against v2512).
+//
+// The micro/nano-flow fork's version is kept alongside as dsmcProperties.mnf.
+// The two solvers do not share a dictionary schema; see
+// docs/solver-compatibility.md for the full mapping and for what is lost.
+
 
 // General Properties
 // ~~~~~~~~~~~~~~~~~~
 
 nEquivalentParticles            4e14;
+
+
+// Wall Interaction Model
+// ~~~~~~~~~~~~~~~~~~~~~~
+// Required by standard dsmcFoam; the MNF fork configured this per patch in
+// system/boundariesDict instead, so there was no entry here to carry over.
+// Specular reflection is the neutral choice for a plume expanding into vacuum:
+// it adds no wall thermal accommodation that the model does not ask for.
+
+WallInteractionModel            SpecularReflection;
 
 
 // Binary Collision Model
@@ -29,30 +45,51 @@ BinaryCollisionModel            LarsenBorgnakkeVariableHardSphere;
 
 LarsenBorgnakkeVariableHardSphereCoeffs
 {
-    rotationalRelaxationCollisionNumber     5.0;
+    // Standard dsmcFoam spells these `Tref` and `relaxationCollisionNumber`;
+    // the fork used `rotationalRelaxationCollisionNumber` and no Tref.
+    Tref                        273;
+    relaxationCollisionNumber   5.0;
 }
 
 
-// Collision Partner Selection Model
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Inflow Boundary Model
+// ~~~~~~~~~~~~~~~~~~~~~
+// !! THE PLUME'S ANGULAR DENSITY PROFILE IS LOST HERE !!
+//
+// Standard dsmcFoam's FreeStream model takes ONE number density per species
+// (FreeStream.C:93, `numberDensities_[i] = numberDensitiesDict.get<scalar>(...)`).
+// It reads velocity and temperature PER FACE from 0/boundaryU and 0/boundaryT,
+// so the plume's angular *direction* survives -- but its angular *density* does
+// not.
+//
+// The value below is the area-weighted mean of the per-face number density the
+// source-flow model computes, which preserves total inflow particle flux. On
+// this case the per-face value spans 2.669e19 to 5.570e21, a factor of 209, so
+// this is a lossy collapse, not a translation.
+//
+// Regenerate it with:  python runInflow.py   (it prints the value to use)
+// Keep the profile by using the MNF fork, or by writing a custom
+// InflowBoundaryModel that reads 0/boundaryNumberDensity_<species>.
 
-collisionPartnerSelectionModel   		noTimeCounter;  
+InflowBoundaryModel             FreeStream;
 
-
-// Coordinate System Selection
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-coordinateSystem   dsmcAxisymmetric;
-
-axisymmetricProperties
+FreeStreamCoeffs
 {
-    maxRadialWeightingFactor    1000;
-    revolutionAxis              "x";
-    polarAxis                   "z";
-    // rwMethod                    "particleAverage";
+    numberDensities
+    {
+        Ar          1.915737e+21;
+    };
 }
+
 
 // Molecular species
 // ~~~~~~~~~~~~~~~~~
+// Standard dsmcFoam uses `internalDegreesOfFreedom` where the fork used
+// `rotationalDegreesOfFreedom`, and has no `alpha` (VSS scattering) entry.
+//
+// NOTE (finding SM-03): argon here, but the inflow model in case.yaml is
+// evaluated for N2 (gamma 1.4, M_w 28.0134). That mismatch predates this work
+// and is frozen deliberately; see docs/source-flow-model.md.
 
 typeIdList                      (Ar);
 
@@ -60,13 +97,19 @@ moleculeProperties
 {
     Ar
     {
-        mass                                  6.63e-26;
-        diameter                              4.17e-10;
-        omega                                     0.74;
-        alpha                                     1.36;
-        rotationalDegreesOfFreedom                   0;
+        mass                            6.63e-26;
+        diameter                        4.17e-10;
+        internalDegreesOfFreedom        0;
+        omega                           0.74;
     }
 }
 
+
+// NOTE: `coordinateSystem dsmcAxisymmetric` and its axisymmetricProperties block
+// are NOT carried over -- they are MNF-only, and they were wrong here anyway: a
+// 3D mesh with a phi-dependent inflow and a sym patch (finding HA-06). Standard
+// dsmcFoam is Cartesian, which resolves that question by construction.
+//
+// `collisionPartnerSelectionModel noTimeCounter` is likewise MNF-only.
 
 // ************************************************************************* //

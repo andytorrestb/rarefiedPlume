@@ -41,6 +41,7 @@ class InflowResult:
             (finding GP-02); retained for mesh verification.
         theta: ``(n_faces,)`` polar angle from +z [rad].
         phi: ``(n_faces,)`` azimuth from +x in the x-y plane [rad].
+        areas: ``(n_faces,)`` face areas [m^2].
         rhoN: ``(n_faces,)`` number density [1/m^3].
         U: ``(n_faces, 3)`` velocity [m/s].
         T: ``(n_faces,)`` translational temperature [K].
@@ -51,6 +52,7 @@ class InflowResult:
     vertices: np.ndarray
     centroids: np.ndarray
     normals: np.ndarray
+    areas: np.ndarray
     theta: np.ndarray
     phi: np.ndarray
     rhoN: np.ndarray
@@ -167,9 +169,40 @@ def compute_inflow(case_dir: Path, cfg: CaseConfig) -> InflowResult:
         vertices=points[unique],
         centroids=centroids,
         normals=normals,
+        areas=geometry.areas(faces, points),
         theta=theta,
         phi=phi,
         rhoN=np.asarray(rhoN, dtype=np.float64),
         U=U,
         T=T,
     )
+
+
+def area_weighted_number_density(inflow: InflowResult) -> float:
+    """The single uniform number density standard dsmcFoam would use [1/m^3].
+
+    Args:
+        inflow: an :class:`InflowResult`.
+
+    Returns:
+        Area-weighted mean of the per-face number density, i.e. the value that
+        preserves the total inflow particle flux if the angular profile is
+        collapsed to a constant.
+
+    OpenFOAM's own ``dsmcFoam`` has no per-face number density: its ``FreeStream``
+    inflow model reads ONE scalar per species from ``constant/dsmcProperties``
+    (verified in v2512, ``FreeStream.C:93``). Per-face velocity and temperature
+    *are* supported, so the plume's angular *direction* survives -- but its
+    angular *density* profile does not.
+
+    This is the value to put in ``FreeStreamCoeffs.numberDensities``. It is a
+    lossy collapse, not a translation: on the reference case the per-face density
+    spans a factor of ~200, and replacing it with any constant discards the
+    structure the source-flow model exists to produce. Use the MNF fork's
+    ``dsmcFreeStreamInflowFieldPatch``, or a custom InflowBoundaryModel, to keep
+    it. See docs/solver-compatibility.md.
+    """
+    total = float(inflow.areas.sum())
+    if total <= 0.0:
+        raise ValueError("inflow patch has zero area")
+    return float((inflow.rhoN * inflow.areas).sum() / total)

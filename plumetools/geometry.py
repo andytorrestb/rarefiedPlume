@@ -99,6 +99,33 @@ def normals(faces: list[list[int]], points: np.ndarray) -> np.ndarray:
     return np.array([normal(points[f]) for f in faces], dtype=np.float64)
 
 
+def area(vertices: np.ndarray) -> float:
+    """Area of one planar polygon [m^2].
+
+    Args:
+        vertices: ``(n, 3)`` face vertex coordinates [m], in winding order.
+
+    Returns:
+        Area [m^2], always positive.
+
+    Triangle-fan sum from the first vertex, so it is exact for any planar polygon
+    -- triangles, the quads blockMesh produces, and the higher-order faces
+    snappyHexMesh leaves behind.
+    """
+    v = np.asarray(vertices, dtype=np.float64)
+    if v.ndim != 2 or v.shape[1] != 3:
+        raise ValueError(f"expected (n, 3) vertices, got {v.shape}")
+    if len(v) < 3:
+        raise ValueError(f"a face needs at least 3 vertices, got {len(v)}")
+    fan = np.cross(v[1:-1] - v[0], v[2:] - v[0])
+    return float(np.linalg.norm(fan.sum(axis=0)) / 2.0)
+
+
+def areas(faces: list[list[int]], points: np.ndarray) -> np.ndarray:
+    """Areas of many faces [m^2]. See :func:`area`."""
+    return np.array([area(points[f]) for f in faces], dtype=np.float64)
+
+
 def spherical(points: np.ndarray, radius: float | None = None,
               polar_axis: str = "z") -> tuple[np.ndarray, np.ndarray]:
     """Convert Cartesian positions to the (theta, phi) the source-flow model uses.

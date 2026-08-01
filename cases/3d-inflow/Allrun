@@ -98,11 +98,20 @@ $PYTHON -c "import plumetools" 2>/dev/null \
 APP=$(foam_entry application system/controlDict)
 [ -n "$APP" ] || die "no 'application' entry in system/controlDict"
 
+# The initialiser is named after the solver: OpenFOAM's own dsmcFoam ships
+# dsmcInitialise, the micro/nano-flow fork ships dsmcInitialise+. Derive it from
+# the solver rather than hardcoding one spelling, then fall back to the other so
+# a case pointed at either still runs.
+INIT="dsmcInitialise"
+case "$APP" in *+) INIT="dsmcInitialise+" ;; esac
+have "$INIT" || { for c in dsmcInitialise dsmcInitialise+; do have "$c" && INIT=$c && break; done; }
+
 if [ "$SOLVE" -eq 1 ]; then
     have "$APP" || die "'$APP' is not on PATH.
-       Source your OpenFOAM environment first (this case was built against v1706),
-       or use --no-solve to stop after generating 0/."
-    have dsmcInitialise+ || die "'dsmcInitialise+' is not on PATH"
+       Source your OpenFOAM environment first, or use --no-solve to stop after
+       generating 0/. The solver name comes from 'application' in
+       system/controlDict -- currently '$APP'."
+    have "$INIT" || die "neither 'dsmcInitialise' nor 'dsmcInitialise+' is on PATH"
 fi
 
 if [ -z "$NP" ]; then
@@ -113,7 +122,7 @@ case "$NP" in
     ''|*[!0-9]*) die "subdomain count must be a positive integer, got '$NP'" ;;
 esac
 
-echo "    solver=$APP  subdomains=$NP  solve=$SOLVE"
+echo "    solver=$APP  initialiser=$INIT  subdomains=$NP  solve=$SOLVE"
 echo ""
 
 # --------------------------------------------------------------------------- #
@@ -133,10 +142,10 @@ else
 fi
 
 if [ "$SOLVE" -eq 1 ]; then
-    run dsmcInitialise+ dsmcInitialise+
+    run "$INIT" "$INIT"
 else
     [ -d 0 ] || mkdir -p 0
-    echo "==> skipping dsmcInitialise+ (--no-solve); using $PWD/0"
+    echo "==> skipping $INIT (--no-solve); using $PWD/0"
 fi
 
 # --------------------------------------------------------------------------- #

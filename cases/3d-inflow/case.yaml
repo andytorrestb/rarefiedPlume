@@ -78,6 +78,12 @@ angular:
 # but the original wrote them into every field file. Preserved via
 # legacy.emit_absent_patches; loading this config warns about them.
 output:
+  # 'standard' = OpenFOAM's own dsmcFoam (checked against v2512).
+  # 'mnf'      = the micro/nano-flow fork's dsmcFoam+.
+  # They read 0/boundaryT as DIFFERENT TYPES -- volScalarField vs volVectorField
+  # holding (T 0 0) -- and writing the wrong one is a hard read failure.
+  # Standard also has no per-face number density; see docs/solver-compatibility.md.
+  dialect: standard
   patches:
     vacuum:   {type: zeroGradient}
     sym:      {type: symmetry}

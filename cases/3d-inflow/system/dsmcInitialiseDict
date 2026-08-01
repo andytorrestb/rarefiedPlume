@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v1706                                 |
-|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -15,24 +15,25 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-configurations
-(
-    configuration
-    {
-        type                dsmcMeshFill;
+// Targets OpenFOAM's own dsmcInitialise (checked against v2512), which takes a
+// flat dictionary. The micro/nano-flow fork used a `configurations ( { type
+// dsmcMeshFill; ... } )` list instead; that version is kept alongside as
+// dsmcInitialiseDict.mnf. See docs/solver-compatibility.md.
 
-        numberDensities
-        {
-            Ar          0;
-		};
+// The domain starts empty: this is a plume expanding into vacuum, and every
+// particle should enter through the inflow patch. A zero number density means
+// dsmcInitialise seeds no particles, matching the fork's `Ar 0`.
+//
+// temperature must still be non-zero -- FreeStream.C rejects a zero boundary
+// temperature, and dsmcInitialise uses this value to set the initial field.
 
-		    translationalTemperature     	    1;
-		    rotationalTemperature			    0;
-		    vibrationalTemperature                0;
-            electronicTemperature                 0;
+numberDensities
+{
+    Ar          0;
+};
 
-		    velocity        (0 0 0);
-    } 
-);
+temperature     300;
+
+velocity        (0 0 0);
 
 // ************************************************************************* //
