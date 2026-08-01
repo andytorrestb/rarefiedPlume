@@ -44,12 +44,18 @@ Two modes, selected by ``mesh.projection``:
     is the angular span of one block face (90 degrees for the cap), i.e. about
     **7.6% of R** at the face centre for the default topology.
 
-``searchable_sphere``
+``searchable_sphere`` (default)
     Declares a ``geometry`` block holding a ``searchableSphere`` and projects both
     the twelve edges and the five inflow faces onto it. blockMesh then places
     every surface point on the sphere, so the patch is a true hemisphere at any
-    resolution. This is the fix for the sagitta above and costs nothing --
+    resolution. This is the fix for the deficit above and costs nothing --
     same topology, same cell count, same face count.
+
+    Verified against a real blockMesh: worst inflow-vertex deviation from the
+    nominal radius drops from 0.0816 m to 9.51e-12 m, and the worst face-centroid
+    deficit from 16.31% to 0.16% of R. The residual is ordinary faceting -- a flat
+    quad's centroid sits inside the sphere its corners lie on -- and unlike the
+    16.31% it does shrink with ``n_tangential``.
 
 Block and boundary-face orientation are **derived**, not hand-written: blocks are
 flipped if their inner-to-outer normal points the wrong way, and each boundary

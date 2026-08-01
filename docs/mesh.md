@@ -196,10 +196,23 @@ so the `faces` section is the part that actually matters. A unit test asserts
 both sections are present and that the projected quads are exactly the five the
 `inflow` patch declares.
 
-> **Version note.** v1706 spells the sphere centre `centre`; v2006 and later also
-> accept `origin`. If your build rejects `centre`, that is the key to change.
-> The projection syntax has **not** been executed against a real blockMesh here —
-> only its structure is tested. `arc` remains available as a fallback.
+**Verified against a real blockMesh** (2026-08-01), at the default
+`n_tangential: 20` / `n_radial: 24`:
+
+| | `arc` | `searchable_sphere` |
+|---|---|---|
+| Worst inflow-vertex deviation from r = 0.5 m | 0.0816 m | **9.51e-12 m** |
+| Worst face-centroid deficit | 16.31 % of R | **0.16 % of R** |
+| Inflow faces | 2000 quads | 2000 quads |
+| Mesh | 51 025 points, 146 960 faces | unchanged |
+
+The residual 0.16 % is ordinary faceting — a flat quad's centroid necessarily
+sits inside the sphere its corners lie on — and it shrinks with `n_tangential`,
+unlike the 16.31 % which did not.
+
+> **Version note.** The `centre` key works on the build used here. v2006 and
+> later also accept `origin`; if a build rejects `centre`, that is the key to
+> change. `arc` remains available as a fallback.
 
 `verify_mesh` measures the face-centroid deficit and reports it, so the
 difference is visible without inspecting the mesh by eye.
