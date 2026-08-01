@@ -360,8 +360,10 @@ def render_block_mesh_dict(cfg) -> str:
 
     lines += _patch_block(p_inflow, "patch", inflow,
                           "hemispherical plume source surface")
-    lines += _patch_block(p_outer, "patch", outer,
-                          "the five outer box faces")
+    lines += _patch_block(p_outer, mesh.outer_patch_type, outer,
+                          "the five outer box faces"
+                          + ("  --  WALL: reflects, does not absorb (see docs/solver-compatibility.md)"
+                             if mesh.outer_patch_type == "wall" else ""))
     lines += _patch_block(p_sym, "symmetry", sym,
                           "the x = 0 plane")
 

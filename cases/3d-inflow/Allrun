@@ -60,7 +60,16 @@ run() {
     echo "==> $* (-> $log)"
     if ! "$@" > "$log" 2>&1; then
         echo "" >&2
-        tail -25 "$log" >&2
+        # Surface the FOAM error, not the tail. Under mpirun the last 25 lines are
+        # MPI_ABORT noise and truncated stack traces from eight ranks; the actual
+        # cause sits further up and is identical on every rank.
+        if grep -q "FOAM FATAL" "$log"; then
+            # Strip the "[rank] " prefix and print only the FIRST block: under
+            # mpirun every rank reports the same error.
+            sed "s/^\[[0-9]*\] //" "$log"                 | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*$/{n++; if(n>=3) exit}"                 | head -14 >&2
+        else
+            tail -25 "$log" >&2
+        fi
         die "'$1' failed; full output in $PWD/$log"
     fi
 }
