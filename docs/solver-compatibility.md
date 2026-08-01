@@ -83,8 +83,9 @@ leave the domain, which is what the fork's `dsmcDeletionPatch` does — and what
 
 ## Making it run anyway
 
-Change `vacuum` from `patch` to `wall` in `constant/polyMesh/boundary`. That
-excludes it from `FreeStream` and the case runs to completion — verified:
+Set `mesh.outer_patch_type: wall` in `case.yaml`. The generator then emits the
+outer boundary as a `wall`, which `FreeStream` excludes, and the case runs to
+completion — verified end to end in v2512:
 
 ```
 Particles inserted        = 59251
@@ -102,6 +103,22 @@ End
 
 That may still be useful for a smoke test, a mesh check, or a performance
 measurement. It is not a plume-impingement calculation.
+
+It is opt-in rather than the default because reflecting the outflow is a physics
+decision. Leaving `outer_patch_type` at `patch` under `dialect: standard` makes
+`load_case_config` warn, so the problem is reported when the config is read
+rather than as an MPI stack trace at the first timestep:
+
+```
+ConfigWarning: output.dialect is 'standard' and mesh.outer_patch_type is 'patch'.
+Standard dsmcFoam's FreeStream injects on EVERY patch-type boundary
+(FreeStream.C:57-62), so the outer boundary becomes a second inflow and the run
+aborts at the first timestep with 'Zero boundary temperature detected'.
+```
+
+`Allrun` also extracts the first `FOAM FATAL` block from the log rather than
+tailing it — under `mpirun` the last lines are MPI teardown from every rank and
+the real error has scrolled past.
 
 ## What this repository does about it
 
