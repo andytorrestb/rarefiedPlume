@@ -58,16 +58,29 @@ all finite     : yes
 dict-iteration order and `dsmcFoam+` consumes them in patch-face order, so `labels` is
 stored explicitly and must be reproduced, not just the value multiset.
 
+## How the golden files are kept stable
+
+These are byte-exact reference data, so nothing may rewrite them silently. Three things
+enforce that:
+
+* **`.gitattributes` marks `tests/regression/golden/** -text`.** Git therefore performs
+  no line-ending conversion on checkout or commit. Without it, `core.autocrlf=true` —
+  common on Windows — stored the files as LF but checked them out as CRLF, so the index
+  and the working tree disagreed byte-for-byte while `git status` still looked clean.
+  Any tool that rewrote a golden then surfaced it as a spurious modification.
+* **`*.npz binary`**, rather than relying on git's content heuristic.
+* **`capture_golden.py` writes LF explicitly.** The legacy code emits CRLF on Windows
+  and LF on Linux for identical inputs, so capturing verbatim would have made the golden
+  depend on the platform that captured it. Regeneration is now idempotent: re-running
+  the capture on a clean tree produces byte-identical files.
+
 ## Two formatting quirks the comparison must tolerate
 
 Both were discovered while capturing this snapshot. Neither is a behaviour change; both
 make naive byte comparison non-portable.
 
-1. **Line endings are platform-dependent.** The legacy code writes via `print()` to a
-   file opened in text mode, so newline translation applies: the same script produces
-   **CRLF on Windows and LF on Linux**. The goldens here were captured on Windows and
-   are CRLF. `plumetools` writes `newline="\n"` explicitly so its output is
-   deterministic across platforms.
+1. **Line endings were platform-dependent.** Pinned as described above; the comparison
+   still normalises them, so a golden captured before that fix does not fail.
 
 2. **`boundaryT` values are emitted as `300`, not `300.0`.** `calculateT` returns the
    Python `int` literal `300`, and the writer interpolates `str(...)` of it. A config

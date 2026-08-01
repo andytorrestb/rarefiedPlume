@@ -131,8 +131,14 @@ def main() -> int:
     out = GOLDEN / "3d_inflow_v0.npz"
     np.savez_compressed(out, labels=np.array(labels), rhoN=rhoN, U=U, T=T)
 
+    # Normalise to LF. The legacy code writes via print() to a text-mode file, so
+    # it emits CRLF on Windows and LF on Linux for identical inputs -- capturing
+    # verbatim would make the golden depend on the platform it was captured on.
+    # .gitattributes marks these -text so git will not convert them either way.
     for name in FIELD_FILES:
-        shutil.copyfile(CASE / "0" / name, GOLDEN / f"{name}.txt")
+        text = (CASE / "0" / name).read_text(encoding="utf-8")
+        with open(GOLDEN / f"{name}.txt", "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
 
     print(f"\n  faces          : {len(labels)}")
     print(f"  rhoN [min,max] : {rhoN.min():.6e} {rhoN.max():.6e}")

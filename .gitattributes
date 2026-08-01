@@ -1,0 +1,51 @@
+# Line-ending policy.
+#
+# core.autocrlf is commonly enabled on Windows, which converts LF<->CRLF on
+# checkout and commit. For ordinary source that is harmless. For three kinds of
+# file here it is not, and the rules below pin them.
+#
+# There is deliberately NO `* text=auto` rule: adding one would renormalise
+# ~1500 already-committed files, including the historical Pointwise mesh, and
+# bury the actual change in a diff nobody could review.
+
+
+# --- regression reference data -------------------------------------------
+# Byte-exact snapshots of the pre-refactor output. Git must never rewrite them:
+# a line-ending conversion changes the bytes the goldens exist to pin, and makes
+# them show as modified on one platform but not another.
+#
+# The regression test normalises line endings before comparing, so a conversion
+# would not cause a false failure -- it would cause silent churn in the file that
+# is supposed to be the fixed point. Frozen here instead.
+tests/regression/golden/**   -text
+*.npz                        binary
+
+
+# --- OpenFOAM mesh data ---------------------------------------------------
+# constant/polyMesh cannot be regenerated for most cases (the Pointwise .pw
+# sources are binary and need an interactive licensed session), so these files
+# are irreplaceable. They were committed with mixed line endings -- `boundary`
+# and `points` are CRLF, `sets/*` are LF -- and normalising now would rewrite the
+# whole historical mesh. `-text` freezes each one exactly as committed.
+cases/**/constant/polyMesh/** -text
+
+
+# --- shell scripts --------------------------------------------------------
+# A CRLF checkout gives `#!/bin/bash\r`, which fails on Linux with
+# "bad interpreter: /bin/bash^M". These must be LF everywhere, regardless of the
+# checking-out platform's autocrlf setting.
+*.sh        text eol=lf
+Allrun      text eol=lf
+Allclean    text eol=lf
+Allmesh     text eol=lf
+monitor     text eol=lf
+
+
+# --- binary assets --------------------------------------------------------
+# Marked explicitly rather than relying on git's content heuristic.
+*.pw        binary
+*.glf.pw    binary
+*.png       binary
+*.PNG       binary
+*.vtk       binary
+*.asv       binary
