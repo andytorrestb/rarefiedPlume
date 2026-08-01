@@ -31,12 +31,13 @@ cd "${0%/*}" || exit 1
 
 CASE_NAME=${PWD##*/}
 NP=""
+NP_EXPLICIT=0
 SOLVE=1
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -s|--serial)   NP=1 ;;
-        -np)           shift; NP=${1:?"-np needs a subdomain count"} ;;
+        -s|--serial)   NP=1; NP_EXPLICIT=1 ;;
+        -np)           shift; NP=${1:?"-np needs a subdomain count"}; NP_EXPLICIT=1 ;;
         --no-solve)    SOLVE=0 ;;
         -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
         *)             echo "Allrun: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -103,6 +104,36 @@ PYTHON=$(have python && echo python || echo python3)
 $PYTHON -c "import plumetools" 2>/dev/null \
     || die "plumetools is not importable.
        Install it from the repository root:  pip install -e \".[test]\""
+
+# Refuse to launch a run that will certainly abort. Standard dsmcFoam's
+# FreeStream injects on every patch-type boundary, so any such patch other than
+# the inflow becomes a second inflow with a zero boundary temperature. Catching it
+# here saves a decomposePar and an eight-rank mpirun launch before the failure.
+if [ -d constant/polyMesh ]; then
+    BAD=$($PYTHON - <<'PYEOF' 2>/dev/null
+from plumetools.config import load_case_config
+from plumetools.mesh import read_boundary
+import warnings; warnings.simplefilter("ignore")
+cfg = load_case_config(".")
+if cfg.output.dialect == "standard":
+    extra = [n for n, p in read_boundary(".").items()
+             if p.type == "patch" and n != cfg.geometry.patch]
+    print(" ".join(extra))
+PYEOF
+)
+    if [ -n "${BAD:-}" ]; then
+        die "patch(es) [$BAD] have geometric type 'patch', and output.dialect is
+       'standard'. dsmcFoam's FreeStream injects on EVERY patch-type boundary
+       (FreeStream.C:57-62), so these become a second inflow and the run aborts
+       immediately with 'Zero boundary temperature detected'.
+
+       Fix, in case.yaml:      mesh.outer_patch_type: wall
+       then regenerate:        ./Allmesh --yes
+
+       That makes the outer boundary REFLECT rather than absorb -- a real physics
+       change. See docs/solver-compatibility.md."
+    fi
+fi
 
 APP=$(foam_entry application system/controlDict)
 [ -n "$APP" ] || die "no 'application' entry in system/controlDict"
@@ -180,15 +211,35 @@ fi
 # 4. solve
 # --------------------------------------------------------------------------- #
 
+# -np overrides system/decomposeParDict. Both decomposePar and the solver read
+# numberOfSubdomains from it, and the solver aborts if it disagrees with the rank
+# count, so an override has to reach both -- via OpenFOAM's -decomposeParDict.
+DECOMP_ARGS=""
+if [ "$NP_EXPLICIT" -eq 1 ] && [ "$NP" != "$(foam_entry numberOfSubdomains system/decomposeParDict)" ]; then
+    OVERRIDE=system/decomposeParDict.Allrun
+    cp system/decomposeParDict "$OVERRIDE"
+    # foamDictionary rather than sed: it parses the dictionary properly, so
+    # spacing cannot defeat it and there are no regex backslashes to get mangled.
+    have foamDictionary || die "foamDictionary is not on PATH, so -np cannot
+       override system/decomposeParDict. Source your OpenFOAM environment, or set
+       numberOfSubdomains to $NP there and drop -np."
+    foamDictionary "$OVERRIDE" -entry numberOfSubdomains -set "$NP" >/dev/null 2>&1 || die "could not set numberOfSubdomains in $OVERRIDE"
+    grep -q numberOfSubdomains "$OVERRIDE" || die "$OVERRIDE lost numberOfSubdomains"
+    DECOMP_ARGS="-decomposeParDict $OVERRIDE"
+    echo "    (-np $NP overrides decomposeParDict via $OVERRIDE)"
+fi
+
 if [ "$NP" -gt 1 ]; then
     have decomposePar || die "'decomposePar' is not on PATH"
     have mpirun || die "'mpirun' is not on PATH (use --serial to run in one process)"
-    run decomposePar decomposePar -force
-    run "$APP" mpirun -np "$NP" "$APP" -parallel
+    run decomposePar decomposePar -force $DECOMP_ARGS
+    run "$APP" mpirun -np "$NP" "$APP" -parallel $DECOMP_ARGS
     # reconstructPar is NOT optional. The archived 2d-wedge/run.sh decomposed,
     # ran in parallel, then called postProcess on the undecomposed case -- so it
     # read whatever was in the case directory, not the results (finding AR-11).
     have reconstructPar || die "'reconstructPar' is not on PATH"
+    # No -decomposeParDict here: reconstructPar does not accept it (it discovers
+    # the processor* directories itself) and rejects it as an invalid option.
     run reconstructPar reconstructPar
 else
     run "$APP" "$APP"

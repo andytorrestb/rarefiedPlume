@@ -37,6 +37,7 @@ __pycache__/
 cases/3d-inflow/system/blockMeshDict
 cases/3d-inflow/system/snappyHexMeshDict
 cases/3d-inflow/system/meshQualityDict
+cases/*/system/decomposeParDict.Allrun
 
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a

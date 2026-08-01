@@ -28,6 +28,15 @@ mesh:
   # inflow patch is then NOT a pure hemisphere, dipping to |r| = 0.4184 at the cap
   # face centre -- a 16.3% deficit that does NOT shrink with n_tangential.
   projection: searchable_sphere
+  # !! PHYSICS COMPROMISE, required to run on standard dsmcFoam !!
+  # 'patch' is correct -- particles should LEAVE a plume domain here. But
+  # FreeStream injects on every patch-type boundary with no selection list
+  # (FreeStream.C:57-62), so an outer 'patch' becomes a second inflow and the run
+  # aborts with "Zero boundary temperature detected".
+  # 'wall' excludes it (isType<> is an exact match) -- at the cost of an outer
+  # boundary that REFLECTS instead of absorbing: the plume expands into a closed
+  # box. Revert to 'patch' when using the MNF fork. See docs/solver-compatibility.md.
+  outer_patch_type: wall
   patch_names: {inflow: inflow, outer: vacuum, symmetry: sym}
   # --- snappy_hex_sphere only (ignored by block_mesh_ogrid) -------------------
   background_cell_size_m: 0.125  # background box cell size; keep <= R/4

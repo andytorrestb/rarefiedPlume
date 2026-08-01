@@ -75,6 +75,7 @@ if [ "$CLEAN_MESH" -eq 1 ]; then
 fi
 
 # Python bytecode from the case-local scripts.
+note system/decomposeParDict.Allrun
 note __pycache__
 
 if [ ${#targets[@]} -eq 0 ]; then
