@@ -24,10 +24,23 @@ GOLDEN = Path(__file__).resolve().parent / "golden"
 
 RTOL = 1e-12
 
-pytestmark = pytest.mark.skipif(
-    not (GOLDEN / "3d_inflow_v0.npz").exists(),
-    reason="golden not captured; run tests/regression/capture_golden.py",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not (GOLDEN / "3d_inflow_v0.npz").exists(),
+        reason="golden not captured; run tests/regression/capture_golden.py",
+    ),
+    # cases/3d-inflow/constant/polyMesh is gitignored -- ./Allmesh generates it --
+    # so a fresh clone has no mesh here and every test below would error on a
+    # missing file rather than reporting anything useful. The golden is bound to
+    # the Pointwise export specifically; restore it with
+    #   git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+    pytest.mark.skipif(
+        not (CASE / "constant" / "polyMesh" / "points").exists(),
+        reason="no mesh at cases/3d-inflow/constant/polyMesh (gitignored); restore "
+               "the Pointwise export with: git checkout pointwise-mesh-3d-inflow "
+               "-- cases/3d-inflow/constant/polyMesh",
+    ),
+]
 
 
 # --------------------------------------------------------------------------- #

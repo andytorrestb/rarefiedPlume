@@ -34,7 +34,11 @@
 # Run this only deliberately. ./Allrun never calls it.
 #
 # To restore the Pointwise mesh afterwards:
-#     git checkout -- constant/polyMesh
+#     git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+#
+# (constant/polyMesh is GITIGNORED for this case, because ./Allmesh generates it.
+#  A plain `git checkout -- constant/polyMesh` therefore does nothing at all --
+#  the Pointwise export lives on the tag above, not in HEAD.)
 # ==============================================================================
 
 set -uo pipefail
@@ -182,4 +186,5 @@ echo "    topoSet          -> constant/polyMesh/sets/inflow  (deleted above)"
 echo "    runInflow.py     -> 0/boundaryU, boundaryT, boundaryNumberDensity_*"
 echo ""
 echo "The regression golden will NOT match -- it is bound to the Pointwise mesh."
-echo "Restore it with:  git checkout -- constant/polyMesh"
+echo "Restore that mesh with:"
+echo "    git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh"

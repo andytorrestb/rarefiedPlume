@@ -8,17 +8,22 @@ processor*
 [0-9]*.[0-9]*
 !0.org
 
-# NOTE: constant/polyMesh IS deliberately tracked for every case, and must stay so.
-# The meshes were exported from Pointwise V18.5R2 -- a licensed, interactive tool
-# whose .pw project files are binary and cannot be scripted or regenerated here.
-# The committed polyMesh is therefore the only reproducible artefact, and it is the
-# substrate the regression golden is bound to. See docs/mesh.md.
+# --- meshes -------------------------------------------------------------------
+# 3d-inflow's polyMesh is GENERATED (./Allmesh, from case.yaml), so it is ignored:
+# every regeneration otherwise rewrote ~350k tracked lines and blocked branch
+# switches. Listed by full path -- a rule containing a slash anchors to the
+# repository root, which is what makes this match exactly one case.
+cases/3d-inflow/constant/polyMesh/
+
+# Every OTHER case's constant/polyMesh IS deliberately tracked, and must stay so.
+# Those meshes were exported from Pointwise V18.5R2 -- a licensed, interactive tool
+# whose .pw project files are binary and cannot be scripted or regenerated here --
+# and none of those cases has a generator. The committed polyMesh is the only copy.
+# Do NOT generalise the rule above to `**/constant/polyMesh/`.
 #
-# Rules of the form `constant/polyMesh/*` were previously listed here; because they
-# contain a slash they anchor to the repository root and matched nothing under
-# cases/*/, so they never had any effect (verify: `git check-ignore -v
-# cases/3d-inflow/constant/polyMesh/points` exits 1). They have been removed rather
-# than corrected, since the files should be tracked.
+# 3d-inflow's own Pointwise export is preserved by tag rather than in HEAD:
+#     git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+# See docs/mesh.md.
 
 *.eMesh
 constant/cellToRegion
