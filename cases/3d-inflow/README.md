@@ -65,6 +65,8 @@ All physical inputs live in [`case.yaml`](case.yaml). No Python needs editing to
 change a parameter — that is the point, and it is what broke down in the cases
 copied from here.
 
+## Meshing
+
 Regenerating the mesh is opt-in and destructive, and `Allrun` never does it:
 
 ```bash
@@ -73,12 +75,39 @@ Regenerating the mesh is opt-in and destructive, and `Allrun` never does it:
 git checkout -- constant/polyMesh    # restore the Pointwise mesh afterwards
 ```
 
-`mesh.projection: searchable_sphere` (the default) projects the block edges *and*
-faces onto a `searchableSphere` primitive, so the inflow patch is a true
-hemisphere. With `arc` only the twelve edges are curved and the face interiors
-stay ruled surfaces, dishing the cap face centre to |r| = 0.418 — a **16.3 %
-radial deficit that does not shrink with `n_tangential`**. `mesh.type:
-snappy_hex_sphere` is an alternative using the same primitive via snappyHexMesh.
+`mesh.type: snappy_hex_sphere` — **`blockMesh` builds the background box only;
+`snappyHexMesh` carves the inflow cavity.** The hemisphere is in no
+`blockMeshDict`.
+
+```
+blockMesh                  # 20 x 20 x 20 = 8000 uniform cells of 0.25 m
+snappyHexMesh -overwrite   # carve the cavity, 4 octree levels, snap to the sphere
+```
+
+Building the hemisphere in `blockMeshDict` instead needs a 5-block O-grid
+(`mesh.type: block_mesh_ogrid`), and that topology has a quality floor refinement
+cannot lift: five blocks meet at the projected cube corners and
+`radial_grading: 10` shears every cell in the graded direction. Measured with
+`checkMesh`:
+
+| | O-grid | snappyHexMesh |
+|---|---|---|
+| Max / mean non-orthogonality | 66.1 (limit 70) / 31.2 | **36.9 / 11.9** |
+| Max skewness | 1.79 | **0.76** |
+| Cells | 48 000 | **32 272** |
+| Inflow faces | 2000 quads | 5452 polygons |
+
+Surface resolution comes from the octree, not the box:
+`background_cell_size_m / 2**refinement_level = 0.25 / 16 = 0.015625 m`, 32 cells
+across the radius. A coarse background with more levels is what replaces the
+O-grid's `radial_grading` — fewer cells overall, on a 2.5× finer surface.
+Snapping to a `searchableSphere` **primitive** rather than an STL keeps the
+inflow vertices 8.3e-16 m from the true sphere.
+
+**`./Allmesh` deletes `constant/polyMesh/sets/`** along with the other index-based
+bookkeeping, because those labels address the old mesh. Re-run `./Allrun`
+afterwards: it redoes `topoSet` and then `runInflow.py`, in that order.
+
 See [docs/mesh.md](../../docs/mesh.md).
 
 Post-processing is **not** wired up yet (finding RP-17): the shipped

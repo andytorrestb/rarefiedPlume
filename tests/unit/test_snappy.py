@@ -20,6 +20,7 @@ from plumetools.foamio.snappy import (
     render_background_block_mesh_dict,
     render_mesh_quality_dict,
     render_snappy_hex_mesh_dict,
+    surface_cell_size,
     write_snappy_setup,
 )
 
@@ -55,6 +56,20 @@ def test_cell_size_larger_than_the_sphere_is_rejected(cfg):
         background_divisions(bad)
 
 
+def test_surface_resolution_comes_from_the_octree_not_the_background(cfg):
+    """The refinement level, not the background size, sets the surface cell.
+
+    A coarser background with one more level must land on the same surface size --
+    that equivalence is what lets the far field be cheap without coarsening the
+    plume source.
+    """
+    assert surface_cell_size(cfg) == pytest.approx(0.125 / 2 ** 3)
+    coarser = replace(cfg, mesh=replace(
+        cfg.mesh, background_cell_size_m=0.25, refinement_level=4))
+    assert surface_cell_size(coarser) == pytest.approx(surface_cell_size(cfg))
+    assert background_divisions(coarser) == (20, 20, 20)
+
+
 def test_nonpositive_cell_size_is_rejected(cfg):
     bad = replace(cfg, mesh=replace(cfg.mesh, background_cell_size_m=0.0))
     with pytest.raises(ValueError, match="must be positive"):
@@ -82,6 +97,37 @@ def test_location_in_mesh_avoids_every_symmetry_plane(cfg):
         assert v not in (0.0, limit, -limit)
 
 
+@pytest.mark.parametrize("size", [0.5, 0.25, 0.2, 0.125, 0.1, 0.0625])
+def test_location_in_mesh_never_lands_on_a_background_cell_face(cfg, size):
+    """The failure mode being guarded: a fixed fraction of the domain is on a cell
+    face whenever it happens to be a multiple of the cell size. ``0.5 * L`` is,
+    for every even ``nx`` -- which the default 40 is.
+
+    Snapping to the containing cell's centre makes it interior for any size, so
+    the seed tracks the grid rather than drifting onto it.
+    """
+    sized = replace(cfg, mesh=replace(cfg.mesh, background_cell_size_m=size))
+    nx, ny, nz = background_divisions(sized)
+    point = location_in_mesh(sized)
+
+    for value, lo, span, n in ((point[0], 0.0, L, nx),
+                               (point[1], -H, 2 * H, ny),
+                               (point[2], -H, 2 * H, nz)):
+        h = span / n
+        offset = ((value - lo) / h) % 1.0
+        assert offset == pytest.approx(0.5), (
+            f"{value} sits {offset:.3f} of the way through its cell -- "
+            f"0.0 would be a cell face")
+
+
+def test_location_in_mesh_stays_outside_the_cavity_when_snapped(cfg):
+    """Snapping to a cell centre moves the seed by up to half a cell; it must not
+    move it into the region snappyHexMesh is about to discard."""
+    for size in (0.5, 0.25, 0.125, 0.0625):
+        sized = replace(cfg, mesh=replace(cfg.mesh, background_cell_size_m=size))
+        assert np.linalg.norm(location_in_mesh(sized)) > R
+
+
 # --------------------------------------------------------------------------- #
 # background blockMeshDict
 # --------------------------------------------------------------------------- #
@@ -101,6 +147,18 @@ def test_background_declares_only_sym_and_vacuum(cfg):
     assert re.search(r"sym\s*\{\s*type symmetry;", text)
     assert re.search(r"vacuum\s*\{\s*type patch;", text)
     assert not re.search(r"^\s*inflow\s*$", text, re.M)
+
+
+def test_background_outer_patch_honours_outer_patch_type(cfg):
+    """Not cosmetic. Standard dsmcFoam's FreeStream injects on every patch-type
+    boundary, so an outer `patch` becomes a second inflow and the run aborts with
+    "Zero boundary temperature detected". The O-grid respects
+    `outer_patch_type`; the background box has to as well, or switching mesh.type
+    silently reintroduces the abort."""
+    walled = replace(cfg, mesh=replace(cfg.mesh, outer_patch_type="wall"))
+    text = render_background_block_mesh_dict(walled)
+    assert re.search(r"vacuum\s*\{\s*type wall;", text)
+    assert not re.search(r"vacuum\s*\{\s*type patch;", text)
 
 
 def test_background_box_spans_the_configured_domain(cfg):

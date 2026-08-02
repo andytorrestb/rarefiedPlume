@@ -47,10 +47,13 @@ class MeshConfig:
     """Parameters for generating the mesh.
 
     Attributes:
-        type: ``"block_mesh_ogrid"`` -- a 5-block hexahedral O-grid, rendered by
-            :mod:`plumetools.foamio.blockmesh`; or ``"snappy_hex_sphere"`` -- a
-            background box carved by snappyHexMesh, rendered by
-            :mod:`plumetools.foamio.snappy`.
+        type: ``"snappy_hex_sphere"`` -- a plain background box from blockMesh,
+            with the inflow cavity carved out of it by snappyHexMesh, rendered by
+            :mod:`plumetools.foamio.snappy`; or ``"block_mesh_ogrid"`` -- a
+            5-block hexahedral O-grid with the hemisphere built directly into
+            ``blockMeshDict``, rendered by :mod:`plumetools.foamio.blockmesh`.
+            The O-grid is exact and purely hexahedral but has a non-orthogonality
+            floor set by its block topology; see docs/mesh.md.
         sphere_radius_m: inflow surface radius [m]. Must equal
             ``geometry.sphere_radius_m``.
         box_half_width_m: domain half-extent in y and z [m].
@@ -66,9 +69,14 @@ class MeshConfig:
             projects the edges *and* faces onto a ``searchableSphere`` primitive,
             giving an exact surface at no extra cost. ``"none"`` is an accepted
             alias for ``"arc"``, kept because earlier configs used it.
-        background_cell_size_m: snappy only. Background box cell size [m]; must be
-            at most about R/4 or the cavity falls between cells.
-        refinement_level: snappy only. Octree levels at the sphere.
+        background_cell_size_m: snappy only. Background box cell size [m]. The
+            background has to *find* the sphere, not resolve it -- surface
+            resolution is ``background_cell_size_m / 2**refinement_level`` -- so
+            this may be as large as ``R`` (two cells across the diameter). Above
+            that the cavity falls between cells and the generator refuses.
+        refinement_level: snappy only. Octree levels at the sphere. Raising it
+            halves the surface cell size, so check it against ``controlDict``'s
+            ``deltaT``: a particle must not cross a full cell in one step.
         n_cells_between_levels: snappy only. Buffer cells between refinement levels.
         outer_patch_type: geometric type for the outer boundary. ``"patch"`` is
             physically right -- particles leave a plume domain there.

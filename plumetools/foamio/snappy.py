@@ -1,7 +1,8 @@
 r"""Generate a snappyHexMesh setup for the box-with-hemispherical-cavity geometry.
 
-An alternative to the projected O-grid in :mod:`plumetools.foamio.blockmesh`,
-selected by ``mesh.type: snappy_hex_sphere``.
+The generator ``mesh.type: snappy_hex_sphere`` selects, and what
+``cases/3d-inflow`` uses. The alternative is the projected O-grid in
+:mod:`plumetools.foamio.blockmesh`.
 
 The sphere is declared as a ``searchableSphere`` **primitive**, so no STL is
 needed and the surface is analytic: snappyHexMesh snaps to the true sphere rather
@@ -9,7 +10,9 @@ than to a triangulation of it.
 
 Three files are written:
 
-    system/blockMeshDict      a plain graded box -- the background mesh
+    system/blockMeshDict      a plain uniform box -- the background mesh, and the
+                              ONLY thing blockMesh builds: no sphere, no inflow
+                              patch, no curved edges
     system/snappyHexMeshDict  the searchableSphere and the castellate/snap controls
     system/meshQualityDict    quality limits, #included by the above
 
@@ -27,14 +30,35 @@ of the geometry rather than needing to be constructed. ``locationInMesh`` is
 placed in the fluid, outside the sphere, so snappyHexMesh keeps the region
 connected to it and discards the cavity interior.
 
+Resolution
+----------
+Only ``background_cell_size_m`` sizes the box. Surface resolution comes from the
+octree::
+
+    surface cell size = background_cell_size_m / 2**refinement_level
+
+so a coarse background with more levels concentrates cells at the source and
+leaves the near-vacuum far field coarse -- which is what the O-grid's
+``radial_grading`` was doing by hand. The background only has to *find* the
+sphere, so a few background cells across the diameter is enough; it does not have
+to resolve it.
+
 Trade-off against the projected O-grid
 --------------------------------------
 The projected O-grid (``mesh.type: block_mesh_ogrid`` with
 ``mesh.projection: searchable_sphere``) gives an exact sphere, a pure hexahedral
-mesh, a face count of exactly ``5*n^2``, and a structured radial grading. Prefer
-it unless something rules it out.
+mesh, and a face count of exactly ``5*n^2``.
 
-snappyHexMesh instead gives:
+What it does not give is **cell quality**. Five blocks meet at the cube corners
+projected onto the sphere, and ``radial_grading`` shears every cell in the
+graded direction: at the committed 20/24/10 settings ``checkMesh`` reports a max
+non-orthogonality of **66.1** (against a 70 limit) and a mean of **31.2**.
+Nothing about that improves with refinement -- it is the block topology.
+
+snappyHexMesh keeps the background hexes axis-aligned and orthogonal everywhere
+except the one cell layer it snaps. Measured on the same geometry at 0.25 m /
+level 4: max non-orthogonality **36.9**, mean **11.9**, max skewness **0.76**
+against 1.79, in **32 272** cells against 48 000. The price:
 
 * **Polyhedral cells and polygonal faces near the surface.** Castellation splits
   hexes and snapping produces faces with more than four vertices.
@@ -42,18 +66,23 @@ snappyHexMesh instead gives:
   those correctly -- but the legacy ``/3.0`` divisor would be wrong on every one
   of them (finding AR-01).
 * **An unpredictable inflow face count**, set by refinement level and snapping
-  rather than by a formula. Comparisons against the 2044-face Pointwise mesh stop
-  being like-for-like.
-* **Approximate radii.** Snapped points land on the sphere to within the snapping
-  tolerance, not exactly. :mod:`plumetools.verify_mesh` loosens its radius check
-  accordingly for this mesh type.
-* **A tangency risk.** The sphere meets ``x = 0`` tangentially, and snappyHexMesh
-  is at its least reliable where a surface grazes a domain boundary. Inspect the
-  resulting ``sym`` / ``inflow`` intersection before trusting it.
+  rather than by a formula -- 5452 at the case's settings. Comparisons against the
+  2044-face Pointwise mesh stop being like-for-like.
+* **Approximate radii, in principle.** Snapped points land on the sphere to within
+  the snapping tolerance, not exactly, so :mod:`plumetools.verify_mesh` loosens
+  its radius check for this mesh type. In practice a *primitive* costs nothing:
+  the worst measured vertex deviation is 8.3e-16 m, i.e. round-off. An STL would
+  not behave this way.
+* **A stair-step risk at the rim.** The sphere is bisected by ``x = 0``, so it
+  crosses that boundary at right angles -- the well-conditioned case, not a
+  tangency -- but the rim where ``inflow`` meets ``sym`` is still a surface /
+  domain-boundary intersection, which is where snapping is least predictable.
+  Inspect that circle before trusting the mesh.
 """
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 BANNER = """\
@@ -112,6 +141,10 @@ def background_divisions(cfg) -> tuple[int, int, int]:
 
     Returns ``(nx, ny, nz)``, each at least 1. Cells are kept as close to cubic as
     rounding allows, which is what snappyHexMesh's octree refinement assumes.
+
+    The background does not have to *resolve* the sphere -- ``refinement_level``
+    does that -- but it must **find** it, so a background cell may not exceed the
+    radius. At ``size == R`` the diameter still spans two cells.
     """
     R, H, L = _geometry(cfg)
     size = float(cfg.mesh.background_cell_size_m)
@@ -120,36 +153,83 @@ def background_divisions(cfg) -> tuple[int, int, int]:
     if size > R:
         raise ValueError(
             f"background_cell_size_m ({size}) exceeds the sphere radius ({R}); the "
-            f"cavity would fall between cells. Use at most R/4."
+            f"cavity would fall between cells. Use at most R = {R}, and set the "
+            f"surface resolution with refinement_level instead."
         )
     return (max(1, round(L / size)),
             max(1, round(2 * H / size)),
             max(1, round(2 * H / size)))
 
 
+def surface_cell_size(cfg) -> float:
+    """Cell size at the sphere: the background size halved once per octree level."""
+    _R, _H, L = _geometry(cfg)
+    nx, _ny, _nz = background_divisions(cfg)
+    return (L / nx) / (2 ** int(cfg.mesh.refinement_level))
+
+
 def location_in_mesh(cfg) -> tuple[float, float, float]:
     """A point in the fluid: inside the box, outside the sphere.
 
-    Deliberately off-axis and off any symmetry plane. A ``locationInMesh`` sitting
-    exactly on a face, edge, or plane of symmetry is a classic way to make
-    snappyHexMesh keep the wrong region or fail outright.
+    A ``locationInMesh`` sitting exactly on a face, an edge, or a plane of
+    symmetry is a classic way to make snappyHexMesh keep the wrong region or fail
+    outright -- and "off-axis" is not sufficient on its own. An off-axis fraction
+    of the domain still lands on a cell face whenever it happens to be a multiple
+    of the background cell size, which ``0.5 * L`` is for every even ``nx``.
+
+    So the point is snapped to the **centre** of the background cell containing
+    it. A cell centre is interior by construction, whatever the cell size, and the
+    seed then moves with the grid instead of drifting onto it.
     """
-    _R, H, L = _geometry(cfg)
-    return (0.5 * L, 0.31 * H, 0.27 * H)
+    R, H, L = _geometry(cfg)
+    nx, ny, nz = background_divisions(cfg)
+
+    def index_of(value: float, lo: float, span: float, n: int) -> int:
+        return min(n - 1, max(0, int((value - lo) / (span / n))))
+
+    def centre(index: int, lo: float, span: float, n: int) -> float:
+        return lo + (index + 0.5) * (span / n)
+
+    # Fractions chosen to sit well inside the box and off both symmetry planes.
+    iy = index_of(0.3313 * H, -H, 2 * H, ny)
+    iz = index_of(0.2371 * H, -H, 2 * H, nz)
+    # On a coarse background the two fractions can round into the same cell, which
+    # would put the seed on the y = z diagonal -- also a plane of symmetry here,
+    # since the cross-section is square. One cell of separation is enough.
+    if ny == nz and iy == iz:
+        iz = iz - 1 if iz > 0 else iz + 1
+
+    point = (centre(index_of(0.4137 * L, 0.0, L, nx), 0.0, L, nx),
+             centre(iy, -H, 2 * H, ny),
+             centre(iz, -H, 2 * H, nz))
+
+    if math.dist(point, (0.0, 0.0, 0.0)) <= R:
+        raise ValueError(
+            f"locationInMesh {point} is inside the sphere (radius {R}); "
+            f"snappyHexMesh would keep the cavity and discard the fluid"
+        )
+    return point
 
 
 def render_background_block_mesh_dict(cfg) -> str:
-    """A plain graded box for snappyHexMesh to refine.
+    """A plain uniform box for snappyHexMesh to refine.
 
     Patches: ``sym`` on ``x = 0``, ``vacuum`` on the other five faces. The
     ``inflow`` patch does not exist yet -- snappyHexMesh creates it when it carves
     the cavity.
+
+    The outer patch takes ``mesh.outer_patch_type``, exactly as the O-grid does.
+    It is not cosmetic: standard dsmcFoam's FreeStream injects on every
+    ``patch``-type boundary, so leaving this as ``patch`` while the case runs the
+    standard solver turns the vacuum boundary into a second inflow and aborts the
+    run. See docs/solver-compatibility.md.
     """
     R, H, L = _geometry(cfg)
     nx, ny, nz = background_divisions(cfg)
     names = cfg.mesh.patch_names
     p_outer = names.get("outer", "vacuum")
     p_sym = names.get("symmetry", "sym")
+    t_outer = cfg.mesh.outer_patch_type
 
     # Box corners: 0-3 at x = 0, 4-7 at x = L, both wound (-y-z, +y-z, +y+z, -y+z).
     verts = [
@@ -160,7 +240,8 @@ def render_background_block_mesh_dict(cfg) -> str:
     lines = _header(
         "blockMeshDict",
         f"Background box for snappyHexMesh: {nx}x{ny}x{nz} = {nx * ny * nz} cells, "
-        f"cell size ~{_fmt(L / nx)} m.",
+        f"cell size ~{_fmt(L / nx)} m. snappyHexMesh refines this down to "
+        f"~{_fmt(surface_cell_size(cfg))} m at the sphere.",
     )
     lines += ["scale   1;", "", "vertices", "("]
     lines += [f"    ({_fmt(x)} {_fmt(y)} {_fmt(z)})" for x, y, z in verts]
@@ -191,8 +272,10 @@ def render_background_block_mesh_dict(cfg) -> str:
         "",
         f"    {p_outer}",
         "    {",
-        "        type patch;",
-        "        // the remaining five box faces",
+        f"        type {t_outer};",
+        "        // the remaining five box faces"
+        + ("  --  WALL: reflects, does not absorb (see docs/solver-compatibility.md)"
+           if t_outer == "wall" else ""),
         "        faces",
         "        (",
         "            (4 5 6 7)   // x = L",
@@ -216,20 +299,20 @@ def render_background_block_mesh_dict(cfg) -> str:
 
 def render_snappy_hex_mesh_dict(cfg) -> str:
     """The searchableSphere primitive plus castellate and snap controls."""
-    R, H, L = _geometry(cfg)
+    R, _H, _L = _geometry(cfg)
     m = cfg.mesh
     level = int(m.refinement_level)
     if level < 0:
         raise ValueError(f"refinement_level must be >= 0, got {level}")
     inflow = m.patch_names.get("inflow", "inflow")
     lx, ly, lz = location_in_mesh(cfg)
-    _nx, _ny, _nz = background_divisions(cfg)
-    finest = (L / _nx) / (2 ** level)
+    finest = surface_cell_size(cfg)
 
     lines = _header(
         "snappyHexMeshDict",
         f"Carve a hemispherical cavity of radius {_fmt(R)} m out of the background box. "
-        f"Refinement level {level} -> ~{_fmt(finest)} m at the surface.",
+        f"Refinement level {level} -> ~{_fmt(finest)} m at the surface "
+        f"({_fmt(R / finest)} cells across the radius).",
     )
     lines += [
         "castellatedMesh true;",
@@ -294,8 +377,10 @@ def render_snappy_hex_mesh_dict(cfg) -> str:
         "    tolerance       2.0;",
         "    nSolveIter      50;",
         "    nRelaxIter      5;",
-        "    // Feature snapping is off: a sphere has no feature edges to capture, and",
-        "    // enabling it near the x = 0 tangency tends to pull points off the surface.",
+        "    // Feature snapping is off: a sphere has no feature edges to capture. The",
+        "    // one edge-like curve here is the rim where the sphere crosses x = 0, and",
+        "    // that is a surface / domain-boundary intersection, which feature snapping",
+        "    // tends to pull off the surface rather than onto it.",
         "    nFeatureSnapIter        10;",
         "    implicitFeatureSnap     false;",
         "    explicitFeatureSnap     false;",
