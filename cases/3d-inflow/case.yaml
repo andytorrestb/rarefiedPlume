@@ -10,24 +10,22 @@
 
 model: source_flow
 
-# --- mesh generation (plumetools/foamio/blockmesh.py) -------------------------
+# --- mesh generation (plumetools/foamio/snappy.py) ----------------------------
 # Measured from the committed Pointwise mesh: a 5 x 5 x 5 m box with a
 # hemispherical inflow cavity of radius exactly 0.5 m at the origin, on the x = 0
 # symmetry plane, opening toward +x.
+#
+# blockMesh builds the BACKGROUND BOX only. snappyHexMesh carves the inflow
+# cavity out of it, snapping to a searchableSphere primitive. Putting the
+# hemisphere in the blockMeshDict instead (mesh.type: block_mesh_ogrid) works, but
+# the five-block O-grid needed radial_grading 10 to reach the far field and
+# checkMesh reported max non-orthogonality 66.1 / mean 31.2 -- a property of the
+# block topology, so no amount of refinement fixed it. See docs/mesh.md.
 mesh:
-  type: block_mesh_ogrid       # 5-block hemispherical O-grid  (or: snappy_hex_sphere)
+  type: snappy_hex_sphere      # blockMesh background + snappyHexMesh cavity
   sphere_radius_m: 0.5         # must equal geometry.sphere_radius_m (validated)
   box_half_width_m: 2.5        # y, z extent -> [-2.5, 2.5]
   box_length_m: 5.0            # x extent    -> [0, 5]
-  n_tangential: 20             # -> 5 * 20^2 = 2000 inflow quads (Pointwise had 2044 tris)
-  n_radial: 24                 # -> 5 * 20^2 * 24 = 48 000 cells
-  radial_grading: 10.0         # cluster toward the sphere
-  # searchable_sphere projects the block edges AND faces onto a searchableSphere
-  # primitive, so every surface point lies on the sphere. With 'arc' only the
-  # twelve edges are curved and the face interiors stay ruled surfaces: the
-  # inflow patch is then NOT a pure hemisphere, dipping to |r| = 0.4184 at the cap
-  # face centre -- a 16.3% deficit that does NOT shrink with n_tangential.
-  projection: searchable_sphere
   # !! PHYSICS COMPROMISE, required to run on standard dsmcFoam !!
   # 'patch' is correct -- particles should LEAVE a plume domain here. But
   # FreeStream injects on every patch-type boundary with no selection list
@@ -38,10 +36,29 @@ mesh:
   # box. Revert to 'patch' when using the MNF fork. See docs/solver-compatibility.md.
   outer_patch_type: wall
   patch_names: {inflow: inflow, outer: vacuum, symmetry: sym}
-  # --- snappy_hex_sphere only (ignored by block_mesh_ogrid) -------------------
-  background_cell_size_m: 0.125  # background box cell size; keep <= R/4
-  refinement_level: 3            # octree levels at the sphere
-  n_cells_between_levels: 3
+  # --- snappy_hex_sphere ------------------------------------------------------
+  # Surface cell size = background_cell_size_m / 2**refinement_level
+  #                   = 0.25 / 16 = 0.015625 m, i.e. 32 cells across the radius.
+  # A coarse background with more levels is what replaces the O-grid's
+  # radial_grading: cells go where the plume is dense and the near-vacuum far
+  # field stays cheap.
+  #
+  # MEASURED (2026-08-02, checkMesh + verify_mesh): 20^3 = 8000 background cells
+  # refine to 32 272 total, BELOW the O-grid's 48 000, with 5452 inflow faces
+  # (Pointwise had 2044 tris). Max non-orthogonality 36.9 / mean 11.9, against
+  # the O-grid's 66.1 / 31.2; max skewness 0.76 against 1.79.
+  #
+  # Do not push refinement_level past 4 without lowering controlDict deltaT.
+  # At 1e-5 s and ~800 m/s a particle already crosses half a 0.015625 m cell per
+  # step; one more level puts it over a full cell, which DSMC does not tolerate.
+  background_cell_size_m: 0.25   # background box cell size; must be <= R
+  refinement_level: 4            # octree levels at the sphere
+  n_cells_between_levels: 2      # buffer cells per level transition
+  # --- block_mesh_ogrid only (ignored by snappy_hex_sphere) -------------------
+  n_tangential: 20             # -> 5 * 20^2 = 2000 inflow quads
+  n_radial: 24                 # -> 5 * 20^2 * 24 = 48 000 cells
+  radial_grading: 10.0         # cluster toward the sphere
+  projection: searchable_sphere  # project edges AND faces; 'arc' dishes the faces
 
 # --- inflow surface -----------------------------------------------------------
 geometry:

@@ -17,8 +17,8 @@ expanding to 20 m. Running `blockMesh` — the first thing anyone attempting
 reproduction would try — would have **silently overwritten `constant/polyMesh`**
 and replaced it with an unrelated 2D wedge (finding FD-08).
 
-`plumetools/foamio/blockmesh.py` generates a correct dictionary from `case.yaml`,
-making the geometry text, diffable, parametric and version-controlled.
+`plumetools` generates the dictionaries from `case.yaml`, making the geometry
+text, diffable, parametric and version-controlled.
 
 ## The geometry
 
@@ -48,7 +48,137 @@ The plume axis is **+x**. That is inferred from the one-sided hemisphere, from
 `revolutionAxis "x"` in `dsmcProperties`, and from the first sampling line — it is
 stated nowhere in the original code.
 
-## Topology — a 5-block O-grid
+## The pipeline — `mesh.type: snappy_hex_sphere` *(what the case uses)*
+
+**`blockMesh` builds the background box. `snappyHexMesh` carves the inflow
+cavity.** The hemisphere appears in no `blockMeshDict`.
+
+```
+system/blockMeshDict       a plain uniform box — the background mesh
+system/snappyHexMeshDict   the searchableSphere, castellate and snap controls
+system/meshQualityDict     quality limits, #included by the above
+
+blockMesh                  # background box: 20 × 20 × 20 = 8000 cells of 0.25 m
+snappyHexMesh -overwrite   # carve the cavity, refine 4 levels, snap to the sphere
+```
+
+The background `blockMeshDict` is genuinely plain: eight vertices, one
+`hex (0 1 2 3 4 5 6 7) (20 20 20) simpleGrading (1 1 1)`, an empty `edges` block,
+and two patches — `sym` on `x = 0` and `vacuum` on the other five faces. There is
+no `geometry` section and no `inflow` patch; snappyHexMesh creates that patch when
+it carves.
+
+### Why the hemisphere moved out of `blockMeshDict`
+
+Building it there requires the 5-block O-grid below, and that topology has a
+quality floor that refinement cannot lift. Five blocks meet at the cube corners
+projected onto the sphere, and `radial_grading` shears every cell in the graded
+direction — both are properties of the block topology, so raising `n_tangential`
+puts more cells on the same badly conditioned arrangement.
+
+snappyHexMesh keeps the background hexes axis-aligned and orthogonal everywhere
+except the layer it snaps, so the bulk of the mesh is a perfect Cartesian grid and
+non-orthogonality is confined to the cells touching the sphere.
+
+**Both meshed and measured** with `checkMesh` — O-grid at `n_tangential: 20` /
+`n_radial: 24` / `radial_grading: 10`, snappy at `0.25 m` / level 4:
+
+| | O-grid | snappyHexMesh |
+|---|---|---|
+| Max non-orthogonality | 66.1 (limit 70) | **36.9** |
+| Mean non-orthogonality | 31.2 | **11.9** |
+| Max skewness | 1.79 | **0.76** |
+| Max aspect ratio | 4.05 | 3.74 |
+| Cells | 48 000 | **32 272** |
+| Inflow faces | 2000 quads | 5452 quads/pentagons/hexagons |
+| Total volume | 124.738729 m³ | 124.738350 m³ |
+
+The mean is the number that matters most: 31.2 → 11.9 is the graded O-grid's
+shear disappearing. Cell mix is 25 368 hexahedra, 792 prisms and 6112 polyhedra —
+the polyhedra are the snapped layer.
+
+### The cavity falls out of the geometry
+
+The sphere is centred at the origin, which lies **on** the `x = 0` face of the box
+(`x ∈ [0, L]`). Only its `+x` half intersects the mesh, so that half is what gets
+carved — the hemisphere is not constructed, it is what remains.
+
+The region inside the cavity is bounded by the sphere on the `+x` side and by the
+`sym` patch at `x = 0`, which makes it disconnected from the fluid.
+`locationInMesh` sits in the fluid, so snappyHexMesh keeps that region and
+discards the cavity interior.
+
+The geometry entry is *named* `inflow`, because snappyHexMesh names the patch it
+creates after the surface. `patchInfo` sets `type patch` — never `wall`, which
+would make the plume source a no-slip surface.
+
+### Resolution
+
+Only `background_cell_size_m` sizes the box; the octree sets the surface:
+
+```
+surface cell size = background_cell_size_m / 2**refinement_level
+                  = 0.25 / 2**4 = 0.015625 m
+```
+
+so a **coarse background with more levels** is what replaces the O-grid's
+`radial_grading` — cells go where the plume is dense, and the near-vacuum far
+field stays cheap. At the case's settings that is 8000 background cells refining
+to **32 272 total, below the O-grid's 48 000**, with a surface 2.5× finer.
+snappyHexMesh takes about 3 s to do it.
+
+The background only has to *find* the sphere, not resolve it, so
+`background_cell_size_m` may be as large as `R` (two cells across the diameter).
+Above that the generator refuses, because the cavity would fall between cells.
+
+> **Do not raise `refinement_level` past 4 without lowering `controlDict`'s
+> `deltaT`.** At `1e-5` s and ~800 m/s a particle already crosses half a
+> 0.015625 m cell per step; one more level puts it over a full cell, which DSMC
+> does not tolerate.
+
+`n_cells_between_levels: 2` sets the buffer between octree levels. Fewer means a
+cheaper but more abrupt transition.
+
+### `locationInMesh` — a cell centre, not a fraction
+
+A `locationInMesh` on a face, an edge, or a plane of symmetry is a classic way to
+make snappyHexMesh keep the wrong region or fail outright, and *off-axis is not
+sufficient on its own*: any fixed fraction of the domain lands exactly on a cell
+face whenever it happens to be a multiple of the background cell size. The
+previous `0.5 * L` did, for every even `nx` — including the default 40.
+
+The seed is therefore snapped to the **centre of the background cell containing
+it**. A cell centre is interior by construction at any cell size, so the point
+tracks the grid instead of drifting onto it. A unit test sweeps six cell sizes and
+asserts the seed sits at exactly 0.5 of the way through its cell on every axis.
+
+### The rim, and what to inspect
+
+The sphere is *bisected* by `x = 0`, so it crosses that plane at right angles —
+the well-conditioned case, not a tangency. But the rim where `inflow` meets `sym`
+is still a surface / domain-boundary intersection, which is where snapping is
+least predictable. Feature snapping is deliberately **off** (a sphere has no
+feature edges, and enabling it tends to pull rim points off the surface rather
+than onto it), so that circle is the first thing to look at in ParaView.
+
+In the meshed result it behaves: the lowest inflow face centroid sits at
+x = 0.0067 m, so the patch closes cleanly onto `sym` rather than wrapping past it,
+and `sym` comes out as 1420 faces — a 5 × 5 square minus the r = 0.5 circle, as it
+should be. snappyHexMesh does emit a handful of `Displacement ... points through
+the surrounding patch faces` warnings while snapping the rim, then reports
+`Finished meshing without any errors`.
+
+Snapping to a **primitive** rather than an STL turns out to cost nothing in
+accuracy: the worst inflow-vertex deviation from r = 0.5 m is **8.3e-16 m**, which
+is round-off, not tolerance. The remaining 0.04 % face-centroid deficit
+(0.499803 … 0.499919) is ordinary faceting.
+
+## Alternative: `mesh.type: block_mesh_ogrid`
+
+The original generator, and no longer what this case uses. It builds the
+hemisphere directly in `blockMeshDict` as a 5-block O-grid, giving an exact
+sphere, pure hexahedra, and a face count of exactly `5·n²` — at the quality cost
+tabulated above.
 
 Take the +x half of a cube inscribed in the sphere and connect each of its five
 outward faces to the corresponding box face. With `R` the sphere radius, `H` the
@@ -98,7 +228,7 @@ is not obvious by inspection. Boundary faces are classified *geometrically* (on
 the sphere → `inflow`; at x = 0 → `sym`; on a box face → `vacuum`) rather than by
 index lists, so a change to the block table cannot silently mis-assign a patch.
 
-## Resolution
+### Resolution (O-grid)
 
 Inflow faces = `5 · n_tangential²`; cells = `5 · n_tangential² · n_radial`.
 
@@ -109,10 +239,12 @@ mesh's 2044 triangles, which keeps the two comparable. `n_radial: 24` with
 **This is a starting resolution, not a converged one.** Mesh-convergence
 requirements are explicitly out of scope here.
 
-## ⚠ blockMesh gives hexahedra — the centroid consequence
+## ⚠ A generated mesh is not tetrahedral — the centroid consequence
 
 The committed Pointwise mesh is **tetrahedral** with **triangular** inflow faces.
-`blockMesh` produces **hexahedra** with **quadrilateral** inflow faces.
+`blockMesh` produces **hexahedra** with **quadrilateral** inflow faces, and
+snappyHexMesh produces **polyhedra** with **polygonal** ones — faces with more
+than four vertices are the norm, not the exception, on a snapped surface.
 
 The pre-refactor `calculateCentroid` divided the vertex sum by the literal `3.0`
 regardless of vertex count. On a quad that gives exactly **4/3** of the true
@@ -122,8 +254,9 @@ wake-cylinder cases, whose inflow faces are quads — measured code centroid mea
 
 `plumetools.geometry.centroid` divides by `len(vertices)`, which is
 arithmetically identical on triangles (so the golden is untouched) and correct on
-quads. **Enabling mesh generation before that fix would have reproduced AR-01 in
-the reference case.** Do not reintroduce the `3.0`.
+quads and polygons alike. **Enabling mesh generation before that fix would have
+reproduced AR-01 in the reference case**, and the snapped mesh would have hit it
+on nearly every face. Do not reintroduce the `3.0`.
 
 Two other consequences:
 
@@ -135,9 +268,10 @@ Two other consequences:
   so a mismatch would evaluate the source flow on a different sphere than the one
   meshed (finding SM-09).
 
-## Curvature: `arc` versus `project` — and why `arc` is not enough
+## O-grid curvature: `arc` versus `project` — and why `arc` is not enough
 
-`mesh.projection` selects how the inflow surface is made curved.
+`mesh.projection` selects how the **O-grid's** inflow surface is made curved. It
+does nothing under `snappy_hex_sphere`, which snaps to the primitive directly.
 
 ### `arc` — exact edges, **wrong faces**
 
@@ -168,7 +302,7 @@ alone, so increasing `n_tangential` puts *more* points on the same wrong surface
 This is a topological error, not a resolution error — which is why it survives
 any amount of mesh refinement and why `checkMesh` is perfectly happy with it.
 
-### `searchable_sphere` — exact surface *(default)*
+### `searchable_sphere` — exact surface *(the O-grid default)*
 
 Declares the sphere as an analytic primitive and projects both the edges **and**
 the five inflow faces onto it:
@@ -217,49 +351,24 @@ unlike the 16.31 % which did not.
 `verify_mesh` measures the face-centroid deficit and reports it, so the
 difference is visible without inspecting the mesh by eye.
 
-## Alternative: `mesh.type: snappy_hex_sphere`
+## Choosing between the two
 
-A second generator, using snappyHexMesh with the same `searchableSphere`
-primitive instead of an O-grid. Set `mesh.type: snappy_hex_sphere` and `Allmesh`
-writes three dictionaries and runs a two-stage pipeline:
-
-```
-system/blockMeshDict       a plain graded box -- the background mesh
-system/snappyHexMeshDict   the searchableSphere, castellate and snap controls
-system/meshQualityDict     quality limits, #included by the above
-
-blockMesh                  # background box
-snappyHexMesh -overwrite   # carve the cavity, snap to the sphere
-```
-
-The hemisphere falls out of the geometry rather than being constructed: the
-sphere is centred on the `x = 0` face of the box, so only its `+x` half
-intersects the mesh. `locationInMesh` is placed in the fluid, off every symmetry
-plane, so snappyHexMesh keeps the region connected to it and discards the cavity
-interior. The geometry entry is *named* `inflow`, because snappyHexMesh names the
-patch it creates after the surface. `patchInfo` sets `type patch` — never `wall`,
-which would make the plume source a no-slip surface.
-
-Controls: `background_cell_size_m` (≤ R/4, else the cavity falls between cells),
-`refinement_level`, `n_cells_between_levels`.
-
-**Prefer the projected O-grid unless something rules it out.** snappyHexMesh
-gives up several things the O-grid has:
-
-| | projected O-grid | snappyHexMesh |
+| | snappyHexMesh *(current)* | projected O-grid |
 |---|---|---|
-| Cells | pure hexahedra | polyhedra near the surface |
-| Inflow faces | quads, exactly `5·n²` | polygons, count set by refinement |
-| Surface accuracy | exact | within the snapping tolerance |
-| Radial grading | structured, controllable | octree levels only |
-| Comparability with the 2044-face Pointwise mesh | direct | not like-for-like |
+| Max / mean non-orthogonality | **36.9 / 11.9** | 66.1 / 31.2 |
+| Cells | 32 272; polyhedra near the surface, hexes elsewhere | 48 000 pure hexahedra |
+| Inflow faces | 5452 polygons, count set by refinement | 2000 quads, exactly `5·n²` |
+| Surface accuracy | 8.3e-16 m from the primitive | exact |
+| Near-source clustering | octree levels | structured `radial_grading` |
+| Comparability with the 2044-face Pointwise mesh | not like-for-like | not like-for-like |
 
-Two consequences worth knowing. First, snapped faces have more than four
-vertices, so the legacy `/3.0` centroid divisor would be wrong on *every one of
-them* — `plumetools.geometry.centroid` divides by `len(vertices)`, which is what
-makes this mesh type usable at all (finding AR-01). Second, the sphere meets
-`x = 0` tangentially, and snappyHexMesh is least reliable where a surface grazes
-a domain boundary; inspect the `sym`/`inflow` intersection before trusting it.
+The O-grid wins on face-count predictability; snappyHexMesh wins on cell quality
+and cell count, which is why this case uses it — and because the surface is a
+primitive rather than an STL, it gives up essentially nothing on accuracy. Switch
+back by setting
+`mesh.type: block_mesh_ogrid` in `case.yaml` and re-running `./Allmesh --yes` —
+nothing else in the case needs to change, and `Allmesh` picks up the different
+pipeline on its own.
 
 ## Running it
 
@@ -270,14 +379,30 @@ cd cases/3d-inflow
 ```
 
 `Allmesh` dispatches on `mesh.type`, runs the matching pipeline, then runs
-`python -m plumetools.verify_mesh .`. It requires an explicit `--yes`, and
-`Allrun` never calls it.
+`checkMesh` and `python -m plumetools.verify_mesh .` and prints the quality
+numbers. It requires an explicit `--yes`, and `Allrun` never calls it.
 
 **It overwrites `constant/polyMesh`.** Restore the Pointwise mesh with:
 
 ```bash
 git checkout -- constant/polyMesh
 ```
+
+### What `Allmesh` clears first
+
+`blockMesh` rewrites `points`, `faces`, `owner`, `neighbour` and `boundary` —
+and nothing else. Everything else in `constant/polyMesh` addresses the *previous*
+mesh by index, so `Allmesh` deletes it before meshing:
+
+| Removed | Why it would break the next mesh |
+|---|---|
+| `sets/` | Face labels into the old mesh. `runInflow.py` **prefers** `sets/<patch>` over the patch's face range, and only a count mismatch is caught — equal counts would apply the inflow model to the wrong faces. |
+| `cellLevel`, `pointLevel`, `level0Edge`, `refinementHistory`, `surfaceIndex` | snappyHexMesh's own octree bookkeeping from a previous `-overwrite` run, sized for that mesh. |
+| `cellZones`, `faceZones`, `pointZones` | Pointwise export leftovers, addressed by index. |
+
+All of them are regenerated by the pipeline or by `topoSet`, so removing them
+costs nothing. Because `sets/inflow` is deleted, **`./Allrun` must be re-run after
+`./Allmesh`** — it runs `topoSet` and then `runInflow.py`, in that order.
 
 ## Verification
 
