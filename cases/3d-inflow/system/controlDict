@@ -14,7 +14,9 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-application     dsmcFoam+;
+// OpenFOAM's own solver, not the MNF fork's dsmcFoam+.
+// Allrun reads this entry, so switching solvers is a one-line change here.
+application     dsmcFoam;
 
 startFrom       latestTime;
 

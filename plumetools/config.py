@@ -70,6 +70,21 @@ class MeshConfig:
             at most about R/4 or the cavity falls between cells.
         refinement_level: snappy only. Octree levels at the sphere.
         n_cells_between_levels: snappy only. Buffer cells between refinement levels.
+        outer_patch_type: geometric type for the outer boundary. ``"patch"`` is
+            physically right -- particles leave a plume domain there.
+
+            But standard dsmcFoam's FreeStream injects on **every**
+            ``isType<polyPatch>`` boundary, with no selection list
+            (``FreeStream.C:57-62``), so an outer ``patch`` also becomes an
+            inflow. It aborts immediately with "Zero boundary temperature
+            detected", because boundaryT is zeroGradient there and evaluates to
+            the zero internal field.
+
+            Setting ``"wall"`` excludes it -- ``isType<>`` is an exact match --
+            and lets the case run. The cost is that the outer boundary then
+            REFLECTS instead of absorbing: the plume expands into a closed box.
+            That is a real physics change, so it is opt-in, not the default.
+            See docs/solver-compatibility.md.
         patch_names: maps the roles ``inflow`` / ``outer`` / ``symmetry`` to the
             patch names written into the mesh.
     """
@@ -82,6 +97,7 @@ class MeshConfig:
     n_radial: int = 24
     radial_grading: float = 10.0
     projection: str = "arc"
+    outer_patch_type: str = "patch"
     background_cell_size_m: float = 0.125
     refinement_level: int = 3
     n_cells_between_levels: int = 3
@@ -120,8 +136,28 @@ class AngularConfig:
     quadrature_points: int = 500
 
 
+#: Which dsmcFoam the case targets. The two read different boundary field types.
+DIALECTS = ("standard", "mnf")
+
+
 @dataclass(frozen=True)
 class OutputConfig:
+    """How the ``0/`` inflow fields are written.
+
+    Attributes:
+        dialect: ``"standard"`` for OpenFOAM's own ``dsmcFoam`` (v2512 checked),
+            ``"mnf"`` for the micro/nano-flow fork's ``dsmcFoam+``. They differ in
+            one load-bearing way: standard reads ``0/boundaryT`` as a
+            **volScalarField**, while the fork reads a **volVectorField** holding
+            per-component translational temperature as ``(T 0 0)``. Writing the
+            wrong one is a hard read failure, not a silent mis-run.
+
+            Standard also has no per-face number density -- see
+            :mod:`plumetools.foamio.fields` and docs/solver-compatibility.md.
+        patches: non-inflow patch specs, in output order.
+    """
+
+    dialect: str = "standard"
     patches: dict = field(default_factory=dict)
 
 
@@ -279,6 +315,19 @@ def validate_against_case(cfg: CaseConfig, case_dir: Path, path: Path) -> None:
             f"{path}: unknown mesh.projection {cfg.mesh.projection!r}; "
             f"valid: {list(PROJECTIONS)}"
         )
+    if cfg.output.dialect == "standard" and cfg.mesh.outer_patch_type == "patch":
+        warnings.warn(
+            f"{path}: output.dialect is 'standard' and mesh.outer_patch_type is "
+            f"'patch'. Standard dsmcFoam's FreeStream injects on EVERY patch-type "
+            f"boundary (FreeStream.C:57-62), so the outer boundary becomes a second "
+            f"inflow and the run aborts at the first timestep with 'Zero boundary "
+            f"temperature detected'. Set mesh.outer_patch_type: wall to exclude it "
+            f"-- at the cost of a reflecting, non-absorbing outer boundary. See "
+            f"docs/solver-compatibility.md.",
+            ConfigWarning,
+            stacklevel=2,
+        )
+
     if cfg.mesh.type == "block_mesh_ogrid" and cfg.mesh.projection in ("arc", "none"):
         warnings.warn(
             f"{path}: mesh.projection is {cfg.mesh.projection!r}, so only the twelve "

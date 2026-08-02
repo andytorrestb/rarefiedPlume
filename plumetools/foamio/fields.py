@@ -160,6 +160,8 @@ def write_inflow_fields(out_dir: Path, inflow, cfg) -> None:
     patches = dict(cfg.output.patches)
     species = cfg.gas.species_name
 
+    dialect = getattr(cfg.output, "dialect", "mnf")
+
     u_rows = [
         f"            ({repr(float(u))} {repr(float(v))} {repr(float(w))})"
         for u, v, w in inflow.U
@@ -168,17 +170,132 @@ def write_inflow_fields(out_dir: Path, inflow, cfg) -> None:
         out_dir / "boundaryU", "boundaryU", "[0 1 -1 0 0 0 0]", u_rows, patches,
     )
 
-    t_rows = [f"            ( {_fmt_temperature(t)} 0.0 0.0 )" for t in inflow.T]
-    write_vol_vector_field(
-        out_dir / "boundaryT", "boundaryT", "[0 0 0 1 0 0 0]", t_rows, patches,
-    )
+    # boundaryT's TYPE differs between the two solvers, and getting it wrong is a
+    # hard read failure. Verified against OpenFOAM v2512: FreeStream.C declares
+    #     const volScalarField::Boundary& boundaryT = cloud.boundaryT()...
+    # whereas the MNF fork takes a vector holding per-component translational
+    # temperature, which is what the pre-refactor code wrote and what the
+    # regression golden pins.
+    if dialect == "standard":
+        t_rows = [f"            {_fmt_temperature(t)}" for t in inflow.T]
+        write_vol_scalar_field(
+            out_dir / "boundaryT", "boundaryT", "[0 0 0 1 0 0 0]", t_rows, patches,
+        )
+    else:
+        t_rows = [f"            ( {_fmt_temperature(t)} 0.0 0.0 )" for t in inflow.T]
+        write_vol_vector_field(
+            out_dir / "boundaryT", "boundaryT", "[0 0 0 1 0 0 0]", t_rows, patches,
+        )
 
+    # Per-face number density. The MNF fork's dsmcFreeStreamInflowFieldPatch reads
+    # this; standard dsmcFoam has no equivalent and takes ONE scalar per species
+    # from constant/dsmcProperties (FreeStream.C:93,
+    # `numberDensities_[i] = numberDensitiesDict.get<scalar>(molecules[i])`).
+    #
+    # It is still written under the standard dialect: unused files in 0/ are
+    # ignored, and it is the only record of what the model actually computed.
+    # The uniform value standard dsmcFoam *will* use has to be put in
+    # dsmcProperties by hand -- see area_weighted_number_density().
     n_rows = [f"              {repr(float(n))}" for n in inflow.rhoN]
     write_vol_scalar_field(
         out_dir / f"boundaryNumberDensity_{species}",
         f"boundaryNumberDensity_{species}",
         "[0 -3 0 0 0 0 0]", n_rows, patches,
     )
+
+
+#: The measurement fields standard dsmcFoam requires in 0/ but dsmcInitialise
+#: does not create. Specs read from the v2512 freeSpaceStream tutorial's 0.orig.
+#: (name, class, dimensions, uniform internal value)
+MEASUREMENT_FIELDS = (
+    ("dsmcRhoN",  "volScalarField", "[0 -3 0 0 0 0 0]",  "0"),
+    ("fD",        "volVectorField", "[1 -1 -2 0 0 0 0]", "(0 0 0)"),
+    ("iDof",      "volScalarField", "[0 -3 0 0 0 0 0]",  "0"),
+    ("internalE", "volScalarField", "[1 -1 -2 0 0 0 0]", "0"),
+    ("linearKE",  "volScalarField", "[1 -1 -2 0 0 0 0]", "0"),
+    ("momentum",  "volVectorField", "[1 -2 -1 0 0 0 0]", "(0 0 0)"),
+    ("q",         "volScalarField", "[1 0 -3 0 0 0 0]",  "0"),
+    ("rhoM",      "volScalarField", "[1 -3 0 0 0 0 0]",  "0"),
+    ("rhoN",      "volScalarField", "[0 -3 0 0 0 0 0]",  "0"),
+)
+
+
+#: Geometric patch types whose patchField type must match exactly. OpenFOAM
+#: rejects anything else with "inconsistent patch and patchField types".
+CONSTRAINT_PATCH_TYPES = frozenset({
+    "symmetry", "symmetryPlane", "empty", "wedge", "cyclic", "cyclicAMI",
+    "processor", "processorCyclic", "nonuniformTransformCyclic",
+})
+
+
+def patch_field_type(geometric_type: str) -> str:
+    """The patchField type a given geometric patch type requires.
+
+    Constraint patches -- ``symmetry``, ``empty``, ``wedge``, ``cyclic`` and
+    friends -- must carry a patchField of the same name; OpenFOAM fails with
+    "inconsistent patch and patchField types" otherwise. Ordinary ``patch`` and
+    ``wall`` boundaries take a normal condition, and for zeroed measurement
+    fields that is ``zeroGradient``.
+    """
+    return geometric_type if geometric_type in CONSTRAINT_PATCH_TYPES else "zeroGradient"
+
+
+def write_measurement_fields(out_dir: Path, patches) -> list[Path]:
+    """Write the zeroed measurement fields standard dsmcFoam expects in ``0/``.
+
+    Args:
+        out_dir: the case's ``0/`` directory.
+        patches: the mesh's patches -- a mapping of name to
+            :class:`plumetools.mesh.boundary.PatchInfo`, as
+            :func:`plumetools.mesh.read_boundary` returns. The geometric type of
+            each is needed, not just its name.
+
+    Returns:
+        The paths written.
+
+    ``dsmcFoam`` constructs its cloud from these and fails hard if any is absent
+    -- ``cannot find file "0/q"`` and so on. ``dsmcInitialise`` does not create
+    them: OpenFOAM's own tutorials ship them in ``0.orig`` and copy them in with
+    ``restore0Dir``.
+
+    Generated rather than shipped as a static ``0.orig``, because the boundary
+    entries have to name the patches this mesh actually has. The pre-refactor code
+    hardcoded a patch list and wrote ``cylinder`` and ``plate`` into every field on
+    meshes that had neither (finding AD-03); a checked-in ``0.orig`` would repeat
+    that mistake for a lineage whose cases have inflow/sym/vacuum,
+    inflow/vacuum, and inflow/panel/vacuum respectively.
+
+    All nine are ``uniform 0`` internally -- they are outputs the solver fills in,
+    not inputs. Boundary conditions are ``zeroGradient`` except on constraint
+    patches, which must repeat their own type; see :func:`patch_field_type`.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Accept either {name: PatchInfo} or a bare sequence of names, treating the
+    # latter as ordinary patches.
+    if hasattr(patches, "items"):
+        entries = [(n, patch_field_type(getattr(p, "type", "patch")))
+                   for n, p in patches.items()]
+    else:
+        entries = [(n, "zeroGradient") for n in patches]
+
+    written = []
+    for name, field_class, dimensions, zero in MEASUREMENT_FIELDS:
+        lines = [
+            *_foam_file_header(field_class, name),
+            f"dimensions      {dimensions};",
+            f"internalField   uniform {zero};",
+            "boundaryField",
+            "{",
+        ]
+        for patch_name, bc in entries:
+            lines += [f"    {patch_name}", "    {", f"        type            {bc};", "    }"]
+        lines.append("}")
+        path = out_dir / name
+        _write(path, lines)
+        written.append(path)
+    return written
 
 
 def _fmt_temperature(value: float) -> str:

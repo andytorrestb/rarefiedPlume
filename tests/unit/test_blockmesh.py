@@ -341,3 +341,33 @@ def test_impossible_geometry_is_rejected(kwargs, message):
     cfg = CaseConfig(mesh=MeshConfig(**kwargs))
     with pytest.raises(ValueError, match=message):
         render_block_mesh_dict(cfg)
+
+
+# --------------------------------------------------------------------------- #
+# outer patch type -- the standard-dsmcFoam workaround
+# --------------------------------------------------------------------------- #
+
+def test_outer_patch_defaults_to_patch(cfg):
+    """Physically right: particles leave a plume domain through the outer boundary."""
+    text = render_block_mesh_dict(cfg)
+    assert re.search(r"vacuum\s*\{\s*type patch;", text)
+
+
+def test_outer_patch_can_be_a_wall(cfg):
+    """The only lever against FreeStream injecting on every patch-type boundary.
+
+    FreeStream.C:57-62 appends every isType<polyPatch> patch with no selection
+    list, and isType<> is an exact match -- so a wall is excluded. The cost is a
+    reflecting, non-absorbing outer boundary; see docs/solver-compatibility.md.
+    """
+    text = render_block_mesh_dict(
+        replace(cfg, mesh=replace(cfg.mesh, outer_patch_type="wall")))
+    assert re.search(r"vacuum\s*\{\s*type wall;", text)
+    assert "WALL: reflects" in text, "the physics cost must be stated in the dict"
+
+
+def test_outer_patch_type_does_not_affect_inflow_or_sym(cfg):
+    text = render_block_mesh_dict(
+        replace(cfg, mesh=replace(cfg.mesh, outer_patch_type="wall")))
+    assert re.search(r"inflow\s*\{\s*type patch;", text)
+    assert re.search(r"sym\s*\{\s*type symmetry;", text)

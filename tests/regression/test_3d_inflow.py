@@ -125,12 +125,26 @@ def _split_body(lines: list[str]) -> tuple[list[str], list[str]]:
 
 @pytest.fixture(scope="module")
 def written_dir(tmp_path_factory, computed):
-    """Write the three 0/ field files into a scratch dir, leaving the case clean."""
+    """Write the three 0/ field files into a scratch dir, leaving the case clean.
+
+    The output dialect is pinned to "mnf" regardless of what the case currently
+    targets. The golden freezes the PRE-REFACTOR output, which was written for the
+    micro/nano-flow fork's dsmcFoam+ -- in particular boundaryT as a
+    volVectorField holding (T 0 0). Standard OpenFOAM dsmcFoam reads boundaryT as
+    a volScalarField, so a case that has since switched to `dialect: standard`
+    would legitimately produce a different file. That is a solver-target change,
+    not a model change, and it must not be able to fail this test.
+    """
+    from dataclasses import replace
+
     from plumetools.config import load_case_config
     from plumetools.foamio.fields import write_inflow_fields
 
+    cfg = load_case_config(CASE)
+    cfg = replace(cfg, output=replace(cfg.output, dialect="mnf"))
+
     out = tmp_path_factory.mktemp("zero")
-    write_inflow_fields(out, computed, load_case_config(CASE))
+    write_inflow_fields(out, computed, cfg)
     return out
 
 

@@ -114,3 +114,37 @@ def test_rhoN_T0_can_be_unset_to_use_one_temperature(tmp_path):
     """`null` means 'use stagnation.T0_K', i.e. the corrected SM-02 behaviour."""
     cfg = {**MINIMAL, "legacy": {"rhoN_T0_K": None}}
     assert load_case_config(write_case(tmp_path, cfg)).legacy.rhoN_T0_K is None
+
+
+def test_standard_dialect_with_patch_outer_warns_before_the_abort(tmp_path):
+    """Warn at config load, not with an MPI stack trace at the first timestep.
+
+    Standard dsmcFoam's FreeStream injects on every patch-type boundary, so an
+    outer `patch` becomes a second inflow and the run dies with "Zero boundary
+    temperature detected".
+    """
+    cfg = {**MINIMAL, "output": {"dialect": "standard"},
+           "mesh": {"sphere_radius_m": 0.5, "outer_patch_type": "patch"}}
+    with pytest.warns(ConfigWarning, match="FreeStream"):
+        load_case_config(write_case(tmp_path, cfg))
+
+
+def test_wall_outer_does_not_warn(tmp_path):
+    import warnings as _w
+    cfg = {**MINIMAL, "output": {"dialect": "standard"},
+           "mesh": {"sphere_radius_m": 0.5, "outer_patch_type": "wall"}}
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        load_case_config(write_case(tmp_path, cfg))
+    assert not [c for c in caught if "FreeStream" in str(c.message)]
+
+
+def test_mnf_dialect_does_not_warn_about_the_outer_patch(tmp_path):
+    """The fork names its inflow patches explicitly, so an outer patch is fine."""
+    import warnings as _w
+    cfg = {**MINIMAL, "output": {"dialect": "mnf"},
+           "mesh": {"sphere_radius_m": 0.5, "outer_patch_type": "patch"}}
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        load_case_config(write_case(tmp_path, cfg))
+    assert not [c for c in caught if "FreeStream" in str(c.message)]
