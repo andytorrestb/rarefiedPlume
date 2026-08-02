@@ -115,6 +115,18 @@ def test_truncated_list_raises_not_hangs(tmp_path):
         read_points(tmp_path / "bad")
 
 
+def test_binary_mesh_names_writeformat_as_the_cause(tmp_path):
+    """`writeFormat binary` in controlDict makes blockMesh write a binary
+    polyMesh, which these ASCII readers otherwise reject as a missing list."""
+    mesh = tmp_path / "bin" / "constant" / "polyMesh"
+    write(mesh / "points",
+          HEADER.format(cls="vectorField", obj="points").replace("format      ascii;",
+                                                                 "format      binary;")
+          + "\n6\n(\x00\x01\x02\x03)\n")
+    with pytest.raises(ValueError, match="writeFormat"):
+        read_points(tmp_path / "bin")
+
+
 def test_parsers_terminate_on_garbage(tmp_path):
     """Bounded parsing: no input should make a reader spin (RB-01)."""
     mesh = tmp_path / "junk" / "constant" / "polyMesh"
