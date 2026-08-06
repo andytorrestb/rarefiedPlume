@@ -11,7 +11,7 @@ DSMC solves the field from there.
 
 ```bash
 pip install -e ".[test]"          # numpy, scipy, pyyaml (+ pytest)
-pytest -m "not needs_openfoam"    # 124 tests, ~2 s, no OpenFOAM required
+pytest -m "not needs_openfoam"    # 475 tests, ~4 s, no OpenFOAM required
 
 cd cases/3d-inflow
 ./Allrun --no-solve               # generates 0/ inflow fields; needs no OpenFOAM
@@ -26,16 +26,22 @@ No Python needs editing to change a parameter.
 
 ```
 plumetools/          the analytical model and OpenFOAM I/O, as a package
-  sourceflow.py        equations E1-E8, pure functions
+  sourceflow.py        equations E1-E8, pure functions -- the LEGACY model
   geometry.py          centroids, normals, spherical coordinates
   mesh/                polyMesh parsing
-  foamio/              0/ field writers and the blockMeshDict generator
+  foamio/              0/ field writers, mesh dictionary generators
+    primitives.py        searchable sphere/cylinder/box, shared by both families
   config.py            case.yaml loading and validation
   inflow.py            orchestration
+  markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
+                       mesh, flux verification, resolution, checks, post
+applications/        custom OpenFOAM code
+  dsmcBoundaryModels/  plumeFieldInflow -- per-face, patch-selected DSMC inflow
 cases/               standard OpenFOAM cases -- see the scope split below
 docs/                workflow, model reconstruction, mesh, environment
 tests/unit/          Tier 0: pure Python, no OpenFOAM
 tests/regression/    bit-exact freeze of the pre-refactor behaviour
+tests/openfoam/      Tier 2: needs_openfoam, deselected by default
 util/                one-off analysis scripts
 ```
 
@@ -46,7 +52,7 @@ Cases keep the ordinary OpenFOAM layout (`constant/`, `system/`, `0/`).
 
 | Status | Cases |
 |---|---|
-| **Active** | `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
+| **Active** | `markelov1999` (AIAA 99-3455) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
 | **Archived** | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` · `wake-cylinder` |
 
 Archived cases are one-off studies kept for historical record. They are frozen:
@@ -55,8 +61,36 @@ that do not describe what was actually run — [`cases/ARCHIVE.md`](cases/ARCHIV
 records what is known to be wrong in each, so archived output is never mistaken
 for validated output.
 
-Only `cases/3d-inflow` has been migrated to `plumetools` so far. The other seven
+`cases/markelov1999` and `cases/3d-inflow` use `plumetools`. The other seven
 active cases still carry their own copy of the legacy script.
+
+## The AIAA 99-3455 case family
+
+`cases/markelov1999` reproduces the configuration of Lumpkin, Stewart & Markelov,
+*Study of 3D Rarefied Flow on a Flat Plate in the Wake of a Cylinder* (1999): a
+rarefied N₂ plume past a finite cylinder onto a flat plate 6 inches behind it, at
+four reservoir pressures.
+
+```bash
+cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
+cd ../../cases/markelov1999
+./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
+```
+
+It is **new work**, not a fix of the archived `wake-cylinder` lineage, and it
+does not inherit that lineage's defects. Its source-flow model is a separate,
+explicitly named variant — `markelov1999_axisymmetric` — because
+`plumetools/sourceflow.py` is frozen to reproduce those defects and disagrees
+with the paper in six substantive places (SF-1 … SF-6 in
+[`docs/markelov1999-case.md`](docs/markelov1999-case.md)).
+
+**No result in it has been validated** against DAC or experiment.
+
+It also carries the repository's first custom OpenFOAM code:
+[`applications/dsmcBoundaryModels/plumeFieldInflow`](applications/dsmcBoundaryModels/plumeFieldInflow),
+an `InflowBoundaryModel` that injects across a named patch list with a per-face
+number density — the two things stock `FreeStream` cannot do, and the reason
+`3d-inflow` has to reflect at its outer boundary.
 
 ## Read this before trusting the model
 
@@ -98,6 +132,12 @@ achievable. See [`docs/environment.md`](docs/environment.md).
 
 ## Documentation
 
+- [`docs/markelov1999-case.md`](docs/markelov1999-case.md) — the AIAA 99-3455
+  family: the model, the geometry, and every assumption with its reasoning
+- [`docs/plume-field-inflow.md`](docs/plume-field-inflow.md) — the custom DSMC
+  inflow boundary model, and why standard `dsmcFoam` needs one
+- [`cases/markelov1999/README.md`](cases/markelov1999/README.md) — running the
+  case family
 - [`docs/mesh.md`](docs/mesh.md) — geometry, the 5-block O-grid, and why
   generation had to wait for the centroid fix
 - [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,
