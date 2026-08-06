@@ -1,0 +1,24 @@
+/* Include paths mirror those of OpenFOAM's own lagrangian/DSMC library, because
+ * plumeFieldInflow is a peer of FreeStream and pulls in the same headers:
+ * InflowBoundaryModel.H, DSMCCloud.H, dsmcParcel.H, tetIndices.H, volFields.H.
+ */
+EXE_INC = \
+    -I$(LIB_SRC)/lagrangian/basic/lnInclude \
+    -I$(LIB_SRC)/lagrangian/DSMC/lnInclude \
+    -I$(LIB_SRC)/finiteVolume/lnInclude \
+    -I$(LIB_SRC)/meshTools/lnInclude
+
+/* -lDSMC supplies the InflowBoundaryModel<CloudType> selection TABLE, which is
+ * defined once in OpenFOAM's makeDSMCParcelInflowBoundaryModels.C. This library
+ * only adds an entry to it, so the table must come from there rather than be
+ * defined again here.
+ *
+ * The capitalisation is OpenFOAM's: src/lagrangian/DSMC/Make/files sets
+ * LIB = $(FOAM_LIBBIN)/libDSMC, so the linker flag is -lDSMC. Getting it wrong
+ * fails at link time with "cannot find -ldsmc", which at least is unambiguous.
+ */
+LIB_LIBS = \
+    -llagrangian \
+    -lDSMC \
+    -lfiniteVolume \
+    -lmeshTools

@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Build the custom DSMC boundary models.
+#
+#   ./Allwmake            build
+#   ./Allwmake -j8        build with 8 jobs (any wmake option is forwarded)
+#
+# Requires a sourced OpenFOAM environment. Verified against OpenFOAM v2512; see
+# docs/plume-field-inflow.md for what the version dependence actually is.
+#
+# The result is $FOAM_USER_LIBBIN/libplumeDsmcBoundaryModels.so, which a case
+# loads through controlDict:
+#
+#     libs ( "libplumeDsmcBoundaryModels.so" );
+
+set -euo pipefail
+cd "${0%/*}" || exit 1
+
+die() { echo "" >&2; echo "Allwmake: $*" >&2; exit 1; }
+
+command -v wmake >/dev/null 2>&1 || die "wmake is not on PATH.
+       Source your OpenFOAM environment first, e.g.
+           . /usr/lib/openfoam/openfoam2512/etc/bashrc"
+
+[ -n "${FOAM_USER_LIBBIN:-}" ] || die "FOAM_USER_LIBBIN is not set, so there is
+       nowhere to install the library. Source your OpenFOAM environment."
+
+# The InflowBoundaryModel selection table lives in libdsmc. Without it the build
+# links but every case reports plumeFieldInflow as unknown, which is a much
+# harder failure to trace back to a missing library than this message.
+if [ ! -d "${WM_PROJECT_DIR:-}/src/lagrangian/DSMC" ]; then
+    echo "Allwmake: warning -- \$WM_PROJECT_DIR/src/lagrangian/DSMC not found;" >&2
+    echo "          if the include paths in Make/options do not resolve, this" >&2
+    echo "          is why." >&2
+fi
+
+echo "==> OpenFOAM ${WM_PROJECT_VERSION:-unknown} (${WM_OPTIONS:-unknown})"
+echo "==> installing into $FOAM_USER_LIBBIN"
+
+wmake libso plumeFieldInflow "$@"
+
+LIB="$FOAM_USER_LIBBIN/libplumeDsmcBoundaryModels.so"
+[ -f "$LIB" ] || die "wmake reported success but $LIB does not exist"
+
+echo ""
+echo "Built $LIB"
+echo ""
+echo "Load it from a case's system/controlDict:"
+echo "    libs ( \"libplumeDsmcBoundaryModels.so\" );"
+echo ""
+echo "and select it in constant/dsmcProperties:"
+echo "    InflowBoundaryModel   plumeFieldInflow;"
