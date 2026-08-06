@@ -38,7 +38,25 @@ cases/**/constant/polyMesh/** -text
 Allrun      text eol=lf
 Allclean    text eol=lf
 Allmesh     text eol=lf
+Allwmake    text eol=lf
 monitor     text eol=lf
+
+# The markelov1999 study-level drivers, same reason.
+AllmeshCases  text eol=lf
+AllrunCases   text eol=lf
+AllcleanCases text eol=lf
+AllpostCases  text eol=lf
+
+# Python entry points invoked as ./script.py through a shebang need LF for the
+# same reason a shell script does.
+*.py        text eol=lf
+
+# The C++ sources are built by wmake on Linux; CRLF is tolerated by the compiler
+# but makes every diff against the upstream FreeStream they derive from useless.
+applications/**/*.C  text eol=lf
+applications/**/*.H  text eol=lf
+applications/**/Make/files    text eol=lf
+applications/**/Make/options  text eol=lf
 
 
 # --- binary assets --------------------------------------------------------
