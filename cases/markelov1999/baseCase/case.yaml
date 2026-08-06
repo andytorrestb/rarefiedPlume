@@ -1,0 +1,272 @@
+# cases/markelov1999/baseCase -- AIAA 99-3455 flat plate in a cylinder wake.
+#
+# Lumpkin, Stewart & Markelov, "Study of 3D Rarefied Flow on a Flat Plate in the
+# Wake of a Cylinder", AIAA 99-3455, 1999.
+#
+# THE AUTHORITATIVE SOURCE OF PHYSICAL INPUTS FOR THIS CASE.
+#
+#   constant/dsmcProperties, system/controlDict, system/dsmcInitialiseDict,
+#   system/blockMeshDict, system/snappyHexMeshDict and the 0/ boundary fields
+#   are all GENERATED from this file. Do not edit them; edit this and re-run
+#   ./Allmesh (mesh + dictionaries) or ./Allrun (0/ fields).
+#
+# generate_cases.py clones this directory per reservoir pressure and rewrites
+# stagnation.p0_pa and dsmc.n_equivalent_particles here -- structurally, by
+# loading and re-emitting YAML, not by string substitution.
+#
+# Units are in every key name. Values are tagged:
+#
+#   [PAPER]       printed in AIAA 99-3455
+#   [ASSUMPTION]  not in the paper; a modern implementation choice, documented
+#                 in docs/markelov1999-case.md
+#   [DERIVED]     computed, never a literal
+#
+# See cases/markelov1999/README.md.
+
+model: markelov1999_axisymmetric
+
+meta:
+  reference: AIAA 99-3455
+  title: Study of 3D Rarefied Flow on a Flat Plate in the Wake of a Cylinder
+  authors: Lumpkin, Stewart, Markelov
+  year: 1999
+  gap_in: 6.0
+  # generate_cases.py fills in case_name and pressure_psi per generated case.
+
+# --- mesh ---------------------------------------------------------------------
+# blockMesh builds a uniform Cartesian box; snappyHexMesh carves the inflow
+# hemisphere, the cylinder and the plate out of it as analytic searchable
+# primitives. No STL anywhere.
+#
+# Domain extents [ASSUMPTION -- the paper states no computational domain]:
+#
+#   x [0, 0.9]      The source is at x = 0. The plate's downstream face is at
+#                   0.53975 m, so this leaves 0.36 m -- 2.4 cylinder diameters --
+#                   of downstream buffer for the plate wake to develop before
+#                   particles are deleted at the boundary.
+#   y [0, 0.3]      Half domain; y = 0 is the symmetry plane. 0.3 m is 3.9
+#                   cylinder radii and 2 plate half-widths, so the lateral
+#                   boundary is well outside the plume's 130 deg cone at the
+#                   bodies.
+#   z [-0.35, 0.35] The cylinder spans +-0.2286 and the plate +-0.1905, so this
+#                   keeps 0.12 m past the cylinder end caps. The caps must be
+#                   strictly inside the domain: a cylinder flush with the
+#                   boundary would be meshed as infinitely long and the 3D wake
+#                   this case exists to study would vanish.
+#
+# Resolution [ASSUMPTION]:
+#
+#   background 0.025 m -> 36 x 12 x 28 = 12 096 cells. Coarse on purpose: the
+#   far field is near-vacuum, and cells there only have to be found, not
+#   resolved.
+#
+#   inflow   level 2 -> 6.25 mm   (24 cells across the 0.1524 m radius)
+#   cylinder level 2 -> 6.25 mm   (~77 cells around the circumference)
+#   plate    level 3 -> 3.125 mm  (4 cells across the 12.7 mm thickness; the
+#                                  plate is the thinnest body, so it needs the
+#                                  extra level to exist as a solid at all)
+#
+#   Level 2 at the cylinder is set by the mean free path, not by geometry: at
+#   475 psi the mfp at the cylinder stagnation region is ~4.6 mm, so 6.25 mm
+#   cells are marginally coarse and plumetools.markelov1999.checks warns about
+#   it. Halving the cell would fix the ratio and multiply the particle count by
+#   eight; that trade is documented rather than silently taken.
+#
+# NO wake, shock or gap refinement regions yet -- deliberately. snappyHexMeshDict
+# carries an empty refinementRegions block as the place to add them.
+mesh:
+  type: snappy_markelov
+  sphere_radius_m: 0.1524      # must equal geometry.sphere_radius_m (validated)
+  x_min_m: 0.0
+  x_max_m: 0.9
+  y_min_m: 0.0                 # the symmetry plane
+  y_max_m: 0.3
+  z_min_m: -0.35
+  z_max_m: 0.35
+  background_cell_size_m: 0.025
+  inflow_refinement_level: 2
+  cylinder_refinement_level: 2
+  plate_refinement_level: 3
+  n_cells_between_levels: 2
+  refinement_level: 2          # fallback if a per-surface level is unset
+  # 'patch' is CORRECT here and costs nothing, because this case runs the
+  # plumeFieldInflow model, which takes an explicit patch list. Stock FreeStream
+  # injects on every patch-type boundary and would force 'wall' -- a reflecting
+  # outer boundary. See docs/solver-compatibility.md.
+  outer_patch_type: patch
+  patch_names:
+    inflow: inflow
+    cylinder: cylinder
+    plate: plate
+    outer: vacuum
+    symmetry: symmetry
+    upstream_vacuum: upstreamVacuum
+
+# --- inflow surface -----------------------------------------------------------
+geometry:
+  patch: inflow
+  sphere_radius_m: 0.1524      # [ASSUMPTION] hemispherical DSMC source boundary,
+                               # 6 in. NOT a paper value: the paper's physical
+                               # source is the 0.8255 mm orifice, and this is
+                               # only where the analytical solution is handed to
+                               # the particle solver. Matches the radius the
+                               # archived wake-cylinder cases intended
+                               # (cases/ARCHIVE.md, AR-01) -- the value, not that
+                               # lineage's defective implementation.
+                               # Clearance to the cylinder: 0.06985 m [DERIVED].
+  plume_axis: [1, 0, 0]
+  polar_axis: [0, 0, 1]        # unused by this model, which measures the single
+                               # off-axis angle directly from +x
+
+# --- solid bodies -------------------------------------------------------------
+bodies:
+  gap_m: 0.1524                # [PAPER] 6 in, cylinder base to plate face.
+                               # The plate's x is DERIVED from this; there is
+                               # deliberately no plate x key.
+  symmetry_plane_y_m: 0.0
+  cylinder:
+    radius_m: 0.0762           # [PAPER] 3 in (6 in diameter)
+    length_m: 0.4572           # [PAPER] 18 in
+    centre_x_m: 0.29845        # [PAPER] 11.75 in
+    centre_z_m: 0.0
+  plate:
+    width_y_m: 0.1524          # [PAPER] 6 in
+    height_z_m: 0.381          # [PAPER] 15 in
+    thickness_m: 0.0127        # [ASSUMPTION] 0.5 in. The paper does not clearly
+                               # establish a thickness. Thin against the 6 in
+                               # width, thick enough to mesh as a solid body.
+
+# --- gas ----------------------------------------------------------------------
+# [PAPER] nitrogen. The legacy reference case evaluates an N2 model while its
+# solver simulates argon (SM-03); here the model and the solver are the same gas,
+# and plumetools.config cross-checks gas.species_name against dsmcProperties.
+gas:
+  gamma: 1.4
+  molar_mass_g_per_mol: 28.0134
+  species_name: N2
+
+# --- stagnation (reservoir) conditions ----------------------------------------
+stagnation:
+  p0_pa: 34473.78646529103     # 5 psi. generate_cases.py rewrites this per case.
+  T0_K: 300.0                  # [ASSUMPTION] the paper's reservoir temperature
+                               # is not recorded here; 300 K is the stated
+                               # baseline.
+  throat_radius_m: 0.00041275  # [PAPER] the PHYSICAL orifice radius, half of the
+                               # 0.8255 mm diameter. Used by the source-flow
+                               # equations. NOT the inflow hemisphere radius --
+                               # confusing the two scales density by ~1.4e5.
+                               # The legacy case.yaml carries 0.0041275, ten
+                               # times this, hence 100x the density.
+
+# --- angular dependence -------------------------------------------------------
+angular:
+  exponent_offset: 0.41        # [PAPER] the 0.41 in (gamma + 0.41)/(gamma - 1).
+                               # Empirical; the paper gives no derivation either.
+  form: markelov1999           # single off-axis angle from +x, clipped at the
+                               # limiting angle. NOT the legacy separable form.
+  normalization_gamma: 1.4     # unused by this model: the normalisation uses
+                               # gas.gamma throughout. Present only because the
+                               # schema is shared.
+  quadrature_points: 0         # 0 = adaptive Gauss-Kronrod
+
+# --- DSMC ---------------------------------------------------------------------
+dsmc:
+  species:
+    name: N2
+    molar_mass_g_per_mol: 28.0134   # [PAPER] authoritative; mass_kg derives from it
+    mass_kg: null                    # null -> M / (1000 * N_A) = 4.651735e-26 kg
+    gamma: 1.4
+    # [ASSUMPTION] The paper prints the gas, the collision-model family and ZR,
+    # but not the VHS coefficients modern OpenFOAM needs. These are the standard
+    # OpenFOAM N2 model, recorded rather than claimed as a reproduction.
+    diameter_m: 4.17e-10
+    omega: 0.74
+    internal_degrees_of_freedom: 2   # rotation only; no vibrational modes
+    source: >-
+      OpenFOAM v2512 tutorials/discreteMethods/dsmcFoam/wedge15Ma5 constant/dsmcProperties
+      (diameter, omega, internalDegreesOfFreedom). mass derived from the paper's molar mass
+      rather than that file's rounded 46.5e-27 kg, so the analytical model and the solver
+      use one m.
+  binary_collision_model: LarsenBorgnakkeVariableHardSphere   # [PAPER] VHS + LB
+  t_ref_K: 273.0                     # [ASSUMPTION] with the VHS coefficients above
+  rotational_collision_number: 5.0   # [PAPER] ZR = 5
+  wall_interaction_model: MaxwellianThermal
+  wall_temperature_K: 300.0          # [ASSUMPTION] written into 0/boundaryT on the
+                                     # wall patches -- MaxwellianThermal reads the
+                                     # wall temperature from there, so a zero here
+                                     # leaves reflected particles with no thermal speed
+  n_equivalent_particles: null       # null -> derived from resolution below and
+                                     # written back by generate_cases.py
+  delta_t_s: 2.0e-7                  # [ASSUMPTION] ~0.13 of the smallest cell per
+                                     # step at 2000 m/s
+  end_time_s: 4.0e-3                 # [ASSUMPTION] ~3.5 domain transits at 789 m/s
+  write_interval_s: 5.0e-4
+  average_start_s: 2.0e-3            # [ASSUMPTION] discard the first ~1.8 transits
+  initial_number_density_per_m3: 1.0e14   # near-vacuum seed, not a physical state
+  initial_temperature_K: 300.0
+  n_subdomains: 4
+
+# --- particle resolution ------------------------------------------------------
+# Standard dsmcFoam has ONE particle weight for the whole domain
+# (DSMCCloud::nParticle_ is a single scalar). There is no radial or adaptive
+# weighting to configure, so the target can be met in exactly one region and the
+# others follow. The estimator reports occupancy in ALL regions either way.
+resolution:
+  target_particles_per_cell: 20.0
+  sizing_region: cylinder      # 'plate' meets the target everywhere at several
+                               # times the particle count; see the README
+  wake_offset_m: 0.0254        # 1 in behind the cylinder base
+  report_only: false
+
+# --- DSMC quality checks ------------------------------------------------------
+checks:
+  enabled: true
+  max_cell_over_mfp: 1.0       # warn above; DSMC wants a cell well under one mfp
+  max_courant: 1.0             # HARD ERROR above: a particle crossing more than
+                               # one smallest cell per step invalidates collision
+                               # sampling
+  warn_courant: 0.5
+  min_particles_per_cell: 5.0
+
+# --- generated 0/ boundary conditions -----------------------------------------
+output:
+  dialect: standard            # OpenFOAM's own dsmcFoam, v2512
+  inflow_model: plumeFieldInflow   # applications/dsmcBoundaryModels/plumeFieldInflow.
+                                   # Takes an explicit patch list and a per-face
+                                   # number density; stock FreeStream can do
+                                   # neither. The case FAILS if the library is
+                                   # not compiled -- it never falls back.
+  patches: {}                  # filled from the mesh; no hard-coded patch list
+
+# --- post-processing ----------------------------------------------------------
+# Surface pressure is the wall-normal component of fDMean, the time average of
+# the force density dsmcFoam accumulates in DSMCParcel::hitWallPatch. Dimensions
+# [1 -1 -2 0 0 0 0] = Pa. A single-timestep fD is a one-step momentum tally and
+# far too noisy to read as a pressure.
+#
+# Windows, never a single face: a one-face reading depends on where snappyHexMesh
+# happened to put that face and changes with refinement rather than with physics.
+post:
+  surface_pressure_field: fDMean
+  cylinder_patch: cylinder
+  plate_patch: plate
+  windows:
+    - {name: windward,     azimuth_deg: 180.0, half_angle_deg: 15.0, axial_half_height_m: 0.0381}
+    - {name: leeward,      azimuth_deg: 0.0,   half_angle_deg: 15.0, axial_half_height_m: 0.0381}
+    - {name: midspan_side, azimuth_deg: 90.0,  half_angle_deg: 15.0, axial_half_height_m: 0.0381}
+
+# --- post-processing sampling lines (inherited schema; unused here) -----------
+sampling:
+  radial_lines_deg: [0, 45, 90]
+  r_start_m: 0.1524
+  r_end_m: 0.9
+  n_points: 500
+  fields: [U_N2, Ttra_N2, rhoN_N2]
+
+# --- legacy switches ----------------------------------------------------------
+# All OFF. These exist to reproduce known defects in the frozen 3d-inflow
+# lineage; this case family must not go anywhere near them.
+legacy:
+  rhoN_T0_K: null              # one temperature throughout
+  clip_beyond_limiting_angle: true
+  emit_absent_patches: false   # a patch name not in the mesh is an ERROR here

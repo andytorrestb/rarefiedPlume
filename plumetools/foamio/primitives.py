@@ -158,14 +158,26 @@ class SearchableSurface:
                 f"{self.name}: refinement level must be >= 0, got {self.level}")
 
     def min_feature_size_m(self) -> float:
-        """The smallest length the background mesh has to be able to find.
+        """The thinnest dimension of the body [m].
 
-        Used by :func:`check_background_resolves_surfaces`. A background cell
-        larger than this can straddle the whole feature, in which case
-        castellation may never flag a cell for refinement and the surface simply
-        does not appear in the mesh.
+        What the **refined** cell has to resolve: for a plate this is the
+        thickness, and cells no smaller than it cannot represent the body as a
+        solid with two distinct faces.
         """
         raise NotImplementedError
+
+    def max_feature_size_m(self) -> float:
+        """The largest dimension of the body [m].
+
+        What the **background** cell has to be smaller than. A body smaller than
+        one background cell in every direction can sit entirely inside that cell,
+        never intersect a cell boundary, and so never get flagged for refinement.
+        """
+        raise NotImplementedError
+
+    def refined_cell_size_m(self, background_cell_size_m: float) -> float:
+        """Cell size at this surface [m]: the background halved once per level."""
+        return float(background_cell_size_m) / 2 ** int(self.level)
 
 
 @dataclass(frozen=True)
@@ -198,6 +210,9 @@ class SearchableSphere(SearchableSurface):
 
     def min_feature_size_m(self) -> float:
         return float(self.radius)
+
+    def max_feature_size_m(self) -> float:
+        return 2.0 * float(self.radius)
 
 
 @dataclass(frozen=True)
@@ -241,6 +256,9 @@ class SearchableCylinder(SearchableSurface):
     def min_feature_size_m(self) -> float:
         return min(float(self.radius), self.length_m())
 
+    def max_feature_size_m(self) -> float:
+        return max(2.0 * float(self.radius), self.length_m())
+
 
 @dataclass(frozen=True)
 class SearchableBox(SearchableSurface):
@@ -276,6 +294,9 @@ class SearchableBox(SearchableSurface):
 
     def min_feature_size_m(self) -> float:
         return min(hi - lo for lo, hi in zip(self.min, self.max))
+
+    def max_feature_size_m(self) -> float:
+        return max(hi - lo for lo, hi in zip(self.min, self.max))
 
 
 # --------------------------------------------------------------------------- #
@@ -321,37 +342,66 @@ def render_refinement_surfaces_block(surfaces, indent: str = "    ") -> list[str
     return lines
 
 
-def check_background_resolves_surfaces(surfaces, background_cell_size_m: float) -> None:
-    """Refuse a background too coarse to find one of the surfaces.
+#: Cells required across the thinnest dimension of a body for it to be meshed as
+#: a solid rather than as a smeared obstruction.
+MIN_CELLS_ACROSS_THINNEST_FEATURE = 2
+
+
+def check_surfaces_are_resolvable(surfaces, background_cell_size_m: float) -> None:
+    """Refuse a background and level combination that cannot mesh a surface.
 
     Args:
-        surfaces: the searchable surfaces.
+        surfaces: the searchable surfaces, each carrying its own ``level``.
         background_cell_size_m: the uniform background cell size [m].
 
     Raises:
-        ValueError: naming the surface, its smallest feature and the cell size
-            that fails to resolve it.
+        ValueError: naming the surface, the offending dimension and the level that
+            would fix it.
 
-    The background mesh does not have to *resolve* a surface -- that is what the
-    refinement level is for -- but it does have to **find** it: snappyHexMesh only
-    refines cells that intersect the surface, so a feature entirely inside one
-    background cell may produce no intersection test hits at all. Requiring the
-    cell to be no larger than the smallest feature means at least two cells span
-    it, which is the same rule the single-sphere generator already applied to its
-    radius.
+    Two separate conditions, for two separate failure modes:
+
+    **Finding it.** snappyHexMesh only refines cells that intersect a surface, so
+    a body smaller than one background cell in *every* direction can sit entirely
+    inside that cell and never be flagged. The background cell must therefore be
+    smaller than the body's largest dimension. Note this is not the same as being
+    smaller than its *smallest*: a plate 12.7 mm thick and 381 mm tall spans
+    hundreds of background cells laterally and cannot be missed, however coarse
+    the background is relative to its thickness.
+
+    **Resolving it.** After refinement the cell size is
+    ``background / 2**level``, and that has to fit across the body's thinnest
+    dimension at least :data:`MIN_CELLS_ACROSS_THINNEST_FEATURE` times. Below
+    that, a plate has no interior for snappyHexMesh to remove and comes out as a
+    dented single layer of cells rather than as a body with two faces.
     """
     if background_cell_size_m <= 0.0:
         raise ValueError(
             f"background cell size must be positive, got {background_cell_size_m}")
+
+    import math
+
     for surface in surfaces:
-        smallest = surface.min_feature_size_m()
-        if background_cell_size_m > smallest:
+        largest = surface.max_feature_size_m()
+        if background_cell_size_m >= largest:
             raise ValueError(
-                f"background_cell_size_m ({background_cell_size_m}) exceeds the "
-                f"smallest feature of surface {surface.name!r} ({smallest:.6g} m), so "
-                f"the feature can fall entirely inside one background cell and never "
-                f"be found. Use at most {smallest:.6g} m and set the surface "
-                f"resolution with its refinement level instead."
+                f"background_cell_size_m ({background_cell_size_m}) is not smaller "
+                f"than the largest dimension of surface {surface.name!r} "
+                f"({largest:.6g} m), so the whole body can sit inside one background "
+                f"cell and never be found. Reduce the background cell size."
+            )
+
+        smallest = surface.min_feature_size_m()
+        refined = surface.refined_cell_size_m(background_cell_size_m)
+        needed = smallest / MIN_CELLS_ACROSS_THINNEST_FEATURE
+        if refined > needed:
+            required_level = math.ceil(math.log2(background_cell_size_m / needed))
+            raise ValueError(
+                f"surface {surface.name!r} at refinement level {surface.level} gives "
+                f"cells of {refined:.6g} m, but its thinnest dimension is "
+                f"{smallest:.6g} m -- only {smallest / refined:.2f} cells across, "
+                f"against the {MIN_CELLS_ACROSS_THINNEST_FEATURE} needed to mesh it "
+                f"as a solid. Raise its refinement level to {required_level}, or "
+                f"reduce background_cell_size_m."
             )
 
 

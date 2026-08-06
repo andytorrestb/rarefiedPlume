@@ -18,7 +18,7 @@ from plumetools.foamio.primitives import (
     SearchableBox,
     SearchableCylinder,
     SearchableSphere,
-    check_background_resolves_surfaces,
+    check_surfaces_are_resolvable,
     fmt,
     fmt_point,
     render_box_block_mesh_dict,
@@ -242,20 +242,53 @@ def test_duplicate_surface_names_are_rejected():
 # background resolution guard
 # --------------------------------------------------------------------------- #
 
-def test_background_must_be_able_to_find_the_thinnest_body():
-    plate = SearchableBox(name="plate", min=(0.5, -0.1, -0.2), max=(0.5127, 0.1, 0.2))
-    check_background_resolves_surfaces([plate], 0.0127)      # exactly two cells: ok
-    with pytest.raises(ValueError, match="smallest feature of surface 'plate'"):
-        check_background_resolves_surfaces([plate], 0.025)
+def test_a_thin_plate_is_resolvable_when_its_own_level_is_high_enough():
+    """A 12.7 mm plate under a 25 mm background is fine at level 3 (3.125 mm, four
+    cells across) and not at level 1 (12.5 mm, one cell). Coarseness relative to
+    the *thickness* is not by itself a problem: the plate is 400 mm tall, so it
+    intersects hundreds of background cells and cannot be missed."""
+    thin = dict(min=(0.5, -0.1, -0.2), max=(0.5127, 0.1, 0.2))
+    check_surfaces_are_resolvable([SearchableBox(name="plate", level=3, **thin)], 0.025)
+    with pytest.raises(ValueError, match="only 1.02 cells across"):
+        check_surfaces_are_resolvable([SearchableBox(name="plate", level=1, **thin)], 0.025)
 
 
-def test_background_guard_names_the_offending_surface():
+def test_the_resolution_error_names_the_level_that_would_fix_it():
+    """25 mm background, 12.7 mm plate: two cells across needs 6.35 mm, so
+    ceil(log2(25/6.35)) = 2. Checked by taking the suggestion and re-running."""
+    thin = dict(min=(0.5, -0.1, -0.2), max=(0.5127, 0.1, 0.2))
+    with pytest.raises(ValueError, match=r"Raise its refinement level to 2"):
+        check_surfaces_are_resolvable([SearchableBox(name="plate", level=1, **thin)], 0.025)
+    check_surfaces_are_resolvable([SearchableBox(name="plate", level=2, **thin)], 0.025)
+
+
+def test_a_body_smaller_than_one_background_cell_is_rejected():
+    """The genuine "cannot be found" case: every dimension inside one cell, so the
+    body need never intersect a cell boundary."""
+    speck = SearchableSphere(name="speck", level=4, radius=0.005)
+    with pytest.raises(ValueError, match="whole body can sit inside one background cell"):
+        check_surfaces_are_resolvable([speck], 0.025)
+
+
+def test_the_guard_names_the_offending_surface():
     surfaces = [
-        SearchableSphere(name="inflow", radius=0.1524),
-        SearchableBox(name="plate", min=(0.5, -0.1, -0.2), max=(0.5127, 0.1, 0.2)),
+        SearchableSphere(name="inflow", level=2, radius=0.1524),
+        SearchableBox(name="plate", level=1, min=(0.5, -0.1, -0.2), max=(0.5127, 0.1, 0.2)),
     ]
     with pytest.raises(ValueError, match="'plate'"):
-        check_background_resolves_surfaces(surfaces, 0.05)
+        check_surfaces_are_resolvable(surfaces, 0.025)
+
+
+def test_the_shipped_baseline_combination_is_resolvable():
+    """background 25 mm; inflow and cylinder at level 2, plate at level 3."""
+    check_surfaces_are_resolvable([
+        SearchableSphere(name="inflow", level=2, radius=0.1524),
+        SearchableCylinder(name="cylinder", level=2, radius=0.0762,
+                           point1=(0.29845, 0.0, -0.2286),
+                           point2=(0.29845, 0.0, 0.2286)),
+        SearchableBox(name="plate", level=3, min=(0.52705, -0.0762, -0.1905),
+                      max=(0.53975, 0.0762, 0.1905)),
+    ], 0.025)
 
 
 # --------------------------------------------------------------------------- #

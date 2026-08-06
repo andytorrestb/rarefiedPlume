@@ -44,6 +44,23 @@ cases/3d-inflow/system/snappyHexMeshDict
 cases/3d-inflow/system/meshQualityDict
 cases/*/system/decomposeParDict.Allrun
 
+# markelov1999 generates ALL of its OpenFOAM dictionaries from case.yaml, not
+# just the mesh ones: dsmcProperties, controlDict and dsmcInitialiseDict follow
+# from the same file, so committing them would create a second, silently
+# divergent source of truth for the physics. case.yaml and the scripts are the
+# tracked artefacts; ./Allmesh writes the rest.
+cases/markelov1999/*/system/blockMeshDict
+cases/markelov1999/*/system/snappyHexMeshDict
+cases/markelov1999/*/system/meshQualityDict
+cases/markelov1999/*/system/controlDict
+cases/markelov1999/*/system/dsmcInitialiseDict
+cases/markelov1999/*/system/decomposeParDict
+cases/markelov1999/*/constant/dsmcProperties
+cases/markelov1999/*/constant/polyMesh/
+# ... and the same under the generated Cases/ tree, which is itself derived from
+# baseCase and reproducible with ./generate_cases.py.
+cases/markelov1999/Cases/
+
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a
 # Pointwise export that cannot be reproduced without an interactive licensed
