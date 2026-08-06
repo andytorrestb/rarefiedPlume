@@ -148,15 +148,57 @@ void Foam::plumeFieldInflow<CloudType>::readNumberDensityFields(CloudType& cloud
             )
         );
 
-        // FreeStream divides its scalars by nParticle once, at construction:
-        //     numberDensities_ /= cloud.nParticle();
-        // The accumulator below is in PARCELS, not molecules, so the same
-        // scaling is applied here -- once, to the whole field, rather than per
-        // face inside the time loop.
-        numberDensityFields_[i] /= cloud.nParticle();
-
         Info<< "    plumeFieldInflow: " << molecules[i] << " number density from "
             << fieldName << endl;
+    }
+}
+
+
+template<class CloudType>
+void Foam::plumeFieldInflow<CloudType>::extractNumberDensities(CloudType& cloud)
+{
+    const scalar nParticle = cloud.nParticle();
+
+    if (nParticle <= 0)
+    {
+        FatalErrorInFunction
+            << "nEquivalentParticles is " << nParticle
+            << "; it must be positive." << nl << abort(FatalError);
+    }
+
+    numberDensities_.setSize(patches_.size());
+
+    forAll(patches_, p)
+    {
+        const label patchi = patches_[p];
+
+        numberDensities_[p].setSize(moleculeTypeIds_.size());
+
+        forAll(moleculeTypeIds_, i)
+        {
+            // Copy the patch's own values out, then scale. FreeStream applies
+            // the same nParticle division once at construction:
+            //     numberDensities_ /= cloud.nParticle();
+            // but its numberDensities_ is a plain list of scalars. Doing the
+            // equivalent to a volScalarField would scale every patch field in
+            // the mesh, including ones this model never reads.
+            numberDensities_[p][i] =
+                numberDensityFields_[i].boundaryField()[patchi];
+
+            numberDensities_[p][i] /= nParticle;
+
+            if (min(numberDensities_[p][i]) < 0)
+            {
+                FatalErrorInFunction
+                    << "Negative number density on inflow patch "
+                    << patchNames_[p] << " in field "
+                    << numberDensityFieldNames_[i] << "." << nl
+                    << "Range: " << min(numberDensities_[p][i])*nParticle
+                    << " .. " << max(numberDensities_[p][i])*nParticle
+                    << " 1/m^3" << nl
+                    << abort(FatalError);
+            }
+        }
     }
 }
 
@@ -174,12 +216,14 @@ Foam::plumeFieldInflow<CloudType>::plumeFieldInflow
     patches_(),
     patchNames_(),
     moleculeTypeIds_(),
+    numberDensities_(),
     numberDensityFields_(),
     numberDensityFieldNames_(),
     particleFluxAccumulators_()
 {
     readPatches(cloud);
     readNumberDensityFields(cloud);
+    extractNumberDensities(cloud);
 
     // One accumulator field per (patch, species), sized to the patch's LOCAL
     // face count. In a decomposed run every rank holds every patch, most with
@@ -277,20 +321,10 @@ void Foam::plumeFieldInflow<CloudType>::inflow()
             }
 
             // CHANGED: per-face, where FreeStream has one scalar for the patch.
-            const scalarField& numberDensity
-            (
-                numberDensityFields_[i].boundaryField()[patchi]
-            );
-
-            if (min(numberDensity) < 0)
-            {
-                FatalErrorInFunction
-                    << "Negative number density on inflow patch " << patch.name()
-                    << " in field " << numberDensityFieldNames_[i] << "." << nl
-                    << "Range: " << min(numberDensity) << " .. "
-                    << max(numberDensity) << nl
-                    << abort(FatalError);
-            }
+            // Already divided by nParticle at construction, so this is in
+            // parcels per m^3 -- the same units FreeStream's numberDensities_
+            // carries by the time it reaches this expression.
+            const scalarField& numberDensity = numberDensities_[p][i];
 
             const scalarField mostProbableSpeed
             (

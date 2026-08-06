@@ -62,9 +62,16 @@ meta:
 #
 #   inflow   level 2 -> 6.25 mm   (24 cells across the 0.1524 m radius)
 #   cylinder level 2 -> 6.25 mm   (~77 cells around the circumference)
-#   plate    level 3 -> 3.125 mm  (4 cells across the 12.7 mm thickness; the
-#                                  plate is the thinnest body, so it needs the
-#                                  extra level to exist as a solid at all)
+#   plate    level 2 -> 6.25 mm   (2 cells across the 12.7 mm thickness)
+#
+#   Level 2 rather than 3 at the plate is a resolution decision, not a geometric
+#   one. Both mesh correctly and both measure the plate's dimensions exactly
+#   (verified against OpenFOAM v2512: 56 274 cells at level 3, 34 346 at level 2,
+#   checkMesh "Mesh OK" either way). But the plate sits where the plume is ~6x
+#   less dense than at the cylinder, and halving the cell divides the occupancy
+#   there by eight. At level 3 the estimator reports 0.4 particles/cell at the
+#   plate against a target of 20; at level 2 it reports 3.2. Neither meets the
+#   target -- see the resolution: section -- but 0.4 is noise.
 #
 #   Level 2 at the cylinder is set by the mean free path, not by geometry: at
 #   475 psi the mfp at the cylinder stagnation region is ~4.6 mm, so 6.25 mm
@@ -86,7 +93,7 @@ mesh:
   background_cell_size_m: 0.025
   inflow_refinement_level: 2
   cylinder_refinement_level: 2
-  plate_refinement_level: 3
+  plate_refinement_level: 2
   n_cells_between_levels: 2
   refinement_level: 2          # fallback if a per-surface level is unset
   # 'patch' is CORRECT here and costs nothing, because this case runs the
@@ -202,7 +209,7 @@ dsmc:
   end_time_s: 4.0e-3                 # [ASSUMPTION] ~3.5 domain transits at 789 m/s
   write_interval_s: 5.0e-4
   average_start_s: 2.0e-3            # [ASSUMPTION] discard the first ~1.8 transits
-  initial_number_density_per_m3: 1.0e14   # near-vacuum seed, not a physical state
+  initial_number_density_per_m3: 1.0e+14   # near-vacuum seed, not a physical state
   initial_temperature_K: 300.0
   n_subdomains: 4
 
@@ -211,10 +218,23 @@ dsmc:
 # (DSMCCloud::nParticle_ is a single scalar). There is no radial or adaptive
 # weighting to configure, so the target can be met in exactly one region and the
 # others follow. The estimator reports occupancy in ALL regions either way.
+#
+# MEASURED at the shipped mesh (level 2 everywhere), sized on the cylinder:
+#
+#   cylinder  20.0 particles/cell   <- the target, met by construction
+#   wake       6.2
+#   plate      3.2
+#   total      ~3.4e6 particles
+#
+# Sizing on 'plate' instead would meet the target everywhere at ~2.1e7 particles,
+# a 6x cost. Sizing on 'wake' lands between the two. The estimator reports all
+# three whichever is chosen, and ./Allpost audits what actually happened against
+# the sampled dsmcRhoN field -- the target is never claimed met on the strength
+# of the estimate alone.
 resolution:
   target_particles_per_cell: 20.0
-  sizing_region: cylinder      # 'plate' meets the target everywhere at several
-                               # times the particle count; see the README
+  sizing_region: cylinder      # 'plate' meets the target everywhere at ~6x the
+                               # particle count; see the README
   wake_offset_m: 0.0254        # 1 in behind the cylinder base
   report_only: false
 

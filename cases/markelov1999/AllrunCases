@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# Run every generated case, in order.
+#
+#   ./AllrunCases                run all of them
+#   ./AllrunCases --serial       one process per case
+#   ./AllrunCases -np 8          override the subdomain count
+#   ./AllrunCases --no-solve     generate 0/ only (needs no solver)
+#   ./AllrunCases --keep-going   do not stop at the first failure
+#   ./AllrunCases --help
+#
+# Sequentially, not in parallel: each case already uses every core it is given,
+# and two DSMC runs competing for memory is how a study of four cases turns into
+# four cases that all get killed.
+#
+# Cases come from manifest.yaml in the order generate_cases.py wrote them, so the
+# sequence is reproducible. Nothing here re-meshes -- ./Allrun never does, and a
+# solver run that changed its own geometry would invalidate its own results.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+ARGS=()
+KEEP_GOING=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)  KEEP_GOING=1 ;;
+        -s|--serial)   ARGS+=("--serial") ;;
+        -np)           shift; ARGS+=("-np" "${1:?"-np needs a subdomain count"}") ;;
+        --no-solve)    ARGS+=("--no-solve") ;;
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)             echo "AllrunCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllrunCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+[ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+echo "### running ${#CASES[@]} case(s), sequentially"
+echo ""
+
+START=$(date +%s)
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    echo "### $case_path"
+    echo "=============================================================="
+    [ -d "$case_path/constant/polyMesh" ] || die "$case_path has no mesh.
+       Run ./AllmeshCases first."
+
+    CASE_START=$(date +%s)
+    if [ -x "$case_path/Allrun" ]; then
+        "$case_path/Allrun" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    elif [ -f "$case_path/Allrun" ]; then
+        bash "$case_path/Allrun" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    else
+        echo "AllrunCases: $case_path has no Allrun" >&2
+        FAILED+=("$case_path")
+    fi
+    echo "    elapsed $(( $(date +%s) - CASE_START )) s"
+
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Its log files are in that directory.
+       Use --keep-going to run the remaining cases anyway."
+    fi
+    echo ""
+done
+
+echo "### finished in $(( $(date +%s) - START )) s"
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "AllrunCases: ${#FAILED[@]} of ${#CASES[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+echo "    next:  ./AllpostCases"

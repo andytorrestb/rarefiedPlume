@@ -1,0 +1,190 @@
+#!/bin/bash
+#
+# Run this case end to end.
+#
+#   ./Allrun                 decomposition from system/decomposeParDict
+#   ./Allrun --serial        force a single process
+#   ./Allrun -np 8           override the subdomain count
+#   ./Allrun --no-solve      stop after generating 0/ (needs no solver)
+#   ./Allrun --help
+#
+# Order (all of it load-bearing):
+#
+#   1. runInflow.py    writes 0/boundaryU, boundaryT, boundaryNumberDensity_N2
+#                      and the nine measurement fields; verifies the inflow flux
+#   2. dsmcInitialise  CONSTRUCTS a DSMCCloud, whose constructor reads
+#                      0/boundaryT and 0/boundaryU with MUST_READ -- so step 1
+#                      has to come first
+#   3. dsmcFoam        solve
+#
+# This script never re-meshes. Mesh generation is ./Allmesh, kept separate so a
+# solver run cannot silently change the geometry underneath its own results.
+#
+# Every command's exit status is checked, and the first FOAM FATAL block is
+# printed rather than the tail of the log -- under mpirun the last lines are MPI
+# teardown from every rank and the actual cause has scrolled past.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+CASE_NAME=${PWD##*/}
+NP=""
+NP_EXPLICIT=0
+SOLVE=1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s|--serial) NP=1; NP_EXPLICIT=1 ;;
+        -np)         shift; NP=${1:?"-np needs a subdomain count"}; NP_EXPLICIT=1 ;;
+        --no-solve)  SOLVE=0 ;;
+        -h|--help)   awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)           echo "Allrun: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+foam_entry() {
+    local key=$1 file=$2 value
+    value=$(sed -n "s/^[[:space:]]*$key[[:space:]]\+\([^;]*\);.*/\1/p" "$file" 2>/dev/null | head -1)
+    echo "${value//[[:space:]]/}"
+}
+
+# --------------------------------------------------------------------------- #
+# preflight
+# --------------------------------------------------------------------------- #
+
+echo "### $CASE_NAME"
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a markelov1999 case?"
+[ -f runInflow.py ] || die "no runInflow.py here"
+
+[ -d constant/polyMesh ] || die "no constant/polyMesh. Generate it first:
+       ./Allmesh"
+
+[ -f constant/dsmcProperties ] || die "no constant/dsmcProperties. It is
+       GENERATED from case.yaml, so run ./Allmesh first."
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+if [ "$SOLVE" -eq 1 ]; then
+    have dsmcFoam || die "'dsmcFoam' is not on PATH. Source your OpenFOAM
+       environment, or use --no-solve to stop after generating 0/."
+    have dsmcInitialise || die "'dsmcInitialise' is not on PATH"
+
+    # Fail fast if the custom inflow library is missing. Without this the run
+    # gets several minutes in -- through dsmcInitialise and decomposePar -- and
+    # then dies with an unknown-model error whose cause is not obvious. There is
+    # deliberately NO fallback to a uniform inflow.
+    LIB=libplumeDsmcBoundaryModels.so
+    if grep -q "InflowBoundaryModel *plumeFieldInflow" constant/dsmcProperties; then
+        FOUND=0
+        for dir in "${FOAM_USER_LIBBIN:-}" "${FOAM_SITE_LIBBIN:-}" "${FOAM_LIBBIN:-}"; do
+            [ -n "$dir" ] && [ -f "$dir/$LIB" ] && FOUND=1 && break
+        done
+        [ "$FOUND" -eq 1 ] || die "$LIB is not built.
+       constant/dsmcProperties selects the plumeFieldInflow boundary model, which
+       lives in that library. Stock dsmcFoam cannot express this case's inflow --
+       it injects on every patch-type boundary and takes ONE number density per
+       species -- so there is no fallback and the run would abort.
+
+       Build it:
+           cd ../../../../applications/dsmcBoundaryModels && ./Allwmake
+
+       Searched: \${FOAM_USER_LIBBIN}, \${FOAM_SITE_LIBBIN}, \${FOAM_LIBBIN}"
+    fi
+fi
+
+if [ -z "$NP" ]; then
+    NP=$(foam_entry numberOfSubdomains system/decomposeParDict)
+    NP=${NP:-1}
+fi
+case "$NP" in
+    ''|*[!0-9]*) die "subdomain count must be a positive integer, got '$NP'" ;;
+esac
+
+echo "    subdomains=$NP  solve=$SOLVE"
+echo ""
+
+# --------------------------------------------------------------------------- #
+# 1. analytical inflow conditions -- the only step needing no OpenFOAM
+# --------------------------------------------------------------------------- #
+
+echo "==> $PYTHON runInflow.py"
+$PYTHON runInflow.py || die "runInflow.py failed (see above). It refuses to
+       write a case whose DSMC checks fail."
+
+for f in 0/boundaryU 0/boundaryT; do
+    [ -s "$f" ] || die "$f was not written"
+done
+ls 0/boundaryNumberDensity_* >/dev/null 2>&1 \
+    || die "no 0/boundaryNumberDensity_* was written"
+
+if [ "$SOLVE" -eq 0 ]; then
+    echo ""
+    echo "Stopped after generating 0/ (--no-solve)."
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+# 2. initialise
+# --------------------------------------------------------------------------- #
+
+run dsmcInitialise dsmcInitialise
+
+# --------------------------------------------------------------------------- #
+# 3. solve
+# --------------------------------------------------------------------------- #
+
+DECOMP_ARGS=""
+if [ "$NP_EXPLICIT" -eq 1 ] && [ "$NP" != "$(foam_entry numberOfSubdomains system/decomposeParDict)" ]; then
+    OVERRIDE=system/decomposeParDict.Allrun
+    cp system/decomposeParDict "$OVERRIDE"
+    have foamDictionary || die "foamDictionary is not on PATH, so -np cannot
+       override system/decomposeParDict. Set dsmc.n_subdomains in case.yaml and
+       re-run ./Allmesh instead."
+    foamDictionary "$OVERRIDE" -entry numberOfSubdomains -set "$NP" >/dev/null 2>&1 \
+        || die "could not set numberOfSubdomains in $OVERRIDE"
+    DECOMP_ARGS="-decomposeParDict $OVERRIDE"
+    echo "    (-np $NP overrides decomposeParDict via $OVERRIDE)"
+fi
+
+if [ "$NP" -gt 1 ]; then
+    have decomposePar || die "'decomposePar' is not on PATH"
+    have mpirun || die "'mpirun' is not on PATH (use --serial for one process)"
+    run decomposePar decomposePar -force $DECOMP_ARGS
+    run dsmcFoam mpirun -np "$NP" dsmcFoam -parallel $DECOMP_ARGS
+    # reconstructPar is NOT optional: without it the post-processing would read
+    # the undecomposed case directory, which holds no results at all.
+    have reconstructPar || die "'reconstructPar' is not on PATH"
+    run reconstructPar reconstructPar
+else
+    run dsmcFoam dsmcFoam
+fi
+
+echo ""
+echo "### $CASE_NAME finished"
+echo "    log:     log.dsmcFoam"
+echo "    next:    ./Allpost"

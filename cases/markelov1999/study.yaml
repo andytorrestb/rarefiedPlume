@@ -1,0 +1,40 @@
+# The AIAA 99-3455 case matrix.
+#
+# Lumpkin, Stewart & Markelov, "Study of 3D Rarefied Flow on a Flat Plate in the
+# Wake of a Cylinder", AIAA 99-3455, 1999.
+#
+# Generate with:
+#     ./generate_cases.py                 every enabled case
+#     ./generate_cases.py --dry-run       show what would be generated
+#     ./generate_cases.py --pressures 5 25
+#
+# To skip a case, set enabled: false. The entry STAYS -- it is the record of the
+# intended matrix, and deleting it would lose the fact that the case exists.
+
+base_case: baseCase
+cases_dir: Cases
+manifest_name: manifest.yaml
+
+# One separation. The 12 in gap cases are explicitly out of scope; the geometry
+# code derives the plate position from this, so adding them later is a second
+# gap_dir and no code change.
+gap_in: 6.0
+gap_dir: gap06in
+
+# [PAPER] the four reservoir pressures.
+pressure_cases:
+  - {name: p005psi, pressure_psi: 5,   enabled: true}
+  - {name: p025psi, pressure_psi: 25,  enabled: true}
+  - {name: p100psi, pressure_psi: 100, enabled: true}
+  - {name: p475psi, pressure_psi: 475, enabled: true}
+
+meta:
+  reference: AIAA 99-3455
+  gas: N2
+  collision_model: VHS + Larsen-Borgnakke
+  rotational_collision_number: 5
+  note: >-
+    Reservoir pressures, gas, collision-model family and ZR are paper values.
+    The inflow hemisphere radius, domain extents, plate thickness, mesh sizes,
+    VHS coefficients, time step and particle weighting are implementation
+    assumptions -- see docs/markelov1999-case.md.

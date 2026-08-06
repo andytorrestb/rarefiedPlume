@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+# Post-process every generated case and build the combined study table.
+#
+#   ./AllpostCases               post-process all of them
+#   ./AllpostCases --keep-going  do not stop at the first failure
+#   ./AllpostCases --help
+#
+# Produces:
+#
+#   <case>/case-summary.json     per case
+#   results/study-table.csv      the combined table
+#   results/*.png                windward / leeward / ratio against pressure
+#
+# Rows follow manifest.yaml order -- sorted by reservoir pressure -- so the table
+# is byte-for-byte reproducible.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+KEEP_GOING=0
+case "${1:-}" in
+    "")            ;;
+    --keep-going)  KEEP_GOING=1 ;;
+    -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    *)             echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+
+die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+echo "### post-processing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    if [ -x "$case_path/Allpost" ]; then
+        "$case_path/Allpost" || FAILED+=("$case_path")
+    elif [ -f "$case_path/Allpost" ]; then
+        bash "$case_path/Allpost" || FAILED+=("$case_path")
+    else
+        echo "AllpostCases: $case_path has no Allpost" >&2
+        FAILED+=("$case_path")
+    fi
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Use --keep-going to continue with the rest."
+    fi
+    echo ""
+done
+
+# --------------------------------------------------------------------------- #
+# combined study table
+# --------------------------------------------------------------------------- #
+
+echo "=============================================================="
+echo "### combined study table"
+
+$PYTHON - <<'PY' || die "could not build the study table"
+import json
+from pathlib import Path
+
+import yaml
+
+from plumetools.markelov1999.postprocess import (
+    STUDY_COLUMNS,
+    plot_study,
+    summary_row,
+    write_study_table,
+)
+
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+rows = []
+missing = []
+for entry in document.get("cases", []):
+    path = Path(entry["path"]) / "case-summary.json"
+    if not path.is_file():
+        missing.append(entry["path"])
+        continue
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    summary.setdefault("case", {}).setdefault("name", entry["name"])
+    summary["case"].setdefault("pressure_psi", entry["pressure_psi"])
+    summary["case"].setdefault("pressure_pa", entry["pressure_pa"])
+    summary["case"].setdefault("gap_in", entry["gap_in"])
+    rows.append(summary_row(summary))
+
+table = write_study_table(Path("results") / "study-table.csv", rows)
+print(f"    wrote {table}  ({len(rows)} row(s))")
+if missing:
+    print(f"    {len(missing)} case(s) had no case-summary.json: {missing}")
+
+widths = {c: max(len(c), 14) for c in STUDY_COLUMNS}
+print()
+print("    " + "  ".join(f"{c:>{widths[c]}}" for c in STUDY_COLUMNS))
+for row in rows:
+    cells = []
+    for column in STUDY_COLUMNS:
+        value = row.get(column, "")
+        cells.append(f"{value:>{widths[column]}.6g}"
+                     if isinstance(value, float) else f"{str(value):>{widths[column]}}")
+    print("    " + "  ".join(cells))
+
+figures = plot_study(table, Path("results"))
+print()
+if figures:
+    for figure in figures:
+        print(f"    wrote {figure}")
+else:
+    print("    no plots: matplotlib is not installed "
+          '(pip install -e ".[plots]")')
+PY
+
+echo ""
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "AllpostCases: ${#FAILED[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+echo "### done"
+echo ""
+echo "These results are NOT validated. Nothing here has been compared with DAC"
+echo "or with experiment; see cases/markelov1999/README.md."

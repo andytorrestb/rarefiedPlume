@@ -60,6 +60,11 @@ cases/markelov1999/*/constant/polyMesh/
 # ... and the same under the generated Cases/ tree, which is itself derived from
 # baseCase and reproducible with ./generate_cases.py.
 cases/markelov1999/Cases/
+# manifest.yaml records what generate_cases.py produced in that tree, so it is
+# only meaningful alongside it.
+cases/markelov1999/manifest.yaml
+cases/markelov1999/results/
+cases/markelov1999/*/case-summary.json
 
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a

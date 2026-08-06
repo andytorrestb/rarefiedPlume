@@ -572,8 +572,35 @@ def _build(cls, data: dict, where: str):
             value = _build(nested[f.name], value or {}, f"{where}.{f.name}")
         elif f.type in ("tuple", tuple) and isinstance(value, list):
             value = tuple(value)
+        elif isinstance(value, str):
+            value = _coerce_number(value, f, where)
         coerced[f.name] = value
     return cls(**coerced)
+
+
+def _coerce_number(value: str, f, where: str):
+    """Turn a numeric-looking string into a number for a numeric field.
+
+    YAML 1.1 requires the exponent of a float to carry a sign, so ``1.0e-14``
+    parses as a float but ``1.0e14`` parses as a **string**. That is a genuine
+    trap: the value looks right in the file, loads without complaint, and then
+    fails deep inside a dictionary renderer with ``Unknown format code 'g' for
+    object of type 'str'``, a long way from the line that caused it.
+
+    So a string reaching a field declared ``float`` or ``int`` is converted here,
+    or rejected with the key name and the fix.
+    """
+    annotation = str(f.type)
+    if "float" not in annotation and "int" not in annotation:
+        return value
+    try:
+        return float(value) if "float" in annotation else int(value)
+    except ValueError:
+        raise ConfigError(
+            f"{where}: {f.name} is {value!r}, which is not a number. If it looks "
+            f"like one, check the exponent: YAML requires a signed exponent, so "
+            f"1.0e+14 is a float and 1.0e14 is a string."
+        ) from None
 
 
 def load_case_config(case_dir: Path) -> CaseConfig:

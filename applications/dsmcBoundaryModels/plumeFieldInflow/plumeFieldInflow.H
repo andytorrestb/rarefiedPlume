@@ -127,10 +127,25 @@ class plumeFieldInflow
         //- The molecule types to be introduced
         List<label> moleculeTypeIds_;
 
-        //- Per-species number-density fields, already divided by nParticle so
-        //  they are in PARCELS per m^3, matching what the flux accumulator wants.
-        //  Owned here: the fields are read from the time directory and must
-        //  outlive the constructor.
+        //- Per-face number density on each injection patch, already divided by
+        //  nParticle so it is in PARCELS per m^3 -- which is what the flux
+        //  accumulator counts.
+        //  + Outer List  - one inner List per patch, matching patches_
+        //  + Inner List  - one Field per species
+        //  + Field entry - one per patch face
+        //
+        //  Extracted ONCE at construction rather than read from the field every
+        //  timestep, and copied out rather than scaling the volScalarField in
+        //  place. Scaling in place would touch the patch fields of boundaries
+        //  this model has nothing to do with, including zeroGradient ones whose
+        //  storage OpenFOAM has not initialised at that point -- arithmetic on
+        //  which raises a floating-point exception. It also leaves the field on
+        //  disk in physical 1/m^3, which is what anyone inspecting it expects.
+        List<List<Field<scalar>>> numberDensities_;
+
+        //- The number-density fields, kept registered and AUTO_WRITE so they are
+        //  rewritten into each output time directory and a restart finds them.
+        //  Not otherwise used after construction.
         PtrList<volScalarField> numberDensityFields_;
 
         //- Names of those fields, for error messages.
@@ -150,6 +165,10 @@ class plumeFieldInflow
 
         //- Read the per-species number-density fields, or abort.
         void readNumberDensityFields(CloudType& cloud);
+
+        //- Copy each injection patch's number density out and scale it by
+        //  1/nParticle, or abort.
+        void extractNumberDensities(CloudType& cloud);
 
 
 public:
