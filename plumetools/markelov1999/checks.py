@@ -234,8 +234,10 @@ def _check_patches(cfg, patches, report: CheckReport) -> None:
             "duplicate_patches", "pass",
             "no patch name serves two roles"))
 
-    empty = sorted(name for name, info in patches.items()
-                   if info.n_faces == 0 and name in expected.values())
+    # Only patches that are actually present: a missing one is already reported
+    # above, and looking it up here would raise instead of adding to the report.
+    present = [name for name in expected.values() if name in patches]
+    empty = sorted(name for name in present if patches[name].n_faces == 0)
     if empty:
         report.add(CheckResult(
             "empty_patches", "fail",
@@ -247,7 +249,7 @@ def _check_patches(cfg, patches, report: CheckReport) -> None:
         report.add(CheckResult(
             "empty_patches", "pass",
             "every required patch has faces: "
-            + ", ".join(f"{n}({patches[n].n_faces})" for n in sorted(expected.values()))))
+            + ", ".join(f"{n}({patches[n].n_faces})" for n in sorted(present))))
 
 
 def _check_time_step(cfg, cell_sizes: dict, report: CheckReport) -> None:
