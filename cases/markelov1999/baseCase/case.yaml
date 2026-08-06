@@ -70,7 +70,7 @@ meta:
 #   checkMesh "Mesh OK" either way). But the plate sits where the plume is ~6x
 #   less dense than at the cylinder, and halving the cell divides the occupancy
 #   there by eight. At level 3 the estimator reports 0.4 particles/cell at the
-#   plate against a target of 20; at level 2 it reports 3.2. Neither meets the
+#   plate against a target of 20; at level 2 it reports 3.6. Neither meets the
 #   target -- see the resolution: section -- but 0.4 is noise.
 #
 #   Level 2 at the cylinder is set by the mean free path, not by geometry: at
@@ -223,7 +223,7 @@ dsmc:
 #
 #   cylinder  20.0 particles/cell   <- the target, met by construction
 #   wake       6.2
-#   plate      3.2
+#   plate      3.6
 #   total      ~3.4e6 particles
 #
 # Sizing on 'plate' instead would meet the target everywhere at ~2.1e7 particles,

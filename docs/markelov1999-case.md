@@ -315,9 +315,12 @@ Every result — pass, warn or fail — is recorded in `case-summary.json`.
 * **No validation.** No comparison with DAC or experiment. `AllpostCases` says so
   in its own output.
 * **The 20 particles/cell target is met in one region only.** See §3.8.
-* **The cylinder cell is marginal against the mean free path at 475 psi** —
-  ~4.6 mm mfp against a 6.25 mm cell. The check warns. One more refinement level
-  fixes the ratio and multiplies the particle count by eight.
+* **The cylinder cell is marginal against the mean free path at 475 psi.**
+  Measured: the ratio is **1.36** there — a 6.25 mm cell against a 4.6 mm mean
+  free path — so `checks` warns. It falls to 0.42 in the wake, 0.24 at the plate,
+  and below 0.02 everywhere at 5 psi, so only the highest-pressure case is
+  affected. One more refinement level at the cylinder fixes the ratio and
+  multiplies the particle count by eight.
 * **No wake or gap refinement.** Deliberately, per the scope; the configuration
   path is in place.
 * **The 12 in gap cases are not implemented.** The geometry derives the plate
