@@ -333,7 +333,32 @@ Every result — pass, warn or fail — is recorded in `case-summary.json`.
 
 ---
 
-## 7. Related documents
+## 7. Case generation
+
+[CaseFoam](https://github.com/DLR-RY/caseFOAM) clones `baseCase` into
+`Cases/gap06in/<case>`. It is a dependency — `pip install -e ".[cases]"` — with
+no built-in substitute, and `manifest.yaml` records the version that produced the
+tree.
+
+`caseData` is passed empty, so CaseFoam does the cloning and the hierarchy and
+nothing else. Its two parameter-application forms both miss `case.yaml`: the
+dictionary-aware one goes through PyFoam's `ParsedParameterFile`, which reads
+OpenFOAM dictionaries and not YAML, and the other is `'#!stringManipulation'`,
+the whitespace-sensitive substitution `util/caseFoam/genCases.py` uses and this
+design avoids. The physical values are therefore applied by
+`apply_case_parameters`, which loads the YAML, sets specific keys and re-emits —
+so a key that is not there is an error rather than a silent no-op.
+
+Two consequences worth knowing:
+
+* CaseFoam writes `Allrun`, `Allclean` and `rmCases` into the study directory,
+  and its `Allrun` launches every case **concurrently**. Use `./AllrunCases`,
+  which runs them sequentially in manifest order. Both are left in place.
+* CaseFoam copies the template faithfully, so a dictionary left in `baseCase` by
+  running `./Allmesh` there would be inherited by every case. Those are removed
+  from each clone — template hygiene, not a second cloner.
+
+## 8. Related documents
 
 * [`cases/markelov1999/README.md`](../cases/markelov1999/README.md) — running it
 * [`docs/plume-field-inflow.md`](plume-field-inflow.md) — the custom boundary model

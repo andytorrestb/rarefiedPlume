@@ -11,17 +11,25 @@ import yaml
 
 from plumetools.markelov1999.constants import PSI_TO_PA
 from plumetools.markelov1999.study import (
-    CASE_TEMPLATE_ENTRIES,
     PressureCase,
     StudyError,
     apply_case_parameters,
     case_is_complete,
-    clone_base_case,
+    clone_cases,
     filter_by_pressure,
-    generation_backend,
     load_study,
+    prune_generated_dictionaries,
+    require_casefoam,
     write_manifest,
 )
+
+
+def _casefoam_installed() -> bool:
+    try:
+        import casefoam  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 STUDY_YAML = """\
 base_case: baseCase
@@ -198,14 +206,19 @@ def test_duplicate_pressures_are_an_error(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# cloning
+# cloning -- CaseFoam is a dependency, so these need it
 # --------------------------------------------------------------------------- #
+
+needs_casefoam = pytest.mark.skipif(
+    not _casefoam_installed(),
+    reason='casefoam is not installed (pip install -e ".[cases]")')
+
 
 @pytest.fixture
 def base_case(tmp_path):
+    """A minimal template, shaped like cases/markelov1999/baseCase."""
     base = tmp_path / "baseCase"
     (base / "system").mkdir(parents=True)
-    (base / "constant" / "polyMesh").mkdir(parents=True)
     (base / "case.yaml").write_text(
         "model: markelov1999_axisymmetric\n"
         "stagnation: {p0_pa: 34473.79}\n"
@@ -214,85 +227,182 @@ def base_case(tmp_path):
     (base / "Allrun").write_text("#!/bin/bash\n", encoding="utf-8")
     (base / "runInflow.py").write_text("# inflow\n", encoding="utf-8")
     (base / "system" / "fvSchemes").write_text("ddtSchemes{}\n", encoding="utf-8")
-    (base / "constant" / "polyMesh" / "points").write_text("0\n", encoding="utf-8")
     return base
 
 
-def test_clone_copies_the_template_files(base_case, tmp_path):
-    destination = tmp_path / "out" / "p005psi"
-    clone_base_case(base_case, destination)
-
-    assert (destination / "case.yaml").is_file()
-    assert (destination / "Allrun").is_file()
-    assert (destination / "runInflow.py").is_file()
-    assert (destination / "system" / "fvSchemes").is_file()
-
-
-def test_clone_does_not_inherit_the_template_mesh(base_case, tmp_path):
-    """Each case meshes itself from its own case.yaml. Inheriting a mesh would
-    silently give every case the template's geometry."""
-    destination = tmp_path / "out" / "p005psi"
-    clone_base_case(base_case, destination)
-    assert not (destination / "constant" / "polyMesh").exists()
+@pytest.fixture
+def study_root(tmp_path, base_case):
+    """A study directory: the template plus the study-level files."""
+    root = tmp_path / "study"
+    root.mkdir()
+    shutil.copytree(base_case, root / "baseCase")
+    (root / "study.yaml").write_text(STUDY_YAML, encoding="utf-8")
+    (root / "AllrunCases").write_text("#!/bin/bash\n", encoding="utf-8")
+    (root / "README.md").write_text("# study\n", encoding="utf-8")
+    (root / "generate_cases.py").write_text("# generator\n", encoding="utf-8")
+    return root
 
 
-def test_clone_rejects_a_missing_or_incomplete_base(tmp_path):
+def test_casefoam_is_required_not_optional():
+    """There is no built-in substitute. Reimplementing a case generator the
+    project already depends on would mean maintaining two, and the one that is
+    not exercised is the one that drifts."""
+    import plumetools.markelov1999.study as study_module
+    assert not hasattr(study_module, "clone_base_case")
+    assert not hasattr(study_module, "generation_backend")
+
+
+def test_a_missing_casefoam_names_the_install_command(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_casefoam(name, *args, **kwargs):
+        if name == "casefoam":
+            raise ImportError("no casefoam")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_casefoam)
+    with pytest.raises(StudyError, match=r'pip install -e "\.\[cases\]"'):
+        require_casefoam()
+
+
+@needs_casefoam
+def test_casefoam_builds_the_expected_hierarchy(study_root, study):
+    generated = clone_cases(study_root, study, study.enabled_cases())
+
+    assert [p.name for p in generated] == [
+        "p005psi", "p025psi", "p100psi", "p475psi"]
+    for path in generated:
+        assert path.is_dir()
+        assert path.parent.name == "gap06in"
+        assert path.parent.parent.name == "Cases"
+        assert (path / "case.yaml").is_file()
+        assert (path / "Allrun").is_file()
+        assert (path / "system" / "fvSchemes").is_file()
+
+
+@needs_casefoam
+def test_the_study_directory_is_not_disturbed(study_root, study):
+    """mkCases is pointed at the baseCase DIRECTORY, not the study root. Pointed
+    at the root it copies study.yaml, generate_cases.py and the drivers into
+    Cases/ -- which is what the first attempt at this integration got wrong."""
+    clone_cases(study_root, study, study.enabled_cases())
+
+    for name in ("study.yaml", "AllrunCases", "README.md", "generate_cases.py"):
+        assert (study_root / name).is_file(), f"{name} disappeared"
+
+    leaked = {p.name for p in (study_root / "Cases").rglob("*")}
+    for name in ("study.yaml", "AllrunCases", "generate_cases.py"):
+        assert name not in leaked, f"{name} leaked into Cases/"
+
+
+@needs_casefoam
+def test_casefoams_own_artefacts_are_left_alone(study_root, study):
+    """Cases/baseCase, and the rmCases/Allrun/Allclean CaseFoam writes into
+    Cases/, are its own layout -- the same one cases/caseFoamEx has. They are
+    not cleaned up."""
+    clone_cases(study_root, study, study.enabled_cases())
+    assert (study_root / "Cases" / "baseCase").is_dir()
+
+
+@needs_casefoam
+def test_regenerating_replaces_the_previous_tree(study_root, study):
+    """mkCases swallows FileExistsError from its own copytree, so a stale Cases/
+    would otherwise be restructured in place."""
+    clone_cases(study_root, study, study.enabled_cases())
+    (study_root / "Cases" / "gap06in" / "p005psi" / "stale.txt").write_text(
+        "left over\n", encoding="utf-8")
+
+    clone_cases(study_root, study, study.enabled_cases())
+    assert not (study_root / "Cases" / "gap06in" / "p005psi" / "stale.txt").exists()
+
+
+@needs_casefoam
+def test_generated_cases_do_not_inherit_a_dictionary_from_the_template(
+        study_root, study):
+    """CaseFoam copies the template faithfully, as it should. A dictionary left
+    in baseCase by someone running ./Allmesh there would otherwise let a case run
+    against the template's physics instead of its own."""
+    (study_root / "baseCase" / "system" / "controlDict").write_text(
+        "// stale\n", encoding="utf-8")
+    (study_root / "baseCase" / "constant").mkdir(exist_ok=True)
+    (study_root / "baseCase" / "constant" / "dsmcProperties").write_text(
+        "// stale\n", encoding="utf-8")
+
+    generated = clone_cases(study_root, study, study.enabled_cases())
+
+    for path in generated:
+        assert not (path / "system" / "controlDict").exists()
+        assert not (path / "constant" / "dsmcProperties").exists()
+        # A static dictionary the case does not generate is kept.
+        assert (path / "system" / "fvSchemes").is_file()
+
+
+@needs_casefoam
+def test_a_missing_template_is_an_error(tmp_path, study):
+    root = tmp_path / "empty"
+    root.mkdir()
     with pytest.raises(StudyError, match="does not exist"):
-        clone_base_case(tmp_path / "nope", tmp_path / "out")
+        clone_cases(root, study, study.enabled_cases())
 
-    empty = tmp_path / "empty"
-    empty.mkdir()
+    (root / "baseCase").mkdir()
     with pytest.raises(StudyError, match="no case.yaml"):
-        clone_base_case(empty, tmp_path / "out")
+        clone_cases(root, study, study.enabled_cases())
 
 
-def test_the_template_entry_list_names_no_generated_dictionary():
-    """Generated dictionaries must NOT be copied: they would be a second,
-    silently divergent source of truth for the physics."""
-    for generated in ("dsmcProperties", "controlDict", "blockMeshDict",
-                      "snappyHexMeshDict", "dsmcInitialiseDict"):
-        assert generated not in CASE_TEMPLATE_ENTRIES
+def test_pruning_removes_what_a_case_must_not_inherit(tmp_path):
+    """The hygiene step, tested directly so it needs no CaseFoam."""
+    case = tmp_path / "case"
+    (case / "system").mkdir(parents=True)
+    (case / "constant" / "polyMesh").mkdir(parents=True)
+    (case / "0").mkdir()
+    (case / "case.yaml").write_text("model: x\n", encoding="utf-8")
+    (case / "system" / "controlDict").write_text("// generated\n", encoding="utf-8")
+    (case / "system" / "fvSchemes").write_text("// static\n", encoding="utf-8")
+    (case / "constant" / "dsmcProperties").write_text("// generated\n", encoding="utf-8")
+
+    prune_generated_dictionaries(case)
+
+    assert not (case / "system" / "controlDict").exists()
+    assert not (case / "constant" / "dsmcProperties").exists()
+    assert not (case / "constant" / "polyMesh").exists()
+    assert not (case / "0").exists()
+    assert (case / "case.yaml").is_file()
+    assert (case / "system" / "fvSchemes").is_file()
 
 
 # --------------------------------------------------------------------------- #
 # applying case parameters
 # --------------------------------------------------------------------------- #
 
-def test_parameters_are_applied_structurally(base_case, tmp_path, study):
+def test_parameters_are_applied_structurally(tmp_path, study):
     """Structured YAML editing, not string substitution: the value is replaced
     whatever its original formatting."""
-    destination = tmp_path / "out" / "p025psi"
-    clone_base_case(base_case, destination)
-    case = PressureCase(name="p025psi", pressure_psi=25.0)
+    destination = tmp_path / "p025psi"
+    destination.mkdir()
+    (destination / "case.yaml").write_text(
+        "model: markelov1999_axisymmetric\n"
+        "stagnation: {p0_pa: 34473.79}\n"
+        "dsmc: {n_equivalent_particles: null}\n"
+        "meta: {reference: AIAA 99-3455}\n", encoding="utf-8")
 
-    applied = apply_case_parameters(destination, case, study,
-                                    n_equivalent_particles=1.5e11)
+    applied = apply_case_parameters(
+        destination, PressureCase("p025psi", 25.0), study,
+        n_equivalent_particles=1.5e11)
 
     data = yaml.safe_load((destination / "case.yaml").read_text(encoding="utf-8"))
     assert data["stagnation"]["p0_pa"] == pytest.approx(25.0 * PSI_TO_PA, rel=1e-15)
     assert data["dsmc"]["n_equivalent_particles"] == pytest.approx(1.5e11)
     assert applied["pressure_psi"] == 25.0
 
-
-def test_case_metadata_records_the_pressure_and_the_gap(base_case, tmp_path, study):
-    destination = tmp_path / "out" / "p100psi"
-    clone_base_case(base_case, destination)
-    apply_case_parameters(destination, PressureCase("p100psi", 100.0), study)
-
-    meta = yaml.safe_load((destination / "case.yaml").read_text(encoding="utf-8"))["meta"]
-    assert meta["case_name"] == "p100psi"
-    assert meta["pressure_psi"] == 100.0
+    meta = data["meta"]
+    assert meta["case_name"] == "p025psi"
     assert meta["gap_in"] == 6.0
     assert meta["reference"] == "AIAA 99-3455"   # inherited, not overwritten
 
-
-def test_the_generated_case_yaml_says_it_is_generated(base_case, tmp_path, study):
-    destination = tmp_path / "out" / "p005psi"
-    clone_base_case(base_case, destination)
-    apply_case_parameters(destination, PressureCase("p005psi", 5.0), study)
-    text = (destination / "case.yaml").read_text(encoding="utf-8")
-    assert text.startswith("# GENERATED by")
-    assert "do not edit" in text
+    assert (destination / "case.yaml").read_text(
+        encoding="utf-8").startswith("# GENERATED by")
 
 
 def test_applying_to_a_file_without_the_expected_sections_is_an_error(tmp_path, study):
@@ -305,9 +415,12 @@ def test_applying_to_a_file_without_the_expected_sections_is_an_error(tmp_path, 
         apply_case_parameters(destination, PressureCase("x", 5.0), study)
 
 
-def test_leaving_the_weight_unset_keeps_it_unset(base_case, tmp_path, study):
-    destination = tmp_path / "out" / "p005psi"
-    clone_base_case(base_case, destination)
+def test_leaving_the_weight_unset_keeps_it_unset(tmp_path, study):
+    destination = tmp_path / "p005psi"
+    destination.mkdir()
+    (destination / "case.yaml").write_text(
+        "stagnation: {p0_pa: 1}\ndsmc: {n_equivalent_particles: null}\nmeta: {}\n",
+        encoding="utf-8")
     apply_case_parameters(destination, PressureCase("p005psi", 5.0), study)
     data = yaml.safe_load((destination / "case.yaml").read_text(encoding="utf-8"))
     assert data["dsmc"]["n_equivalent_particles"] is None
@@ -352,13 +465,13 @@ def test_manifest_records_every_generated_case(tmp_path, study):
          "gap_in": 6.0, "n_equivalent_particles": 1e11}
         for c in study.enabled_cases()
     ]
-    path = write_manifest(tmp_path / "manifest.yaml", study, entries, "builtin")
+    path = write_manifest(tmp_path / "manifest.yaml", study, entries)
 
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert document["n_generated"] == 4
     assert document["reference"] == "AIAA 99-3455"
     assert document["gap_in"] == 6.0
-    assert document["backend"] == "builtin"
+    assert document["generator"].startswith("casefoam ")
     assert [c["name"] for c in document["cases"]] == [
         "p005psi", "p025psi", "p100psi", "p475psi"]
     for case in document["cases"]:
@@ -373,7 +486,7 @@ def test_manifest_records_disabled_cases_as_a_decision(tmp_path):
         "{name: p475psi, pressure_psi: 475, enabled: true}",
         "{name: p475psi, pressure_psi: 475, enabled: false, note: too expensive}")
     study = load_study(write_study(tmp_path, text))
-    path = write_manifest(tmp_path / "manifest.yaml", study, [], "builtin")
+    path = write_manifest(tmp_path / "manifest.yaml", study, [])
 
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert document["disabled_cases"] == [
@@ -381,212 +494,16 @@ def test_manifest_records_disabled_cases_as_a_decision(tmp_path):
 
 
 def test_manifest_says_it_is_generated(tmp_path, study):
-    path = write_manifest(tmp_path / "manifest.yaml", study, [], "builtin")
+    path = write_manifest(tmp_path / "manifest.yaml", study, [])
     assert path.read_text(encoding="utf-8").startswith("# GENERATED by")
 
 
-def test_the_backend_is_recorded(tmp_path, study):
-    """CaseFoam is optional; the built-in clone produces the same tree, so this
-    is provenance rather than a behaviour switch."""
-    assert generation_backend() in ("casefoam", "builtin")
-
-
-# --------------------------------------------------------------------------- #
-# backend selection
-# --------------------------------------------------------------------------- #
-
-def test_builtin_is_always_available():
-    assert generation_backend("builtin") == "builtin"
-
-
-def test_auto_uses_casefoam_only_when_it_is_importable():
-    from plumetools.markelov1999.study import casefoam_available
-    expected = "casefoam" if casefoam_available() else "builtin"
-    assert generation_backend("auto") == expected
-
-
-def test_requiring_casefoam_fails_loudly_when_it_is_absent(monkeypatch):
-    """A study that asked for CaseFoam and silently got something else would be
-    unreproducible in exactly the way the manifest exists to prevent."""
-    monkeypatch.setattr(
-        "plumetools.markelov1999.study.casefoam_available", lambda: False)
-    with pytest.raises(StudyError, match="not importable"):
-        generation_backend("casefoam")
-
-
-def test_an_unknown_backend_is_rejected():
-    with pytest.raises(StudyError, match="unknown backend"):
-        generation_backend("caseFoam")
-
-
-# --------------------------------------------------------------------------- #
-# the two backends agree
-# --------------------------------------------------------------------------- #
-
-casefoam_only = pytest.mark.skipif(
-    not __import__("plumetools.markelov1999.study", fromlist=["x"]).casefoam_available(),
-    reason='casefoam is not installed (pip install -e ".[cases]")')
-
-
-@casefoam_only
-def test_casefoam_and_builtin_produce_the_same_tree(tmp_path, base_case):
-    """The claim the documentation makes, checked rather than asserted.
-
-    Both backends are run against the same template and the resulting trees are
-    compared file by file, by relative path and by content.
-    """
-    from plumetools.markelov1999.study import clone_with_casefoam
-
-    def build(root: Path, backend: str) -> dict:
-        root.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(base_case, root / "baseCase")
-        (root / "study.yaml").write_text(STUDY_YAML, encoding="utf-8")
-        study = load_study(root / "study.yaml")
-        cases = study.enabled_cases()
-
-        if backend == "casefoam":
-            clone_with_casefoam(root, study, cases)
-        else:
-            for case in cases:
-                clone_base_case(root / study.base_case, root / study.case_path(case))
-
-        return {
-            str(p.relative_to(root)).replace("\\", "/"): p.read_bytes()
-            for p in sorted((root / study.cases_dir).rglob("*")) if p.is_file()
-        }
-
-    with_casefoam = build(tmp_path / "cf", "casefoam")
-    with_builtin = build(tmp_path / "bi", "builtin")
-
-    assert sorted(with_casefoam) == sorted(with_builtin), (
-        "the two backends produced different file sets")
-    for name in with_casefoam:
-        assert with_casefoam[name] == with_builtin[name], f"{name} differs"
-
-
-@casefoam_only
-def test_casefoam_builds_the_expected_hierarchy(tmp_path, base_case, study):
-    from plumetools.markelov1999.study import clone_with_casefoam
-
-    root = tmp_path / "root"
-    root.mkdir()
-    shutil.copytree(base_case, root / "baseCase")
-
-    generated = clone_with_casefoam(root, study, study.enabled_cases())
-
-    assert [p.name for p in generated] == [
-        "p005psi", "p025psi", "p100psi", "p475psi"]
-    for path in generated:
-        assert path.is_dir()
-        assert (path / "case.yaml").is_file()
-        assert path.parent.name == "gap06in"
-
-
-@casefoam_only
-def test_casefoam_leaves_nothing_of_its_own_in_the_study_directory(
-        tmp_path, base_case, study):
-    """mkCases writes Allrun, Allclean and rmCases beside the template, and
-    copies the whole directory it is pointed at into writeDir. Run against the
-    study root that would put study.yaml, generate_cases.py and the All*Cases
-    drivers inside Cases/. Staging keeps every one of them out."""
-    from plumetools.markelov1999.study import clone_with_casefoam
-
-    root = tmp_path / "root"
-    root.mkdir()
-    shutil.copytree(base_case, root / "baseCase")
-    # The study-level files a real study directory carries.
-    (root / "study.yaml").write_text(STUDY_YAML, encoding="utf-8")
-    (root / "AllrunCases").write_text("#!/bin/bash\n", encoding="utf-8")
-    (root / "README.md").write_text("# study\n", encoding="utf-8")
-
-    clone_with_casefoam(root, study, study.enabled_cases())
-
-    for name in ("Allrun", "Allclean", "rmCases"):
-        assert not (root / name).exists(), f"{name} was left in the study directory"
-
-    inside_cases = {p.name for p in (root / "Cases").rglob("*")}
-    for leaked in ("study.yaml", "AllrunCases", "README.md", "baseCase"):
-        assert leaked not in inside_cases, f"{leaked} leaked into Cases/"
-
-
-@casefoam_only
-def test_study_level_files_survive_untouched(tmp_path, base_case, study):
-    """Nothing is deleted from the study directory, so a file of a name CaseFoam
-    also uses cannot be lost."""
-    from plumetools.markelov1999.study import clone_with_casefoam
-
-    root = tmp_path / "root"
-    root.mkdir()
-    shutil.copytree(base_case, root / "baseCase")
-    (root / "Allrun").write_text("#!/bin/bash\n# mine\n", encoding="utf-8")
-
-    clone_with_casefoam(root, study, study.enabled_cases())
-
-    assert (root / "Allrun").is_file()
-    assert "# mine" in (root / "Allrun").read_text(encoding="utf-8")
-
-
-@casefoam_only
-def test_casefoam_cases_do_not_inherit_generated_dictionaries(
-        tmp_path, base_case, study):
-    """CaseFoam copies the template wholesale, so a dictionary left in baseCase
-    by a local ./Allmesh would otherwise be inherited by every case and become a
-    second source of truth for the physics."""
-    from plumetools.markelov1999.study import clone_with_casefoam
-
-    root = tmp_path / "root"
-    root.mkdir()
-    shutil.copytree(base_case, root / "baseCase")
-    stale = root / "baseCase" / "system" / "blockMeshDict"
-    stale.write_text("// stale, from a local ./Allmesh\n", encoding="utf-8")
-    (root / "baseCase" / "constant").mkdir(exist_ok=True)
-    (root / "baseCase" / "constant" / "dsmcProperties").write_text(
-        "// stale\n", encoding="utf-8")
-
-    generated = clone_with_casefoam(root, study, study.enabled_cases())
-
-    for path in generated:
-        assert not (path / "system" / "blockMeshDict").exists()
-        assert not (path / "constant" / "dsmcProperties").exists()
-
-
-def test_the_builtin_clone_also_excludes_generated_dictionaries(tmp_path, base_case):
-    """The same invariant through the other backend -- and it needs no CaseFoam,
-    so it runs everywhere."""
-    (base_case / "system" / "controlDict").write_text("// stale\n", encoding="utf-8")
-    (base_case / "system" / "blockMeshDict").write_text("// stale\n", encoding="utf-8")
-
-    destination = tmp_path / "out" / "p005psi"
-    clone_base_case(base_case, destination)
-
-    assert not (destination / "system" / "controlDict").exists()
-    assert not (destination / "system" / "blockMeshDict").exists()
-    # A static dictionary the case does not generate is still copied.
-    assert (destination / "system" / "fvSchemes").is_file()
-
-
-def test_pruning_removes_what_a_case_must_not_inherit(tmp_path):
-    """The shared cleanup, tested directly so it does not depend on CaseFoam."""
-    from plumetools.markelov1999.study import prune_inherited_artefacts
-
-    case = tmp_path / "case"
-    (case / "system").mkdir(parents=True)
-    (case / "constant" / "polyMesh").mkdir(parents=True)
-    (case / "0").mkdir()
-    (case / "0.004").mkdir()
-    (case / "case.yaml").write_text("model: x\n", encoding="utf-8")
-    (case / "system" / "controlDict").write_text("// generated\n", encoding="utf-8")
-    (case / "system" / "fvSchemes").write_text("// static\n", encoding="utf-8")
-    (case / "constant" / "dsmcProperties").write_text("// generated\n", encoding="utf-8")
-
-    prune_inherited_artefacts(case)
-
-    assert not (case / "system" / "controlDict").exists()
-    assert not (case / "constant").exists(), "an emptied constant/ is removed too"
-    assert not (case / "0").exists()
-    assert not (case / "0.004").exists(), "results are not inherited"
-    assert (case / "case.yaml").is_file()
-    assert (case / "system" / "fvSchemes").is_file()
+def test_the_generator_version_is_recorded(tmp_path, study):
+    """The generated tree is CaseFoam's output, so the manifest says which
+    version produced what is on disk."""
+    path = write_manifest(tmp_path / "manifest.yaml", study, [])
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert document["generator"].startswith("casefoam ")
 
 
 # --------------------------------------------------------------------------- #

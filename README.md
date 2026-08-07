@@ -72,10 +72,17 @@ rarefied N₂ plume past a finite cylinder onto a flat plate 6 inches behind it,
 four reservoir pressures.
 
 ```bash
+pip install -e ".[cases]"                          # CaseFoam, for case generation
 cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
 cd ../../cases/markelov1999
 ./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
 ```
+
+Case generation uses [CaseFoam](https://github.com/DLR-RY/caseFOAM) to clone the
+base case into the hierarchy, as `util/caseFoam/` has since before the refactor.
+The physical values are applied afterwards by structured YAML editing rather than
+through CaseFoam's `caseData`, because that mechanism reaches a non-OpenFOAM file
+only through `'#!stringManipulation'` — whitespace-sensitive substitution.
 
 It is **new work**, not a fix of the archived `wake-cylinder` lineage, and it
 does not inherit that lineage's defects. Its source-flow model is a separate,

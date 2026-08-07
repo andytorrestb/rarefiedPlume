@@ -80,36 +80,56 @@ is not there is an error.
 
 ## What CaseFoam does
 
-CaseFoam clones `baseCase` into the `Cases/gap06in/<case>` hierarchy. It does
-**cloning only** — the physical values are applied afterwards by the structured
-YAML step, because CaseFoam's own `caseData` mechanism applies them through
-`'#!stringManipulation'`, the whitespace-sensitive substitution described above.
+[CaseFoam](https://github.com/DLR-RY/caseFOAM) clones `baseCase` into the
+`Cases/gap06in/<case>` hierarchy. It is a **dependency**, not an optional
+accelerant — there is no built-in substitute:
 
 ```bash
-pip install -e ".[cases]"               # casefoam 0.2.0
-
-./generate_cases.py                     # uses CaseFoam if importable
-./generate_cases.py --backend casefoam  # require it; fail if absent
-./generate_cases.py --backend builtin   # never use it
+pip install -e ".[cases]"          # casefoam 0.2.0
+./generate_cases.py
 ```
 
-It is **optional**. Without it the same tree is built by
-`plumetools.markelov1999.study.clone_base_case`. The two produce *identical*
-trees — `tests/unit/test_markelov_study.py` generates both and compares them file
-by file, and the four-case tree is 28 files either way — so a study generated
-without CaseFoam is not a different study. `manifest.yaml` records which ran.
+`generate_cases.py` calls `casefoam.mkCases` the way it is designed to be
+called — pointed at the `baseCase` *directory*:
 
-`mkCases` needs two things handled, both in `clone_with_casefoam`:
+```python
+mkCases(<baseCase dir>, [["gap06in"], ["p005psi", ...]],
+        caseData, hierarchy="tree", writeDir="Cases")
+```
 
-* It copies the **whole directory** it is pointed at into `writeDir`. Run against
-  the study root that would put `study.yaml`, `generate_cases.py`, the
-  `All*Cases` drivers and this README inside `Cases/` — and it writes `Allrun`,
-  `Allclean` and `rmCases` of its own beside the template. So it runs in an
-  isolated staging directory and the finished cases are moved into place.
-  Nothing is ever deleted from the study directory.
-* It copies the template wholesale, so a generated dictionary left in `baseCase`
-  by a local `./Allmesh` would be inherited by every case. Those are pruned —
-  which is also what makes the two backends agree exactly.
+It copies the template to `Cases/`, moves that content down into
+`Cases/baseCase/`, and creates `Cases/gap06in/<case>/` from it. So
+`Cases/baseCase` alongside the case directories is **CaseFoam's own layout** —
+the same one `cases/caseFoamEx` has. It is not cleaned up; it belongs to
+CaseFoam.
+
+> **CaseFoam also writes `Allrun`, `Allclean` and `rmCases` into this
+> directory** (`mkAllRunClean` opens `'Allrun'` relative to the working
+> directory). They are kept, and gitignored. Note what its `Allrun` does:
+>
+> ```
+> Cases/gap06in/p025psi/Allrun &
+> Cases/gap06in/p005psi/Allrun &
+> ...
+> ```
+>
+> — every case launched **concurrently**. Four simultaneous 3.4 M-particle DSMC
+> runs is how a study of four cases becomes four cases that all get killed. Use
+> **`./AllrunCases`**, which runs them sequentially in manifest order. CaseFoam's
+> is left in place for anyone who does want the parallel launch.
+
+**Why the parameters are applied outside CaseFoam.** `caseData` is passed empty.
+Its two forms both miss `case.yaml`: the dictionary-aware form goes through
+PyFoam's `ParsedParameterFile`, which reads OpenFOAM dictionaries and not YAML,
+and the other is `'#!stringManipulation'` — the whitespace-sensitive substitution
+described above. So CaseFoam does the cloning and the hierarchy, and
+`apply_case_parameters` applies the physical values structurally.
+
+The one thing done afterwards is removing generated dictionaries from each clone.
+That is template hygiene, not a second cloner: CaseFoam copies the template
+faithfully, as it should, so a `constant/dsmcProperties` left in `baseCase` by
+someone running `./Allmesh` there would otherwise let every case run against the
+template's physics instead of its own.
 
 ## Status: what this does and does not establish
 

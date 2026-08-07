@@ -5,21 +5,23 @@
     ./generate_cases.py --dry-run        show what would be generated
     ./generate_cases.py --pressures 5 25 only these reservoir pressures
     ./generate_cases.py --overwrite      replace cases that already have results
-    ./generate_cases.py --backend builtin   clone without CaseFoam
 
 No arguments are needed for normal use.
 
 What it does:
 
-  1. clone baseCase into Cases/<gap>/<case>. CaseFoam does this when it is
-     installed, otherwise an equivalent built-in copy does -- the two produce
-     the same tree, and a test checks that they do.
+  1. clone baseCase into Cases/<gap>/<case> with casefoam.mkCases
   2. rewrite each case-local case.yaml with that case's reservoir pressure and
      particle weight -- STRUCTURALLY, by loading and re-emitting YAML, never by
      string substitution. CaseFoam's own caseData mechanism is not used for
-     this: its '#!stringManipulation' form is exactly the whitespace-sensitive
-     substitution this design avoids.
+     this: its dictionary-aware form goes through PyFoam, which does not read
+     YAML, and the other form is '#!stringManipulation' -- exactly the
+     whitespace-sensitive substitution this design avoids.
   3. record everything in manifest.yaml
+
+Requires CaseFoam (https://github.com/DLR-RY/caseFOAM):
+
+    pip install -e ".[cases]"
 
 The OpenFOAM dictionaries are NOT written here. Each case writes its own from
 its own case.yaml when ./Allmesh runs, so there is one authoritative source of
@@ -52,11 +54,11 @@ from plumetools.markelov1999.study import (
     StudyError,
     apply_case_parameters,
     case_is_complete,
-    clone_base_case,
-    clone_with_casefoam,
+    casefoam_version,
+    clone_cases,
     filter_by_pressure,
-    generation_backend,
     load_study,
+    require_casefoam,
     write_manifest,
 )
 
@@ -78,11 +80,6 @@ def parse_args(argv):
     parser.add_argument(
         "--study", default=str(HERE / "study.yaml"),
         help="path to study.yaml (default: alongside this script)")
-    parser.add_argument(
-        "--backend", choices=("auto", "casefoam", "builtin"), default="auto",
-        help="how to clone the base case. 'auto' (default) uses CaseFoam when "
-             "it is importable. Both produce the same tree; 'casefoam' fails if "
-             "it is not installed, 'builtin' never uses it.")
     return parser.parse_args(argv[1:])
 
 
@@ -127,8 +124,11 @@ def main(argv) -> int:
         return 1
 
     disabled = [c for c in study.all_cases() if not c.enabled]
+
+    # Fail here rather than after the dry-run listing, so a missing dependency
+    # is reported before anything is printed that implies it will work.
     try:
-        backend = generation_backend(args.backend)
+        require_casefoam()
     except StudyError as exc:
         print(f"generate_cases: {exc}", file=sys.stderr)
         return 1
@@ -136,11 +136,8 @@ def main(argv) -> int:
     print(f"study      {args.study}")
     print(f"base case  {base}")
     print(f"gap        {study.gap_in:g} in -> {study.gap_dir}/")
-    print(f"backend    {backend}"
-          + ("  (CaseFoam clones the hierarchy; values are applied afterwards)"
-             if backend == "casefoam" else
-             "  (CaseFoam is not installed; the built-in clone produces the "
-             "same tree)" if args.backend == "auto" else ""))
+    print(f"generator  casefoam {casefoam_version()}"
+          "  (clones the hierarchy; values are applied structurally afterwards)")
     print()
 
     if not selected:
@@ -180,19 +177,13 @@ def main(argv) -> int:
         if destination.exists() and args.overwrite:
             shutil.rmtree(destination)
 
-    # Cloning first, for every case, then values. CaseFoam builds the whole
-    # hierarchy in one call, so the two phases cannot be interleaved per case --
-    # and keeping the builtin path the same shape means the two backends differ
-    # in one step rather than in their control flow.
-    if backend == "casefoam":
-        try:
-            clone_with_casefoam(root, study, selected)
-        except StudyError as exc:
-            print(f"generate_cases: {exc}", file=sys.stderr)
-            return 1
-    else:
-        for case in selected:
-            clone_base_case(base, root / study.case_path(case))
+    # Cloning first for every case, then values: CaseFoam builds the whole
+    # hierarchy in one call, so the two phases cannot be interleaved per case.
+    try:
+        clone_cases(root, study, selected)
+    except StudyError as exc:
+        print(f"generate_cases: {exc}", file=sys.stderr)
+        return 1
 
     entries = []
     for case in selected:
@@ -231,7 +222,7 @@ def main(argv) -> int:
             print(f"          particles/cell: {occupancy}   "
                   f"total {estimate.total_particles:.3e}")
 
-    manifest = write_manifest(root / study.manifest_name, study, entries, backend)
+    manifest = write_manifest(root / study.manifest_name, study, entries)
     print()
     print(f"manifest  {manifest}")
     print()

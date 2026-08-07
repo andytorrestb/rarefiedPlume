@@ -64,6 +64,13 @@ cases/markelov1999/Cases/
 # only meaningful alongside it.
 cases/markelov1999/manifest.yaml
 cases/markelov1999/results/
+# CaseFoam writes these into the study directory (mkAllRunClean opens 'Allrun'
+# relative to the cwd, mkRmCases likewise). They are its output, not ours -- and
+# its Allrun launches every case CONCURRENTLY, which is not what this study
+# wants. See the README.
+cases/markelov1999/Allrun
+cases/markelov1999/Allclean
+cases/markelov1999/rmCases
 cases/markelov1999/*/case-summary.json
 
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with

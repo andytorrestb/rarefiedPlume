@@ -5,36 +5,38 @@ complete, self-contained OpenFOAM case with its own ``case.yaml``.
 
 How cases are generated
 -----------------------
-1. **CaseFoam** clones ``baseCase`` into the hierarchy, when it is installed.
+1. **CaseFoam** clones ``baseCase`` into the hierarchy -- :func:`clone_cases`.
 2. A **structured Python step** rewrites each case-local ``case.yaml`` -- loaded
    as YAML, edited as a data structure, re-emitted.
 3. **plumetools** generates the OpenFOAM dictionaries from that ``case.yaml``.
 
-Step 2 is deliberately not string substitution. ``util/caseFoam/genCases.py``
-does it the other way::
+CaseFoam (https://github.com/DLR-RY/caseFOAM) is a **dependency**, not an
+optional accelerant::
+
+    pip install -e ".[cases]"
+
+There is deliberately no built-in substitute. Reimplementing a case generator the
+repository already depends on would mean maintaining two, and the one that is not
+exercised is the one that drifts. ``util/caseFoam/`` shows this project has used
+CaseFoam since before the refactor.
+
+Why the parameters are applied outside CaseFoam
+-----------------------------------------------
+Step 2 is not string substitution. ``util/caseFoam/genCases.py`` does it the
+other way, through CaseFoam's own ``caseData``::
 
     'system/controlDict': {'#!stringManipulation':
                             {'deltaT          1.0E-05': '%s' % deltaT}}
 
 which silently does nothing if the file is reformatted, if the value already
 differs, or if the base case has moved on -- and none of those is visible in the
-output. Editing the parsed structure either finds the key or raises.
+output.
 
-CaseFoam is **optional**. When it is not importable the same hierarchy is built
-by :func:`clone_base_case`, which copies the same files to the same paths. The
-tree is identical either way -- a test generates both and compares them -- so a
-study generated on a machine without CaseFoam is not a different study.
-:func:`generation_backend` resolves which is used and the manifest records it.
-
-CaseFoam is used for cloning only. Its own ``caseData`` mechanism applies
-parameters through ``'#!stringManipulation'``, which is the whitespace-sensitive
-substitution this design exists to avoid, so the physical values are applied
-afterwards by :func:`apply_case_parameters` instead.
-
-``mkCases`` copies the whole directory it is pointed at and writes drivers of its
-own beside it, so :func:`clone_with_casefoam` runs it in an isolated staging
-directory and moves the finished cases into place. Nothing is ever deleted from
-the study directory. See that function for the detail.
+``caseData`` has two forms and neither fits ``case.yaml``. The dictionary-aware
+form goes through PyFoam's ``ParsedParameterFile``, which reads OpenFOAM
+dictionaries, not YAML. The other is ``'#!stringManipulation'``, the substitution
+above. So CaseFoam does the cloning and the hierarchy -- what it is good at -- and
+the physical values are applied structurally by :func:`apply_case_parameters`.
 """
 
 from __future__ import annotations
@@ -49,27 +51,11 @@ import yaml
 
 from plumetools.markelov1999.constants import psi_to_pa
 
-#: Files and directories copied from ``baseCase`` into each generated case.
-#:
-#: Generated OpenFOAM dictionaries are deliberately NOT in this list: they are
-#: written from each case's own ``case.yaml`` by ``./Allmesh``, so copying a
-#: stale one would create a second source of truth for the physics.
-CASE_TEMPLATE_ENTRIES = (
-    "case.yaml",
-    "Allmesh",
-    "Allrun",
-    "Allclean",
-    "Allpost",
-    "runInflow.py",
-    "postProcess.py",
-    "open.foam",
-)
-
 #: Dictionaries a case generates from its own ``case.yaml``.
 #:
-#: Neither backend copies these. A dictionary left behind in ``baseCase`` by a
-#: local ``./Allmesh`` would otherwise be inherited by every generated case and
-#: become a second, silently divergent source of truth for the physics.
+#: CaseFoam copies the template faithfully, so one of these left in ``baseCase``
+#: by someone running ``./Allmesh`` there would be inherited by every generated
+#: case. See :func:`prune_generated_dictionaries`.
 GENERATED_DICTIONARIES = (
     "system/blockMeshDict",
     "system/snappyHexMeshDict",
@@ -83,10 +69,10 @@ GENERATED_DICTIONARIES = (
 #: Directories a generated case must not inherit from the template.
 #:
 #: ``constant/polyMesh`` because each case meshes itself -- inheriting one would
-#: silently give every case the template's geometry. ``0/`` and any time
-#: directory because those are results, and a case that starts with someone
-#: else's results is not a fresh case.
-GENERATED_DIRECTORIES = ("constant/polyMesh", "0", "processor0")
+#: silently give every case the template's geometry. ``0/`` because it holds
+#: results, and a case that starts with someone else's results is not a fresh
+#: case.
+GENERATED_DIRECTORIES = ("constant/polyMesh", "0")
 
 
 class StudyError(ValueError):
@@ -272,198 +258,61 @@ def filter_by_pressure(cases: list, wanted) -> list:
 # generation
 # --------------------------------------------------------------------------- #
 
-def casefoam_available() -> bool:
-    """Whether ``casefoam`` can be imported."""
+def require_casefoam():
+    """Import and return ``casefoam``, or raise with the install command.
+
+    A hard dependency, not a capability to probe. There is no built-in
+    substitute: reimplementing a case generator this repository already depends
+    on would mean maintaining two of them, and the one that is not exercised
+    would be the one that drifts.
+    """
     try:
-        import casefoam  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
-def generation_backend(requested: str = "auto") -> str:
-    """Resolve the cloning backend to ``"casefoam"`` or ``"builtin"``.
-
-    Args:
-        requested: ``"auto"`` uses CaseFoam when it is importable; ``"casefoam"``
-            requires it; ``"builtin"`` never uses it.
-
-    Returns:
-        The backend that will be used. Recorded in the manifest.
-
-    Raises:
-        StudyError: if CaseFoam was required and is not installed.
-
-    The two backends produce the **same tree** -- verified by a test that
-    generates both and compares them -- so under ``auto`` this is provenance
-    rather than a behaviour switch. It is explicit rather than silent because
-    "which tool built this" is exactly the sort of thing that is impossible to
-    reconstruct later.
-    """
-    if requested not in ("auto", "casefoam", "builtin"):
+        import casefoam
+    except ImportError as exc:
         raise StudyError(
-            f"unknown backend {requested!r}; valid: ['auto', 'casefoam', 'builtin']")
-
-    if requested == "builtin":
-        return "builtin"
-    if casefoam_available():
-        return "casefoam"
-    if requested == "casefoam":
-        raise StudyError(
-            "backend 'casefoam' was requested but casefoam is not importable. "
-            'Install it with: pip install -e ".[cases]"')
-    return "builtin"
+            "casefoam is not importable, and case generation requires it.\n"
+            '    pip install -e ".[cases]"\n'
+            "  See https://github.com/DLR-RY/caseFOAM"
+        ) from exc
+    return casefoam
 
 
-def clone_base_case(base: Path, destination: Path) -> list[Path]:
-    """Copy the template case into ``destination``.
-
-    Args:
-        base: the ``baseCase`` directory.
-        destination: where the case is created. Parents are created.
-
-    Returns:
-        The paths written.
-
-    Raises:
-        StudyError: if the base case is missing, or lacks ``case.yaml`` -- which
-            would produce a tree of directories that no tool in this repository
-            can do anything with.
-
-    Only :data:`CASE_TEMPLATE_ENTRIES` are copied, and only those that exist. In
-    particular ``constant/polyMesh``, ``0/`` and the generated dictionaries are
-    not: each case meshes itself from its own ``case.yaml``, and inheriting a mesh
-    from the template would silently give every case the template's geometry.
-    """
-    base = Path(base)
-    destination = Path(destination)
-    if not base.is_dir():
-        raise StudyError(f"base case {base} does not exist")
-    if not (base / "case.yaml").is_file():
-        raise StudyError(f"base case {base} has no case.yaml")
-
-    destination.mkdir(parents=True, exist_ok=True)
-    written = []
-    for entry in CASE_TEMPLATE_ENTRIES:
-        source = base / entry
-        if not source.exists():
-            continue
-        target = destination / entry
-        if source.is_dir():
-            shutil.copytree(source, target, dirs_exist_ok=True)
-        else:
-            shutil.copy2(source, target)
-        written.append(target)
-
-    # system/ may hold static dictionaries a case does not generate. Copy those,
-    # but never a generated one: a dictionary left behind in the template by a
-    # local ./Allmesh would otherwise be inherited by every case and become a
-    # second source of truth for the physics.
-    generated_names = {Path(p).name for p in GENERATED_DICTIONARIES}
-    base_system = base / "system"
-    if base_system.is_dir():
-        for source in sorted(base_system.iterdir()):
-            if source.is_file() and source.name not in generated_names:
-                target = destination / "system" / source.name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
-                written.append(target)
-
-    return written
-
-
-def prune_inherited_artefacts(case_dir: Path) -> list[Path]:
-    """Remove what a generated case must not inherit from the template.
-
-    Args:
-        case_dir: a freshly cloned case.
-
-    Returns:
-        The paths removed.
-
-    :func:`clone_base_case` never copies these in the first place. CaseFoam
-    copies the template directory wholesale, so this brings its output back to
-    the same content -- which is what makes "both backends produce the same tree"
-    true rather than merely intended.
-    """
-    removed = []
-    for relative in GENERATED_DICTIONARIES:
-        path = Path(case_dir) / relative
-        if path.is_file():
-            path.unlink()
-            removed.append(path)
-
-    for relative in GENERATED_DIRECTORIES:
-        path = Path(case_dir) / relative
-        if path.is_dir():
-            shutil.rmtree(path)
-            removed.append(path)
-
-    # Any time directory other than 0, which GENERATED_DIRECTORIES covers.
-    for entry in Path(case_dir).iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            shutil.rmtree(entry)
-            removed.append(entry)
-
-    # A directory emptied by the removals above is harmless in itself, but the
-    # builtin clone never creates one, and "the two backends produce the same
-    # tree" has to mean exactly that.
-    for name in ("constant", "system"):
-        directory = Path(case_dir) / name
-        if directory.is_dir() and not any(directory.iterdir()):
-            directory.rmdir()
-            removed.append(directory)
-
-    return removed
-
-
-def clone_with_casefoam(root: Path, study: StudyConfig, cases: list) -> list[Path]:
-    """Build the case hierarchy with CaseFoam, then clean up after it.
+def clone_cases(root: Path, study: StudyConfig, cases: list) -> list[Path]:
+    """Build the case hierarchy with CaseFoam.
 
     Args:
         root: the study directory -- the one containing ``baseCase``.
         study: the study.
-        cases: the pressure cases to generate.
+        cases: the pressure cases to generate, in order.
 
     Returns:
         The generated case directories, in the order given.
 
     Raises:
-        StudyError: if CaseFoam is not importable, or does not produce the
-            expected hierarchy.
+        StudyError: if CaseFoam is absent, the template is missing, or the
+            expected hierarchy did not appear.
 
-    CaseFoam does the **cloning** and the directory hierarchy; the physical
-    values are applied afterwards by :func:`apply_case_parameters`, which edits
-    parsed YAML. CaseFoam's own ``caseData`` mechanism is deliberately not used
-    for them: its ``'#!stringManipulation'`` form is whitespace-sensitive
-    substitution, which is the failure mode this whole design avoids.
+    ``casefoam.mkCases`` is called the way it is designed to be called::
 
-    ``mkCases`` is run in an **isolated staging directory** holding nothing but a
-    copy of the template, and the finished cases are moved into place afterwards.
-    That is not fastidiousness. Its ``baseCase`` argument means "the directory
-    containing the template", and with ``writeDir`` set it copies *that whole
-    directory* into the write directory -- so running it against the study root
-    puts ``study.yaml``, ``generate_cases.py``, the ``All*Cases`` drivers and the
-    README inside ``Cases/``. It also writes ``Allrun``, ``Allclean`` and
-    ``rmCases`` of its own next to the template. Staging keeps every one of those
-    out of the study directory, and means nothing has to be deleted from a
-    directory the user owns.
+        mkCases(<the baseCase directory>, [[gap], [case, ...]],
+                caseData, hierarchy="tree", writeDir=<Cases>)
 
-    Each case is then pruned by :func:`prune_inherited_artefacts`, which is what
-    makes the output identical to the built-in clone's.
+    It copies the template to ``writeDir``, moves that content down into
+    ``writeDir/baseCase``, and creates ``writeDir/<gap>/<case>`` from it -- so
+    the resulting ``Cases/baseCase`` alongside ``Cases/gap06in/p005psi`` is
+    CaseFoam's own layout, the same one ``cases/caseFoamEx`` has. Its
+    ``rmCases``, ``Allrun`` and ``Allclean`` land in ``Cases/`` too. None of that
+    is cleaned up: it belongs to CaseFoam.
+
+    ``caseData`` is empty because the physical values are applied afterwards by
+    :func:`apply_case_parameters`. CaseFoam's own mechanism for a non-OpenFOAM
+    file like ``case.yaml`` is ``'#!stringManipulation'``, which is the
+    whitespace-sensitive substitution this design exists to avoid; its
+    dictionary-aware path goes through PyFoam's parser, which does not read YAML.
+    So CaseFoam does the cloning and the hierarchy, and the parameters are
+    applied structurally.
     """
-    try:
-        import casefoam
-    except ImportError as exc:  # pragma: no cover - guarded by the caller
-        raise StudyError(
-            'casefoam is not importable. Install it with: pip install -e ".[cases]"'
-        ) from exc
+    casefoam = require_casefoam()
 
     root = Path(root)
     template = root / study.base_case
@@ -473,44 +322,69 @@ def clone_with_casefoam(root: Path, study: StudyConfig, cases: list) -> list[Pat
         raise StudyError(f"base case {template} has no case.yaml")
 
     structure = [[study.gap_dir], [c.name for c in cases]]
-    # Empty per-name data: CaseFoam clones, the Python step below applies values.
     data = {name: {} for level in structure for name in level}
 
-    staging = Path(tempfile.mkdtemp(prefix="markelov-casefoam-"))
+    write_dir = root / study.cases_dir
+    if write_dir.exists():
+        # mkCases swallows FileExistsError from its copytree and would then
+        # restructure whatever is already there.
+        shutil.rmtree(write_dir)
+
     previous_cwd = Path.cwd()
-    generated = []
     try:
-        shutil.copytree(template, staging / study.base_case)
-
-        os.chdir(staging)
-        casefoam.mkCases(str(staging), structure, data,
-                         hierarchy="tree", writeDir=study.cases_dir)
-        os.chdir(previous_cwd)
-
-        for case in cases:
-            produced = staging / study.case_path(case)
-            if not produced.is_dir():
-                raise StudyError(
-                    f"casefoam did not produce {study.case_path(case)} in its "
-                    f"staging directory. Expected the 'tree' hierarchy "
-                    f"{study.cases_dir}/{study.gap_dir}/<case>.")
-            if not (produced / "case.yaml").is_file():
-                raise StudyError(
-                    f"{study.case_path(case)} has no case.yaml after cloning")
-
-            destination = root / study.case_path(case)
-            if destination.exists():
-                shutil.rmtree(destination)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(produced), str(destination))
-
-            prune_inherited_artefacts(destination)
-            generated.append(destination)
+        os.chdir(root)
+        casefoam.mkCases(str(template), structure, data,
+                         hierarchy="tree", writeDir=str(write_dir))
     finally:
         os.chdir(previous_cwd)
-        shutil.rmtree(staging, ignore_errors=True)
+
+    generated = []
+    for case in cases:
+        destination = root / study.case_path(case)
+        if not destination.is_dir():
+            raise StudyError(
+                f"casefoam did not produce {study.case_path(case)}. Expected the "
+                f"'tree' hierarchy {study.cases_dir}/{study.gap_dir}/<case>.")
+        if not (destination / "case.yaml").is_file():
+            raise StudyError(
+                f"{study.case_path(case)} has no case.yaml after cloning")
+        prune_generated_dictionaries(destination)
+        generated.append(destination)
 
     return generated
+
+
+def prune_generated_dictionaries(case_dir: Path) -> list[Path]:
+    """Remove dictionaries a case must generate from its own ``case.yaml``.
+
+    Args:
+        case_dir: a freshly cloned case.
+
+    Returns:
+        The paths removed.
+
+    Template hygiene, not part of the cloning. CaseFoam copies the template
+    faithfully -- as it should -- so a dictionary left in ``baseCase`` by someone
+    running ``./Allmesh`` there would be inherited by every case. ``./Allmesh``
+    would overwrite it, but ``./Allrun`` checks only that
+    ``constant/dsmcProperties`` exists, so an inherited one would let a case run
+    against the template's physics instead of its own.
+
+    They are gitignored, so this only ever fires on a working copy where someone
+    has meshed the template in place.
+    """
+    removed = []
+    for relative in GENERATED_DICTIONARIES:
+        path = Path(case_dir) / relative
+        if path.is_file():
+            path.unlink()
+            removed.append(path)
+    for relative in GENERATED_DIRECTORIES:
+        path = Path(case_dir) / relative
+        if path.is_dir():
+            shutil.rmtree(path)
+            removed.append(path)
+    return removed
 
 
 def case_is_complete(case_dir: Path) -> bool:
@@ -616,15 +490,26 @@ def apply_case_parameters(case_dir: Path, case: PressureCase,
     return applied
 
 
-def write_manifest(path: Path, study: StudyConfig, entries: list,
-                   backend: str) -> Path:
+def casefoam_version() -> str:
+    """The installed CaseFoam version, for the manifest.
+
+    Recorded because the generated tree is CaseFoam's output: if its layout ever
+    changes, the manifest says which version produced what is on disk.
+    """
+    try:
+        from importlib.metadata import version
+        return version("casefoam")
+    except Exception:  # pragma: no cover - metadata is present in any install
+        return "unknown"
+
+
+def write_manifest(path: Path, study: StudyConfig, entries: list) -> Path:
     """Write the generation manifest.
 
     Args:
         path: destination file.
         study: the study.
         entries: one dict per generated case.
-        backend: ``"casefoam"`` or ``"builtin"``.
 
     Returns:
         The path written.
@@ -642,7 +527,7 @@ def write_manifest(path: Path, study: StudyConfig, entries: list,
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(
             timespec="seconds"),
         "reference": "AIAA 99-3455",
-        "backend": backend,
+        "generator": f"casefoam {casefoam_version()}",
         "base_case": study.base_case,
         "cases_dir": study.cases_dir,
         "gap_in": study.gap_in,
