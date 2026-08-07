@@ -15,10 +15,10 @@ and impinges on a flat plate 6 inches behind it. Four reservoir pressures — 5,
 ## Quick start
 
 ```bash
-pip install -e ".[test]"                              # from the repository root
-
-cd applications/dsmcBoundaryModels && ./Allwmake      # the custom inflow model
-cd ../../cases/markelov1999
+./Allsetup                                            # from the repository root:
+                                                      # pip install, build the custom
+                                                      # inflow model, verify both
+cd cases/markelov1999
 
 ./generate_cases.py --dry-run                         # what would be generated
 ./generate_cases.py                                   # the four pressure cases

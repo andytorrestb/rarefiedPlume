@@ -1,7 +1,7 @@
 # rarefiedPlume
 
 Test cases and utilities for a plume-impingement model for rarefied flows, built
-on OpenFOAM's `dsmcFoam+`.
+on OpenFOAM's `dsmcFoam` (verified against **v2512**).
 
 A rarefied plume expands from a hemispherical inflow surface into a vacuum. The
 inflow conditions come from an analytical source-flow model evaluated per face;
@@ -10,14 +10,25 @@ DSMC solves the field from there.
 ## Quick start
 
 ```bash
-pip install -e ".[test]"          # numpy, scipy, pyyaml (+ pytest)
+./Allsetup                        # pip install, build the inflow library, verify
 pytest -m "not needs_openfoam"    # 475 tests, ~4 s, no OpenFOAM required
 
 cd cases/3d-inflow
 ./Allrun --no-solve               # generates 0/ inflow fields; needs no OpenFOAM
-./Allrun                          # full run; needs OpenFOAM v1706 + dsmcFoam+
+./Allrun                          # full run; needs OpenFOAM v2512
 ./Allclean                        # reset (--dry-run to preview)
 ```
+
+`./Allsetup --python-only` skips everything needing OpenFOAM; `./Allsetup --check`
+verifies an existing setup without installing or building anything. By hand it is:
+
+```bash
+pip install -e ".[test]"                           # numpy, scipy, pyyaml (+ pytest)
+cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
+```
+
+That second step is easy to miss and pip never does it — see
+[Environment](#environment).
 
 All physical inputs live in [`cases/3d-inflow/case.yaml`](cases/3d-inflow/case.yaml).
 No Python needs editing to change a parameter.
@@ -72,9 +83,8 @@ rarefied N₂ plume past a finite cylinder onto a flat plate 6 inches behind it,
 four reservoir pressures.
 
 ```bash
-pip install -e ".[cases]"                          # CaseFoam, for case generation
-cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
-cd ../../cases/markelov1999
+./Allsetup --extras test,cases                     # + CaseFoam, for case generation
+cd cases/markelov1999
 ./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
 ```
 
@@ -125,17 +135,38 @@ Full reconstruction, confidence classification and open questions:
 
 ## Environment
 
+### What the active cases need today
+
+| | |
+|---|---|
+| OpenFOAM | **v2512**, the standard distribution — verified by reading its source and running the cases |
+| Solver | `dsmcFoam` / `dsmcInitialise`. **Not** the MNF fork's `dsmcFoam+` |
+| Custom code | `libplumeDsmcBoundaryModels.so`, built by `applications/dsmcBoundaryModels/Allwmake` |
+| Python | ≥ 3.9; numpy, scipy ≥ 1.6, pyyaml |
+| Post-processing | ParaView **5.10.0** (`paraview.simple`; not pip-installable) |
+
+The fork is not required because the one thing it provided that this work needs —
+a per-face, patch-selected inflow — is supplied instead by
+[`plumeFieldInflow`](applications/dsmcBoundaryModels/plumeFieldInflow), a peer of
+OpenFOAM's own `FreeStream` that links against the standard distribution. Run
+`./Allsetup` to install and build all of it, or `./Allsetup --check` to find out
+which piece is missing. Details in
+[`docs/solver-compatibility.md`](docs/solver-compatibility.md).
+
+### What produced the historical results
+
 | | |
 |---|---|
 | OpenFOAM | build **v1706** (recorded in `cases/wake-cylinder/5psi/sample_out.txt`) |
 | Solver | `dsmcFoam+` / `dsmcInitialise+` — the MNF fork; version not recorded |
 | Meshing | Pointwise **V18.5R2** (binary `.pw`; `cases/3d-inflow` no longer needs it) |
-| Post-processing | ParaView **5.10.0** |
-| Python | ≥ 3.9; numpy, scipy ≥ 1.6, pyyaml |
 
-The Python library versions used to produce the historical results are **unknown
-and unrecoverable**, so bit-level reproduction of archived output is not
-achievable. See [`docs/environment.md`](docs/environment.md).
+This row is provenance, not an instruction: the archived cases still name
+`dsmcFoam+` in their `controlDict`s and are frozen that way
+([`cases/ARCHIVE.md`](cases/ARCHIVE.md)). The Python library versions behind
+those results are **unknown and unrecoverable**, so bit-level reproduction of
+archived output is not achievable. See
+[`docs/environment.md`](docs/environment.md).
 
 ## Documentation
 
