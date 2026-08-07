@@ -80,11 +80,36 @@ is not there is an error.
 
 ## What CaseFoam does
 
-CaseFoam clones `baseCase` into the hierarchy when it is installed. It is
-**optional**: when it is absent the same tree is built by
-`plumetools.markelov1999.study.clone_base_case`, which copies the same files to
-the same paths. `manifest.yaml` records which was used. A study generated without
-CaseFoam is not a different study.
+CaseFoam clones `baseCase` into the `Cases/gap06in/<case>` hierarchy. It does
+**cloning only** — the physical values are applied afterwards by the structured
+YAML step, because CaseFoam's own `caseData` mechanism applies them through
+`'#!stringManipulation'`, the whitespace-sensitive substitution described above.
+
+```bash
+pip install -e ".[cases]"               # casefoam 0.2.0
+
+./generate_cases.py                     # uses CaseFoam if importable
+./generate_cases.py --backend casefoam  # require it; fail if absent
+./generate_cases.py --backend builtin   # never use it
+```
+
+It is **optional**. Without it the same tree is built by
+`plumetools.markelov1999.study.clone_base_case`. The two produce *identical*
+trees — `tests/unit/test_markelov_study.py` generates both and compares them file
+by file, and the four-case tree is 28 files either way — so a study generated
+without CaseFoam is not a different study. `manifest.yaml` records which ran.
+
+`mkCases` needs two things handled, both in `clone_with_casefoam`:
+
+* It copies the **whole directory** it is pointed at into `writeDir`. Run against
+  the study root that would put `study.yaml`, `generate_cases.py`, the
+  `All*Cases` drivers and this README inside `Cases/` — and it writes `Allrun`,
+  `Allclean` and `rmCases` of its own beside the template. So it runs in an
+  isolated staging directory and the finished cases are moved into place.
+  Nothing is ever deleted from the study directory.
+* It copies the template wholesale, so a generated dictionary left in `baseCase`
+  by a local `./Allmesh` would be inherited by every case. Those are pruned —
+  which is also what makes the two backends agree exactly.
 
 ## Status: what this does and does not establish
 

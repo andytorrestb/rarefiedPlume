@@ -22,6 +22,12 @@ test = ["pytest>=7"]
 # Post-processing only. paraview.simple ships with ParaView and is not pip-installable;
 # see docs/environment.md.
 plots = ["matplotlib>=3.4", "pandas>=1.2"]
+# Case generation. Optional: cases/markelov1999/generate_cases.py uses CaseFoam to
+# clone the base case when it is importable, and an equivalent built-in copy when
+# it is not. The two produce the same tree -- tests/unit/test_markelov_study.py
+# generates both and compares them file by file -- so this is a convenience, not a
+# requirement. Verified against casefoam 0.2.0.
+cases = ["casefoam>=0.2"]
 
 [tool.setuptools.packages.find]
 include = ["plumetools*"]
