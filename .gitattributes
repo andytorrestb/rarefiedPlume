@@ -39,6 +39,7 @@ Allrun      text eol=lf
 Allclean    text eol=lf
 Allmesh     text eol=lf
 Allwmake    text eol=lf
+Allsetup    text eol=lf
 monitor     text eol=lf
 
 # The markelov1999 study-level drivers, same reason.
