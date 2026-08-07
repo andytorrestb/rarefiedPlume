@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "plumetools"
 version = "0.1.0"
-description = "Analytical plume source-flow inflow generation for dsmcFoam+ cases"
+description = "Analytical plume source-flow inflow generation for dsmcFoam cases"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -34,5 +34,5 @@ include = ["plumetools*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "needs_openfoam: requires a working OpenFOAM + dsmcFoam+ environment (deselect with -m 'not needs_openfoam')",
+    "needs_openfoam: requires a working OpenFOAM + dsmcFoam environment, and libplumeDsmcBoundaryModels.so (deselect with -m 'not needs_openfoam')",
 ]
