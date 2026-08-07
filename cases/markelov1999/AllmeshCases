@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+# Mesh every generated case.
+#
+#   ./AllmeshCases                 mesh all of them
+#   ./AllmeshCases --dict-only     write dictionaries only (no OpenFOAM needed)
+#   ./AllmeshCases --keep-going    do not stop at the first failure
+#   ./AllmeshCases --help
+#
+# Cases come from manifest.yaml, in the order generate_cases.py wrote them --
+# which is sorted by reservoir pressure, so the sequence is reproducible and does
+# not depend on directory iteration order.
+#
+# Each case meshes itself from its own case.yaml. Nothing here writes into a
+# case; it only invokes ./Allmesh in each.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+ARGS=()
+KEEP_GOING=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going) KEEP_GOING=1 ;;
+        --dict-only)  ARGS+=("--dict-only") ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "AllmeshCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllmeshCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+# Read the case paths from the manifest rather than globbing: the manifest is
+# the record of what was generated, and a stale directory from an earlier study
+# must not be picked up as if it belonged to this one.
+mapfile -t CASES < <($PYTHON - <<'PY'
+import sys
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+[ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+echo "### meshing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    echo "### $case_path"
+    echo "=============================================================="
+    if [ ! -x "$case_path/Allmesh" ]; then
+        if [ -f "$case_path/Allmesh" ]; then
+            bash "$case_path/Allmesh" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+        else
+            echo "AllmeshCases: $case_path has no Allmesh" >&2
+            FAILED+=("$case_path")
+        fi
+    else
+        "$case_path/Allmesh" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    fi
+
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Its log files are in that directory.
+       Use --keep-going to mesh the remaining cases anyway."
+    fi
+    echo ""
+done
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "AllmeshCases: ${#FAILED[@]} of ${#CASES[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+
+echo "### all ${#CASES[@]} case(s) meshed"
+echo "    next:  ./AllrunCases"

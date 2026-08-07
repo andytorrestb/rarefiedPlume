@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Post-process this case.
+#
+#   ./Allpost           mesh stats, particle stats, wall pressures, audit
+#   ./Allpost --help
+#
+# Writes case-summary.json, which AllpostCases collects into the study table.
+#
+# Runs OpenFOAM's writeCellCentres first when it is available: the resolution
+# audit needs cell centres to report per-region occupancy, and without them it
+# falls back to domain-wide statistics only.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+case "${1:-}" in
+    "")        ;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    *)         echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+
+die() { echo "" >&2; echo "Allpost: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a markelov1999 case?"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+if have postProcess; then
+    if ! ls [0-9]*/C >/dev/null 2>&1 && ! ls [0-9]*/cellCentres >/dev/null 2>&1; then
+        echo "==> postProcess -func writeCellCentres (-> log.writeCellCentres)"
+        # Not fatal: the audit degrades to domain-wide statistics and says so.
+        postProcess -func writeCellCentres > log.writeCellCentres 2>&1 \
+            || echo "    (failed; the audit will report domain-wide statistics only)"
+    fi
+else
+    echo "==> skipping writeCellCentres (postProcess is not on PATH)"
+fi
+
+$PYTHON postProcess.py . || die "postProcess.py failed"

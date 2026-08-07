@@ -8,7 +8,12 @@ because ``readline()`` keeps returning ``''`` -- a missing patch or a failed
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+#: ``format binary;`` inside a FoamFile header. Anchored to the start of a line
+#: so the byte payload of a binary file cannot match it by chance.
+_BINARY_FORMAT = re.compile(r"^\s*format\s+binary\s*;", re.MULTILINE)
 
 
 def read_text(path: Path) -> str:
@@ -49,7 +54,23 @@ def find_list_block(text: str, path: Path) -> tuple[int, int]:
     rather than by searching for a line that happens to contain the digits --
     the legacy ``while str(nFaces) not in line`` matched headers by accident
     (finding RB-03).
+
+    Raises:
+        ValueError: if the list is missing, or if the file is binary. Binary
+            payloads follow the ``(`` on the same line, so they present as a
+            missing list unless named explicitly.
     """
+    # Checked here rather than in read_text because polyBoundaryMesh inherits
+    # `format binary;` from controlDict while its body stays plain text -- only
+    # the files carrying a list payload actually go binary.
+    if _BINARY_FORMAT.search(text):
+        raise ValueError(
+            f"{path}: this file is in OpenFOAM's binary format, and these readers "
+            f"parse ASCII only. The mesh takes its format from 'writeFormat' in "
+            f"system/controlDict -- set 'writeFormat ascii;' and re-run the mesher, "
+            f"or convert an existing case in place with 'foamFormatConvert'."
+        )
+
     lines = text.split("\n")
     for i, line in enumerate(lines):
         if line.strip() == "(":

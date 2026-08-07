@@ -22,6 +22,11 @@ test = ["pytest>=7"]
 # Post-processing only. paraview.simple ships with ParaView and is not pip-installable;
 # see docs/environment.md.
 plots = ["matplotlib>=3.4", "pandas>=1.2"]
+# Case generation. cases/markelov1999/generate_cases.py REQUIRES CaseFoam
+# (https://github.com/DLR-RY/caseFOAM) -- there is no built-in substitute. It is
+# an extra rather than a core dependency only because it pulls in PyFoam and
+# pandas, which the library itself does not need. Verified against casefoam 0.2.0.
+cases = ["casefoam>=0.2"]
 
 [tool.setuptools.packages.find]
 include = ["plumetools*"]

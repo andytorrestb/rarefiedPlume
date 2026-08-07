@@ -8,17 +8,22 @@ processor*
 [0-9]*.[0-9]*
 !0.org
 
-# NOTE: constant/polyMesh IS deliberately tracked for every case, and must stay so.
-# The meshes were exported from Pointwise V18.5R2 -- a licensed, interactive tool
-# whose .pw project files are binary and cannot be scripted or regenerated here.
-# The committed polyMesh is therefore the only reproducible artefact, and it is the
-# substrate the regression golden is bound to. See docs/mesh.md.
+# --- meshes -------------------------------------------------------------------
+# 3d-inflow's polyMesh is GENERATED (./Allmesh, from case.yaml), so it is ignored:
+# every regeneration otherwise rewrote ~350k tracked lines and blocked branch
+# switches. Listed by full path -- a rule containing a slash anchors to the
+# repository root, which is what makes this match exactly one case.
+cases/3d-inflow/constant/polyMesh/
+
+# Every OTHER case's constant/polyMesh IS deliberately tracked, and must stay so.
+# Those meshes were exported from Pointwise V18.5R2 -- a licensed, interactive tool
+# whose .pw project files are binary and cannot be scripted or regenerated here --
+# and none of those cases has a generator. The committed polyMesh is the only copy.
+# Do NOT generalise the rule above to `**/constant/polyMesh/`.
 #
-# Rules of the form `constant/polyMesh/*` were previously listed here; because they
-# contain a slash they anchor to the repository root and matched nothing under
-# cases/*/, so they never had any effect (verify: `git check-ignore -v
-# cases/3d-inflow/constant/polyMesh/points` exits 1). They have been removed rather
-# than corrected, since the files should be tracked.
+# 3d-inflow's own Pointwise export is preserved by tag rather than in HEAD:
+#     git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+# See docs/mesh.md.
 
 *.eMesh
 constant/cellToRegion
@@ -38,6 +43,35 @@ cases/3d-inflow/system/blockMeshDict
 cases/3d-inflow/system/snappyHexMeshDict
 cases/3d-inflow/system/meshQualityDict
 cases/*/system/decomposeParDict.Allrun
+
+# markelov1999 generates ALL of its OpenFOAM dictionaries from case.yaml, not
+# just the mesh ones: dsmcProperties, controlDict and dsmcInitialiseDict follow
+# from the same file, so committing them would create a second, silently
+# divergent source of truth for the physics. case.yaml and the scripts are the
+# tracked artefacts; ./Allmesh writes the rest.
+cases/markelov1999/*/system/blockMeshDict
+cases/markelov1999/*/system/snappyHexMeshDict
+cases/markelov1999/*/system/meshQualityDict
+cases/markelov1999/*/system/controlDict
+cases/markelov1999/*/system/dsmcInitialiseDict
+cases/markelov1999/*/system/decomposeParDict
+cases/markelov1999/*/constant/dsmcProperties
+cases/markelov1999/*/constant/polyMesh/
+# ... and the same under the generated Cases/ tree, which is itself derived from
+# baseCase and reproducible with ./generate_cases.py.
+cases/markelov1999/Cases/
+# manifest.yaml records what generate_cases.py produced in that tree, so it is
+# only meaningful alongside it.
+cases/markelov1999/manifest.yaml
+cases/markelov1999/results/
+# CaseFoam writes these into the study directory (mkAllRunClean opens 'Allrun'
+# relative to the cwd, mkRmCases likewise). They are its output, not ours -- and
+# its Allrun launches every case CONCURRENTLY, which is not what this study
+# wants. See the README.
+cases/markelov1999/Allrun
+cases/markelov1999/Allclean
+cases/markelov1999/rmCases
+cases/markelov1999/*/case-summary.json
 
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a

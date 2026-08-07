@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Remove build products for the custom DSMC boundary models.
+#
+#   ./Allclean              remove object files and the installed library
+#   ./Allclean --dry-run    list what would be removed
+#
+# Removes only build output: the Make/linux*/ object trees and the installed
+# libplumeDsmcBoundaryModels.so. Source files are never touched.
+
+set -euo pipefail
+cd "${0%/*}" || exit 1
+
+DRY=0
+case "${1:-}" in
+    --dry-run) DRY=1 ;;
+    "")        ;;
+    *)         echo "Allclean: unknown option '$1' (try --dry-run)" >&2; exit 2 ;;
+esac
+
+remove() {
+    [ -e "$1" ] || return 0
+    if [ "$DRY" -eq 1 ]; then
+        echo "    would remove $1"
+    else
+        rm -rf "$1"
+        echo "    removed $1"
+    fi
+}
+
+echo "==> cleaning object trees"
+for d in plumeFieldInflow/Make/*; do
+    # Keep the two source-controlled files; everything else under Make/ is
+    # wmake's per-platform object directory.
+    case "${d##*/}" in
+        files|options) continue ;;
+    esac
+    remove "$d"
+done
+
+echo "==> cleaning the installed library"
+if [ -n "${FOAM_USER_LIBBIN:-}" ]; then
+    remove "$FOAM_USER_LIBBIN/libplumeDsmcBoundaryModels.so"
+else
+    echo "    FOAM_USER_LIBBIN is not set (no OpenFOAM environment); skipping"
+fi
+
+echo ""
+echo "Done. Rebuild with ./Allwmake."

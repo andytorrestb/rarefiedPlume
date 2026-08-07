@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+# Reset this case to its pre-run state.
+#
+#   ./Allclean               remove generated output
+#   ./Allclean --dry-run     list what would be removed
+#   ./Allclean --mesh        also remove the generated mesh and dictionaries
+#   ./Allclean --help
+#
+# Removes only GENERATED output. Never touched:
+#
+#   case.yaml           the authoritative source of physical inputs
+#   Allmesh Allrun Allclean Allpost runInflow.py postProcess.py
+#   any other case      every path below is relative to this directory
+#
+# By default the mesh and the generated dictionaries survive, so ./Allrun can be
+# repeated without re-meshing. --mesh removes those too, and then ./Allmesh has
+# to run again.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+
+DRY=0
+MESH=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run)  DRY=1 ;;
+        --mesh)     MESH=1 ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "Allclean: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# Refuse to run anywhere that is not a case of this family. Allclean deletes
+# directories by pattern, and a mistyped path is exactly when that matters.
+[ -f case.yaml ] || { echo "Allclean: no case.yaml here; refusing to delete
+       anything in $PWD, which does not look like a markelov1999 case." >&2; exit 1; }
+
+remove() {
+    [ -e "$1" ] || return 0
+    if [ "$DRY" -eq 1 ]; then
+        echo "    would remove $1"
+    else
+        rm -rf "$1"
+        echo "    removed $1"
+    fi
+}
+
+echo "### cleaning ${PWD##*/}"
+
+echo "==> solver output"
+# Every time directory except 0/. Matched by shape rather than by listing, so a
+# run with a different writeInterval still cleans.
+for d in [0-9]* ; do
+    [ -d "$d" ] || continue
+    [ "$d" = "0" ] && continue
+    remove "$d"
+done
+remove 0
+remove processor0
+for d in processor*; do remove "$d"; done
+remove postProcessing
+for f in log.*; do remove "$f"; done
+remove system/decomposeParDict.Allrun
+
+echo "==> analysis output"
+remove case-summary.json
+remove results
+
+if [ "$MESH" -eq 1 ]; then
+    echo "==> generated mesh and dictionaries"
+    remove constant/polyMesh
+    remove constant/dsmcProperties
+    for f in system/blockMeshDict system/snappyHexMeshDict system/meshQualityDict \
+             system/controlDict system/dsmcInitialiseDict system/decomposeParDict \
+             system/fvSchemes system/fvSolution; do
+        remove "$f"
+    done
+    echo ""
+    echo "Mesh removed. Regenerate with ./Allmesh."
+else
+    echo ""
+    echo "Mesh and dictionaries kept -- ./Allrun can be repeated directly."
+    echo "Use --mesh to remove those too."
+fi

@@ -72,7 +72,18 @@ Regenerating the mesh is opt-in and destructive, and `Allrun` never does it:
 ```bash
 ./Allmesh --dict-only     # write mesh dictionaries only, no OpenFOAM needed
 ./Allmesh --yes           # generate, mesh, checkMesh, verify -- OVERWRITES constant/polyMesh
-git checkout -- constant/polyMesh    # restore the Pointwise mesh afterwards
+```
+
+**`constant/polyMesh` is gitignored for this case** — `./Allmesh` generates it, and
+tracking it meant every regeneration rewrote ~350k lines and blocked branch
+switches. A fresh clone therefore has no mesh here until you run `./Allmesh --yes`.
+
+The original Pointwise export (99 240 tets, 2044 triangular inflow faces) is the
+substrate the regression golden is bound to. It is preserved on a tag, not in
+`HEAD`:
+
+```bash
+git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
 ```
 
 `mesh.type: snappy_hex_sphere` — **`blockMesh` builds the background box only;

@@ -93,9 +93,15 @@ echo "### $CASE_NAME"
 [ -f runInflow.py ] || die "no runInflow.py here"
 
 if [ ! -d constant/polyMesh ]; then
-    die "no constant/polyMesh.
-       Either restore the committed mesh:   git checkout -- constant/polyMesh
-       or generate one from case.yaml:      ./Allmesh --yes"
+    die "no constant/polyMesh. It is gitignored for this case -- ./Allmesh
+       generates it -- so a fresh clone starts without one.
+
+       Generate one from case.yaml:
+           ./Allmesh --yes
+
+       Or restore the original Pointwise export, which the regression golden is
+       bound to:
+           git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh"
 fi
 
 have python || have python3 || die "no python on PATH"

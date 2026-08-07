@@ -14,7 +14,12 @@ run, but only after two changes that alter the physics:
 | Per-face inflow **temperature** | ✅ `0/boundaryT` — but **volScalarField** | ✅ — **volVectorField** `(T 0 0)` |
 | Per-face inflow **number density** | ❌ one scalar per species | ✅ `dsmcFreeStreamInflowFieldPatch` |
 | Choose *which* patches admit inflow | ❌ every `patch`-type boundary | ✅ named per patch |
-| Particle-deleting outflow | ❌ no such wall model | ✅ `dsmcDeletionPatch` |
+| Particle-deleting outflow | ✅ any `patch` boundary already does — see [below](#blocker-3-was-not-a-blocker) | ✅ `dsmcDeletionPatch` |
+
+The first two rows are what
+[`plumeFieldInflow`](plume-field-inflow.md) adds to standard `dsmcFoam`. This
+document describes `cases/3d-inflow`, which does **not** use it — that case is
+bound to the regression golden and keeps the workaround below.
 
 The plume's angular *direction* survives. Its angular *density profile* — the
 thing the source-flow model exists to compute — does not.
@@ -168,17 +173,52 @@ setting this case inherited from the archived 2d-wedge case — on a 3D mesh wit
 
 ## If you need the real boundary conditions
 
-In rough order of effort:
+Option 2 below **has since been written**, and it resolves blockers 1 and 2. It
+also establishes that blocker 3 was not a blocker at all.
 
 1. **Use the MNF fork.** `boundariesDict` in this case already configures
    `dsmcFreeStreamInflowFieldPatch` on `inflow` and `dsmcDeletionPatch` on both
    `inflow` and `vacuum`. Nothing needs writing — set `output.dialect: mnf` and
    `application dsmcFoam+` in `controlDict`.
-2. **Write a custom `InflowBoundaryModel`.** Subclass
-   `InflowBoundaryModel<CloudType>`, read `0/boundaryNumberDensity_<species>` as a
-   `volScalarField`, use its boundary field per face where `FreeStream` uses
-   `numberDensities_[i]`, and take a patch-name list from the dictionary instead
-   of `isType<polyPatch>`. Roughly a day's work against `FreeStream.C`, and it
-   would also fix blocker 2. A deleting `WallInteractionModel` for blocker 3 is a
-   much smaller addition.
+2. **Use `plumeFieldInflow`** —
+   [`applications/dsmcBoundaryModels/plumeFieldInflow`](../applications/dsmcBoundaryModels/plumeFieldInflow),
+   documented in [`plume-field-inflow.md`](plume-field-inflow.md). It subclasses
+   `InflowBoundaryModel<CloudType>`, takes a patch-name list from the dictionary
+   instead of `isType<polyPatch>`, and reads the per-face number density from a
+   `volScalarField` where `FreeStream` uses `numberDensities_[i]`. Everything else
+   is `FreeStream`'s injection algorithm, kept line-for-line.
+
+   `cases/markelov1999` uses it, and therefore keeps its vacuum boundary as an
+   open `patch` rather than a reflecting `wall`.
+
+   This case (`3d-inflow`) is **not** switched to it. Its configuration is bound
+   to the regression golden, and changing the boundary condition would change
+   the results the golden exists to pin. The workaround above remains what this
+   case does.
 3. **Accept the compromises** for smoke tests and mesh work only, per above.
+
+### Blocker 3 was not a blocker
+
+The "there is no particle-deleting boundary" entry above is **wrong**, and reading
+`DSMCParcel.C` and `particleTemplates.C` in v2512 shows why.
+
+`DSMCParcel::hitPatch` returns `false`, so `particle::hitBoundaryFace` falls
+through its dispatch chain — wedge, symmetryPlane, symmetry, cyclic, cyclicACMI,
+cyclicAMI, processor, wall — and off the end:
+
+```cpp
+else
+{
+    td.keepParticle = false;
+}
+```
+
+An ordinary `patch` boundary therefore **already deletes** outgoing particles.
+The three `WallInteractionModel`s all reflect, but they only ever run on `wall`
+patches.
+
+What made the open boundary unusable was `FreeStream` *injecting* on it, not any
+failure to delete. Remove that — which a patch-name list does — and no custom
+outflow or deleting model is needed. `cases/markelov1999` runs with `vacuum` and
+`upstreamVacuum` as plain `patch` boundaries and no deleting model at all;
+`tests/openfoam` asserts by measurement that particles leave.

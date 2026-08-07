@@ -32,6 +32,9 @@ def write_mesh_setup(case_dir: Path, cfg) -> list[Path]:
     if cfg.mesh.type == "snappy_hex_sphere":
         from plumetools.foamio.snappy import write_snappy_setup
         return write_snappy_setup(case_dir, cfg)
+    if cfg.mesh.type == "snappy_markelov":
+        from plumetools.markelov1999.mesh import write_mesh_setup as write_markelov
+        return write_markelov(case_dir, cfg)
     raise NotImplementedError(f"mesh.type {cfg.mesh.type!r} is not implemented")
 
 
@@ -44,6 +47,6 @@ def mesh_pipeline(cfg) -> list[str]:
     """
     if cfg.mesh.type == "block_mesh_ogrid":
         return ["blockMesh"]
-    if cfg.mesh.type == "snappy_hex_sphere":
+    if cfg.mesh.type in ("snappy_hex_sphere", "snappy_markelov"):
         return ["blockMesh", "snappyHexMesh"]
     raise NotImplementedError(f"mesh.type {cfg.mesh.type!r} is not implemented")
