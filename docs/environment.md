@@ -33,6 +33,34 @@ spell it `trapz`).
 
 ## Current requirements
 
+> **The MNF fork is not required.** The active cases target OpenFOAM's own
+> `dsmcFoam`, verified against **v2512**. `dsmcFoam+` appears only in the
+> archived cases and in the provenance table above. If something asks you for a
+> library, that is the custom inflow model in step 3 below, not the fork.
+
+### Setting up a new machine
+
+```bash
+./Allsetup                  # all three steps below, then verifies the result
+./Allsetup --python-only    # skip everything needing OpenFOAM
+./Allsetup --check          # verify only; install nothing, build nothing
+```
+
+Three things have to be in place, and `pip` does only the first:
+
+| | | |
+|---|---|---|
+| 1 | the `plumetools` package | `pip install -e ".[test]"` |
+| 2 | standard OpenFOAM on PATH | `dsmcFoam`, `dsmcInitialise`, `blockMesh`, … |
+| 3 | `libplumeDsmcBoundaryModels.so` | `applications/dsmcBoundaryModels/Allwmake` |
+
+**Step 3 is the one that gets missed.** Nothing pip does touches it, and a case
+that needs it fails only at `./Allrun` — several steps into a study, with a
+message that reads like a missing solver rather than a missing build step. Every
+`cases/markelov1999` case selects `plumeFieldInflow` in `constant/dsmcProperties`
+and refuses to run without the library; there is deliberately no fallback to a
+uniform inflow, because that would silently discard the plume's angular structure.
+
 ### The Python library — no OpenFOAM needed
 
 ```bash
@@ -49,15 +77,25 @@ source-flow model, and the field writers are all testable without a solver.
 
 ### Running a case — needs OpenFOAM
 
-`dsmcFoam+` and `dsmcInitialise+` come from the MNF fork of OpenFOAM, not from
-the standard distribution. Standard utilities used: `blockMesh`, `topoSet`,
-`checkMesh`, `decomposePar`, `reconstructPar`, `postProcess`, and `mpirun` for
-parallel runs.
+`dsmcFoam` and `dsmcInitialise` come from the standard distribution. Other
+standard utilities used: `blockMesh`, `snappyHexMesh`, `topoSet`, `checkMesh`,
+`decomposePar`, `reconstructPar`, `postProcess`, and `mpirun` for parallel runs.
 
-Tests requiring them are marked `needs_openfoam` and are **not run by default**:
+Plus `libplumeDsmcBoundaryModels.so` from step 3 — see
+[`plume-field-inflow.md`](plume-field-inflow.md) for what it does and
+[`solver-compatibility.md`](solver-compatibility.md) for why standard `dsmcFoam`
+needs it at all.
+
+The archived cases (`1d`, `2d-planar`, `2d-wedge`, `caseFoamEx`, `wake-cylinder`)
+still name `dsmcFoam+` in their `controlDict`s, as do `util/runCases.py` and
+`util/caseFoam/runCases.py`. Those are frozen historical record and would need
+the fork; see `cases/ARCHIVE.md`.
+
+Tests requiring the toolchain are marked `needs_openfoam` and are **not run by
+default**:
 
 ```bash
-pytest -m needs_openfoam     # only where dsmcFoam+ is on PATH
+pytest -m needs_openfoam     # only where dsmcFoam and the library are available
 ```
 
 ### Post-processing — needs ParaView
@@ -115,6 +153,12 @@ For a reproducible environment, pin exactly rather than by lower bound:
 
 - a `requirements.lock` from `pip freeze` in a known-good environment, committed
   alongside `pyproject.toml`'s looser ranges;
-- a container image pinning OpenFOAM v1706 plus the MNF `dsmcFoam+` build, if a
-  source for that build can be obtained — this is the single largest remaining
-  reproducibility gap, and it is not solvable from inside this repository.
+- a container image pinning OpenFOAM v2512 and building
+  `applications/dsmcBoundaryModels` into it, which pins the whole active stack —
+  the standard distribution is publicly available, so nothing here is blocked.
+
+Reproducing the **archived** results is a separate and harder problem: it would
+need OpenFOAM v1706 plus the MNF `dsmcFoam+` build, and no source for that build
+has been located. That remains the single largest reproducibility gap, and it is
+not solvable from inside this repository. It does not affect the active cases,
+which no longer depend on the fork.

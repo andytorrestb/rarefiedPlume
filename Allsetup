@@ -1,0 +1,195 @@
+#!/bin/bash
+#
+# Set this repository up on a new machine, and verify the setup it produced.
+#
+#   ./Allsetup                  install the Python package, build the OpenFOAM library
+#   ./Allsetup --python-only    skip everything that needs OpenFOAM
+#   ./Allsetup --check          verify only; install nothing, build nothing
+#   ./Allsetup --extras a,b     pip extras to install (default: test)
+#   ./Allsetup --help
+#
+# THREE things have to be in place before a markelov1999 case will run, and pip
+# installs only the first:
+#
+#   1. the plumetools package         pip install -e ".[test]"
+#   2. standard OpenFOAM on PATH      dsmcFoam, dsmcInitialise, blockMesh, ...
+#   3. libplumeDsmcBoundaryModels.so  applications/dsmcBoundaryModels/Allwmake
+#
+# Step 3 is the one that gets missed. Nothing pip does touches it, and a case
+# needing it fails only at ./Allrun -- several steps into a study, with an error
+# that reads like a missing solver rather than a missing build step.
+#
+# THE MNF FORK IS NOT REQUIRED. The active cases target OpenFOAM's own dsmcFoam
+# (verified against v2512), not dsmcFoam+. The per-face, patch-selected inflow
+# that the fork provides through dsmcFreeStreamInflowFieldPatch comes instead
+# from the library built in step 3, which is a peer of OpenFOAM's own FreeStream
+# and links against the standard distribution. See docs/solver-compatibility.md.
+#
+# Archived cases (1d, 2d-planar, 2d-wedge, caseFoamEx, wake-cylinder) do still
+# name dsmcFoam+ in their controlDicts. They are frozen historical record and are
+# out of scope here; see cases/ARCHIVE.md.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "${0%/*}" || exit 1
+ROOT=$PWD
+
+EXTRAS="test"
+PYTHON_ONLY=0
+CHECK_ONLY=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --python-only) PYTHON_ONLY=1 ;;
+        --check)       CHECK_ONLY=1 ;;
+        --extras)      shift; EXTRAS=${1:?"--extras needs a comma-separated list"} ;;
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)             echo "$SELF: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+have() { command -v "$1" >/dev/null 2>&1; }
+ok()   { printf '  ok     %s\n' "$*"; }
+bad()  { printf '  FAIL   %s\n' "$*" >&2; FAILURES=$((FAILURES + 1)); }
+skip() { printf '  skip   %s\n' "$*"; }
+step() { printf '\n== %s\n' "$*"; }
+
+FAILURES=0
+LIB=libplumeDsmcBoundaryModels.so
+
+# Where the library would be installed, if any of the OpenFOAM lib dirs has it.
+lib_path() {
+    local dir
+    for dir in "${FOAM_USER_LIBBIN:-}" "${FOAM_SITE_LIBBIN:-}" "${FOAM_LIBBIN:-}"; do
+        [ -n "$dir" ] && [ -f "$dir/$LIB" ] && { echo "$dir/$LIB"; return 0; }
+    done
+    return 1
+}
+
+echo "### rarefiedPlume setup"
+echo "    root=$ROOT  check-only=$CHECK_ONLY  python-only=$PYTHON_ONLY"
+
+# --------------------------------------------------------------------------- #
+# 1. Python package
+# --------------------------------------------------------------------------- #
+
+step "Python"
+
+if have python3; then PYTHON=python3
+elif have python; then PYTHON=python
+else
+    echo "" >&2
+    echo "$SELF: no python or python3 on PATH. Python >= 3.9 is required." >&2
+    exit 1
+fi
+ok "$PYTHON -- $($PYTHON --version 2>&1)"
+
+# 3.9 is the floor declared in pyproject.toml; check it here rather than let pip
+# fail with a message about the wrong thing.
+$PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' \
+    || bad "Python >= 3.9 is required (pyproject.toml requires-python)"
+
+if [ "$CHECK_ONLY" -eq 0 ]; then
+    echo "  -> $PYTHON -m pip install -e \".[$EXTRAS]\""
+    if ! $PYTHON -m pip install -e ".[$EXTRAS]"; then
+        echo "" >&2
+        echo "$SELF: pip install failed. If it was the 'cases' extra, CaseFoam pulls" >&2
+        echo "       in PyFoam and is the usual culprit; --extras test gets you a" >&2
+        echo "       working library and test suite without it." >&2
+        exit 1
+    fi
+fi
+
+if $PYTHON -c "import plumetools" 2>/dev/null; then
+    ok "plumetools imports ($($PYTHON -c 'import plumetools; print(plumetools.__version__)'))"
+else
+    bad "plumetools is not importable -- run without --check to install it"
+fi
+
+# --------------------------------------------------------------------------- #
+# 2. OpenFOAM
+# --------------------------------------------------------------------------- #
+
+if [ "$PYTHON_ONLY" -eq 1 ]; then
+    step "OpenFOAM"
+    skip "--python-only; the fast test suite needs none of it:"
+    echo "         pytest -m \"not needs_openfoam\""
+else
+    step "OpenFOAM environment"
+
+    if [ -n "${WM_PROJECT_VERSION:-}" ]; then
+        ok "OpenFOAM $WM_PROJECT_VERSION (${WM_OPTIONS:-unknown})"
+    else
+        bad "no \$WM_PROJECT_VERSION -- the OpenFOAM environment is not sourced.
+         Source it and re-run, e.g.
+             . /usr/lib/openfoam/openfoam2512/etc/bashrc"
+    fi
+
+    # Standard distribution names, deliberately. The '+' spellings belong to the
+    # MNF fork and are not what the active cases ask for.
+    for cmd in blockMesh snappyHexMesh checkMesh dsmcInitialise dsmcFoam; do
+        if have "$cmd"; then ok "$cmd"; else bad "$cmd is not on PATH"; fi
+    done
+
+    # decomposePar/reconstructPar/mpirun matter only for a parallel run, and
+    # ./Allrun --serial is a legitimate way to work, so these are not failures.
+    for cmd in decomposePar reconstructPar mpirun foamDictionary; do
+        have "$cmd" && ok "$cmd" || skip "$cmd absent (parallel runs and -np unavailable)"
+    done
+
+    if have dsmcFoam+ && ! have dsmcFoam; then
+        echo "  note   dsmcFoam+ is on PATH but dsmcFoam is not. This repository's"
+        echo "         active cases target the standard solver; the fork's dictionary"
+        echo "         schema differs. See docs/solver-compatibility.md."
+    fi
+
+    # ----------------------------------------------------------------------- #
+    # 3. the custom inflow library
+    # ----------------------------------------------------------------------- #
+
+    step "plumeFieldInflow library"
+
+    if [ "$CHECK_ONLY" -eq 0 ]; then
+        if have wmake && [ -n "${FOAM_USER_LIBBIN:-}" ]; then
+            echo "  -> applications/dsmcBoundaryModels/Allwmake"
+            if ! (cd "$ROOT/applications/dsmcBoundaryModels" && ./Allwmake); then
+                bad "Allwmake failed -- see its output above"
+            fi
+        else
+            bad "cannot build: wmake on PATH and \$FOAM_USER_LIBBIN set are both
+         required. Source your OpenFOAM environment first."
+        fi
+    fi
+
+    if FOUND=$(lib_path); then
+        ok "$FOUND"
+    else
+        bad "$LIB not found in \${FOAM_USER_LIBBIN}, \${FOAM_SITE_LIBBIN} or
+         \${FOAM_LIBBIN}. Every markelov1999 case selects plumeFieldInflow in
+         constant/dsmcProperties and will refuse to run without it."
+    fi
+fi
+
+# --------------------------------------------------------------------------- #
+# summary
+# --------------------------------------------------------------------------- #
+
+echo ""
+if [ "$FAILURES" -eq 0 ]; then
+    echo "### setup complete"
+    echo ""
+    echo "Next:"
+    echo "    pytest -m \"not needs_openfoam\"        # fast suite, no OpenFOAM"
+    if [ "$PYTHON_ONLY" -eq 0 ]; then
+        echo "    cd cases/markelov1999"
+        echo "    ./generate_cases.py && ./AllmeshCases && ./AllrunCases"
+    fi
+    exit 0
+fi
+
+echo "### setup incomplete -- $FAILURES check(s) failed" >&2
+echo "" >&2
+echo "Nothing above needs the MNF fork's dsmcFoam+. If a case still asks for a" >&2
+echo "missing library, it is step 3, not the solver: docs/environment.md." >&2
+exit 1

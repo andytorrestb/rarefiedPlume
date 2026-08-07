@@ -47,6 +47,25 @@ done
 die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Where to build the custom inflow library from, as something that can be pasted.
+#
+# The depth is NOT fixed: baseCase sits three levels below the repository root,
+# a generated case under Cases/<gap>/<pressure> sits five. This used to print a
+# hardcoded '../../../..', which is wrong from both. Walk up to whichever parent
+# actually holds applications/dsmcBoundaryModels, and fall back to naming the
+# path relative to the root if this copy has been moved outside the tree.
+build_dir_hint() {
+    local dir=$PWD
+    while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+        if [ -d "$dir/applications/dsmcBoundaryModels" ]; then
+            echo "cd $dir/applications/dsmcBoundaryModels && ./Allwmake"
+            return 0
+        fi
+        dir=${dir%/*}
+    done
+    echo "cd <repository root>/applications/dsmcBoundaryModels && ./Allwmake"
+}
+
 run() {
     local log="log.$1"; shift
     echo "==> $* (-> $log)"
@@ -106,12 +125,17 @@ if [ "$SOLVE" -eq 1 ]; then
         done
         [ "$FOUND" -eq 1 ] || die "$LIB is not built.
        constant/dsmcProperties selects the plumeFieldInflow boundary model, which
-       lives in that library. Stock dsmcFoam cannot express this case's inflow --
-       it injects on every patch-type boundary and takes ONE number density per
-       species -- so there is no fallback and the run would abort.
+       lives in that library. This is NOT a request for the MNF fork's dsmcFoam+:
+       the model is a peer of OpenFOAM's own FreeStream and is built against the
+       standard distribution. It exists because stock FreeStream injects on every
+       patch-type boundary and takes ONE number density per species, neither of
+       which this case can use -- so there is no fallback and the run would abort.
 
-       Build it:
-           cd ../../../../applications/dsmcBoundaryModels && ./Allwmake
+       Build it, with your OpenFOAM environment sourced:
+           $(build_dir_hint)
+
+       Or from the repository root, which also checks the rest of the setup:
+           ./Allsetup
 
        Searched: \${FOAM_USER_LIBBIN}, \${FOAM_SITE_LIBBIN}, \${FOAM_LIBBIN}"
     fi
