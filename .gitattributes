@@ -38,6 +38,7 @@ cases/**/constant/polyMesh/** -text
 Allrun      text eol=lf
 Allclean    text eol=lf
 Allmesh     text eol=lf
+Allpost     text eol=lf
 Allwmake    text eol=lf
 Allsetup    text eol=lf
 monitor     text eol=lf
