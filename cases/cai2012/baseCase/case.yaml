@@ -1,0 +1,254 @@
+# cases/cai2012/baseCase -- Cai & Wang 2012, collisionless circular plume.
+#
+# Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless
+# Rocket Plume Solutions", Journal of Spacecraft and Rockets, Vol. 49, No. 1,
+# 2012.
+#
+# THE AUTHORITATIVE SOURCE OF PHYSICAL INPUTS FOR THIS CASE.
+#
+#   constant/dsmcProperties, system/controlDict, system/blockMeshDict,
+#   system/topoSetDict, system/createPatchDict, system/dsmcInitialiseDict,
+#   system/decomposeParDict and the 0/ boundary fields are all GENERATED from
+#   this file. Do not edit them; edit this and re-run ./Allmesh (mesh +
+#   dictionaries) or ./Allrun (0/ fields).
+#
+# generate_cases.py clones this directory per Knudsen number and rewrites
+# exit.knudsen here -- structurally, by loading and re-emitting YAML, never by
+# string substitution.
+#
+# Units are in every key name. Values are tagged:
+#
+#   [PAPER]       printed in Cai & Wang 2012
+#   [DERIVED]     computed, never a literal
+#   [ASSUMPTION]  not in the paper; an implementation choice, documented in
+#                 docs/cai2012-case.md
+#
+# NOTHING physical is stored as a number that could have been derived. The whole
+# case is built from Kn, S0, D and T0:
+#
+#   Kn, D       -> lambda0 = Kn D              [DERIVED]
+#   lambda0, T0 -> n0                          [DERIVED]
+#   S0, T0      -> U0 = S0 sqrt(2 R T0)        [DERIVED]
+#   n0, cell    -> particle weight             [DERIVED]
+#   cell, U0    -> deltaT                      [DERIVED]
+#
+# See cases/cai2012/README.md and docs/cai2012-case.md.
+
+model: cai2012_circular_plume
+
+meta:
+  reference: Cai and Wang 2012
+  title: Numerical Validations for a Set of Collisionless Rocket Plume Solutions
+  authors: Cai, Wang
+  journal: Journal of Spacecraft and Rockets
+  volume: 49
+  number: 1
+  year: 2012
+  # generate_cases.py fills in case_name and knudsen per generated case.
+
+# --- the circular nozzle exit -------------------------------------------------
+nozzle:
+  diameter_m: 0.2              # [PAPER] D = 0.2 m. R0 = 0.1 m is DERIVED --
+                               # there is deliberately no radius key.
+
+# --- the exit state -----------------------------------------------------------
+# A uniform drifting Maxwellian across the disk. This is the WHOLE boundary
+# condition: no reservoir, no throat, no isentropic expansion, no hemispherical
+# source surface. The physical nozzle exit IS the DSMC inlet.
+exit:
+  speed_ratio: 2.0             # [PAPER] S0 = U0 / sqrt(2 R T0)
+  T0_K: 300.0                  # [ASSUMPTION] Cai does not appear to print an
+                               # absolute exit temperature, and the normalised
+                               # quantities he validates (n/n0, U sqrt(beta0),
+                               # T/T0) depend on S0 and Kn rather than on it.
+                               # 300 K is stated here as an assumption rather
+                               # than invented as a paper value. Changing it
+                               # rescales U0 and n0 together and leaves every
+                               # validation curve unchanged.
+  knudsen: 100.0               # [PAPER] one of 100, 0.1, 0.01.
+                               # generate_cases.py rewrites this per case.
+  characteristic_length: diameter   # [PAPER] Cai states the nozzle DIAMETER.
+                               # 'radius' would halve every mean free path and
+                               # so double every density -- a factor of two
+                               # hiding in a definition.
+
+# --- the gas ------------------------------------------------------------------
+# [PAPER] argon. The VHS coefficients are NOT paper values: Cai names the gas and
+# the collision model but not the constants a modern solver needs. These are the
+# values cases/3d-inflow already runs argon with, kept because §3 of the case
+# specification asks to start from the repository's model rather than introduce
+# new molecular parameters.
+#
+# Note omega = 0.74 is the OpenFOAM tutorial N2 exponent; Bird's tabulated argon
+# is 0.81 at the same 4.17e-10 m / 273 K reference. The difference moves the
+# Kn -> n0 conversion by 0.6%. See docs/cai2012-case.md §3.
+gas:
+  species_name: Ar
+  mass_kg: 6.63e-26
+  diameter_m: 4.17e-10
+  omega: 0.74
+  t_ref_K: 273.0               # the temperature diameter_m belongs to. The two
+                               # are a PAIR: changing one alone changes the gas.
+  internal_degrees_of_freedom: 0    # argon is monatomic
+  mean_free_path_convention: vhs    # [ASSUMPTION] Cai does not state GRASP's.
+                               # 'vhs' carries the (T0/Tref)^(omega-1/2) factor,
+                               # 1.0229 here; 'hard_sphere' drops it and is the
+                               # same formula evaluated at Tref.
+
+# --- the domain ---------------------------------------------------------------
+# Everything in nozzle diameters, so D is the only length that sets a scale.
+geometry:
+  symmetry_mode: none          # [ASSUMPTION] full 3-D, as requested. 'half_y'
+                               # models y >= 0 with a symmetry plane and halves
+                               # the cost; it is opt-in and never automatic --
+                               # a domain that quietly became half a domain is
+                               # not a result anybody can compare.
+  x_max_over_D: 10.0           # [PAPER] Cai plots 0 <= X/D <= 10
+  y_half_over_D: 10.0          # [PAPER] |Y|/D <= 10
+  z_half_over_D: 10.0          # [PAPER] |Z|/D <= 10
+  plume_axis: [1, 0, 0]
+
+# --- the mesh -----------------------------------------------------------------
+# A uniform fine core around the nozzle and the near plume, with one geometrically
+# expanding segment on each outward side. 2 x 3 x 3 = 18 blocks.
+#
+# Cai's grid is uniform at dx = lambda0(Kn = 0.01) = 2 mm. He can afford that
+# because his solver is AXISYMMETRIC -- the mesh is a 2-D (x, r) sheet. Translated
+# literally into this 3-D box that is
+#
+#     1000 x 2000 x 2000 = 4.0e9 cells
+#
+# which ./Allmesh computes and prints before writing anything. Hence the grading.
+#
+# The exit disk must lie entirely inside the uniform core (core_half_over_D > 0.5
+# is enforced), so every injecting face is the same size. The expansion ratios are
+# SOLVED FOR rather than typed in, so the first cell of each outer segment matches
+# the core cell -- a step in cell size at the core boundary would appear in the
+# sampled density as a feature that looks physical.
+mesh:
+  type: graded_cartesian
+  core_cell_size_m: null       # null -> min(target_cell_over_mfp * lambda0,
+                               #             max_core_cell_over_D * D)
+  target_cell_over_mfp: 1.0    # [PAPER] Cai states dx / lambda0 = 1
+  max_core_cell_over_D: 0.05   # [ASSUMPTION] 20 cells across the diameter. The
+                               # geometric floor under the collision criterion:
+                               # at Kn = 100, lambda0 is 100 D and dx/lambda0 = 1
+                               # would allow a cell larger than the nozzle.
+  core_x_over_D: 2.0           # [ASSUMPTION] the core covers the first two
+  core_half_over_D: 1.5        # diameters and 1.5 D laterally -- where the
+                               # plume is dense and where the near-field
+                               # structure Cai's contours show actually is.
+  outer_x_cells: 40
+  outer_lateral_cells: 34      # 34 rather than 30 so the expansion needed to
+                               # span the lateral far field stays under the cap
+                               # below even for the finest (Kn = 0.01) core
+  outer_expansion: 40.0        # CAP on the ratio (last cell / first cell) in an
+                               # outer segment. The actual ratio is solved for
+                               # continuity with the core and is normally well
+                               # under this; if the cap binds, ./Allmesh warns.
+  max_cells: 4000000           # HARD budget. A mis-set Knudsen number would
+                               # otherwise silently request a multi-billion-cell
+                               # mesh. If the criterion does not fit, the cell is
+                               # coarsened and every report says so.
+  min_core_cell_size_m: null
+  patch_names:
+    nozzle: nozzle             # created by topoSet + createPatch, NOT blockMesh
+    upstream_vacuum: upstreamVacuum
+    outer: vacuum
+    symmetry: symmetry         # only used when symmetry_mode is half_y
+
+# --- DSMC ---------------------------------------------------------------------
+dsmc:
+  binary_collision_model: VariableHardSphere   # [PAPER] VHS. NTC is not a
+                               # setting: it is the only collision-selection
+                               # algorithm standard dsmcFoam implements, so
+                               # Cai's "no-time-counter" holds by construction.
+  collisions_enabled: true     # ON at every Kn, INCLUDING 100. Switching them
+                               # off would make the collisionless comparison
+                               # true by definition instead of demonstrating
+                               # that DSMC approaches it.
+  n_equivalent_particles: null # null -> derived so the EXIT cell reaches
+                               # resolution.target_particles_per_cell
+  delta_t_s: null              # null -> derived from courant_target
+  courant_target: 0.2          # [ASSUMPTION] fraction of the smallest cell a
+                               # molecule at U0 + 3 sigma may cross per step.
+                               # Cai's dt/t0 = 1 is Courant ~3.6 here, which is
+                               # not a valid DSMC step; see docs/cai2012-case.md.
+  end_time_s: null             # null -> average_start + sampling transits
+  average_start_s: null        # null -> the transient below
+  write_interval_s: null
+  transient_basis: cai         # 'cai' uses transient_collision_times below;
+                               # 'transits' uses transient_domain_transits.
+                               # BOTH durations are always printed, and the
+                               # manifest records which was used.
+  transient_collision_times: 10000.0   # [PAPER] Cai runs at least 10^4 t0
+                               # before sampling, with t0 referred to the
+                               # Kn = 0.01 exit properties.
+  transient_domain_transits: 3.0       # the cheaper alternative basis
+  sampling_domain_transits: 3.0        # how long to average for
+  initial_number_density_per_m3: 1.0e+10   # near-vacuum seed, not a physical
+  initial_temperature_K: 300.0             # state -- the plume fills the
+                                           # domain from the nozzle
+  n_subdomains: 4
+
+# --- particle resolution ------------------------------------------------------
+# Standard dsmcFoam has ONE particle weight for the whole domain
+# (DSMCCloud::nParticle_ is a single scalar). There is no radial or adaptive
+# weighting, so the target can be met in exactly one place. It is met at the
+# EXIT CELL -- the densest cell in the domain -- and the occupancy that implies
+# downstream follows from the density ratio and is reported, not assumed.
+resolution:
+  target_particles_per_cell: 20.0
+  reference_knudsen: 0.01      # [PAPER] Cai's dx/lambda0 and dt/t0 are referred
+                               # to the Kn = 0.01 exit properties for EVERY case,
+                               # not to the case's own.
+  report_only: false
+
+# --- DSMC quality checks ------------------------------------------------------
+checks:
+  enabled: true
+  max_cell_over_mfp: 1.0       # warn above; Cai's own criterion is 1
+  max_courant: 1.0             # HARD ERROR above: a molecule crossing more than
+                               # one smallest cell per step skips cells without
+                               # being offered a collision partner in them
+  warn_courant: 0.5
+  min_particles_per_cell: 5.0
+  min_nozzle_faces: 12         # HARD ERROR below: a disk resolved by a handful
+                               # of squares is not a circular exit
+  max_nozzle_area_error: 0.05  # HARD ERROR above. The injected molecule flow is
+                               # proportional to the meshed patch area, so the
+                               # whole solution scales with this error.
+
+# --- generated dictionaries ---------------------------------------------------
+output:
+  dialect: standard            # OpenFOAM's own dsmcFoam, v2512
+  inflow_model: plumeFieldInflow   # applications/dsmcBoundaryModels.
+                               # Stock FreeStream cannot express this case: it
+                               # injects on EVERY patch-type boundary, so the
+                               # five vacuum boundaries would become inlets, and
+                               # the only way to stop that is to declare them
+                               # walls -- which replaces the vacuum with a
+                               # reflecting box. The case FAILS if the library
+                               # is not compiled; it never falls back.
+
+# --- post-processing ----------------------------------------------------------
+post:
+  centerline_x_over_D_max: 10.0     # [PAPER] Cai Figs. 19-21
+  centerline_points: 200
+  centerline_radius_over_D: 0.10    # [ASSUMPTION] cells within this radius of
+                               # the axis are averaged into a centreline sample.
+                               # A single cell column is shot noise; a fat tube
+                               # is not the centreline -- and the plume is peaked
+                               # on the axis, so a tube average sits BELOW it.
+                               # That bias is 6.8% in the density at X/D = 1 for
+                               # a 0.25 D tube and 1.1% at 0.10 D. It is removed
+                               # exactly by averaging the analytical solution
+                               # over the same cells (plumetools.cai2012.post),
+                               # so this value only has to keep the plotted
+                               # points near Cai's on-axis curve.
+  plane: xz                    # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+  plane_half_over_D: 5.0
+  contour_levels: [0.1, 0.01, 0.001]   # [PAPER] the levels Cai draws
+  plane_points_x: 240          # resolution of the ANALYTICAL comparison grid
+  plane_points_lateral: 240    # only; the DSMC contour uses the cells as they
+                               # are, with no resampling
