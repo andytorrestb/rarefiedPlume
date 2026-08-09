@@ -4,6 +4,7 @@
 #
 #   ./Allmesh                 generate dictionaries, mesh, check, verify
 #   ./Allmesh --dict-only     write the dictionaries and stop (no OpenFOAM needed)
+#   ./Allmesh --force         re-mesh even if the case already has results
 #   ./Allmesh --help
 #
 # Pipeline:
@@ -27,15 +28,57 @@ SELF=${0##*/}
 cd "${0%/*}" || exit 1
 
 DICT_ONLY=0
-case "${1:-}" in
-    "")           ;;
-    --dict-only)  DICT_ONLY=1 ;;
-    -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
-    *)            echo "Allmesh: unknown option '$1' (try --help)" >&2; exit 2 ;;
-esac
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dict-only)  DICT_ONLY=1 ;;
+        --force)      FORCE=1 ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "Allmesh: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 die() { echo "" >&2; echo "Allmesh: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# Numeric time directories, i.e. solver output. `sort -g` rather than -n:
+# OpenFOAM's general time format writes 2e-05, which -n reads as 2.
+result_times() {
+    local entry name
+    for entry in */; do
+        name=${entry%/}
+        case "$name" in
+            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
+        esac
+        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
+            echo "$name"
+        fi
+    done | sort -g
+}
+
+# Refuse to re-mesh a case that already holds results.
+#
+# blockMesh replaces the geometry those results were computed on, and NOTHING
+# downstream would notice: the time directories stay where they are, addressing
+# cells that no longer exist, and the next ./Allpost reads them against the new
+# mesh. That is worse than losing them.
+#
+# --dict-only is allowed, because rewriting controlDict without touching the mesh
+# is how a finished run is carried further (see ./Allrun --help).
+LATEST=$(result_times | tail -1)
+if [ -n "$LATEST" ] && [ "$DICT_ONLY" -eq 0 ] && [ "$FORCE" -eq 0 ]; then
+    echo "Allmesh: this case already holds results (latest time $LATEST)." >&2
+    echo "" >&2
+    echo "Re-meshing would replace the geometry they were computed on while" >&2
+    echo "leaving them in place, addressing cells that no longer exist." >&2
+    echo "" >&2
+    echo "  to CONTINUE the run:            ./Allrun" >&2
+    echo "  to run further than endTime:    ./Allmesh --dict-only && ./Allrun" >&2
+    echo "  to start over:                  ./Allclean --mesh && ./Allmesh" >&2
+    echo "  to re-mesh anyway:              ./Allmesh --force" >&2
+    exit 1
+fi
 
 # Run a command, log it, and surface the FOAM error rather than the tail: under
 # mpirun the last lines are MPI teardown from every rank and the real cause has
