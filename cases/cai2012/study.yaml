@@ -1,0 +1,117 @@
+# The Cai & Wang 2012 case matrix.
+#
+# Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless Rocket
+# Plume Solutions", Journal of Spacecraft and Rockets, Vol. 49, No. 1, 2012.
+#
+# Generate with:
+#     ./generate_cases.py                 every enabled case
+#     ./generate_cases.py --dry-run       show what would be generated
+#     ./generate_cases.py --knudsen 100   only these Knudsen numbers
+#
+# To skip a case, set enabled: false. The entry STAYS -- it is the record of the
+# intended matrix, and deleting it would lose the fact that the case exists.
+#
+# The Knudsen number is the ONLY physical value here. Everything else -- lambda0,
+# n0, the cell size, the particle weight, the time step -- is derived from it at
+# mesh time, so a case named for one Kn cannot run at another. `overrides` may
+# not touch exit.knudsen; that is rejected.
+
+base_case: baseCase
+cases_dir: Cases
+manifest_name: manifest.yaml
+
+# [PAPER] the three Knudsen numbers, on the nozzle DIAMETER.
+#
+# Generated most-rarefied-first, which is also the development order §14 of the
+# case specification lays out: the collisionless benchmark has to be right before
+# the collisional cases mean anything.
+#
+# On dsmc.transient_basis
+# -----------------------
+# baseCase/case.yaml defaults to 'cai' -- Cai's own statement of 10 000 reference
+# collision times before sampling. On this domain that is 0.0501 s, i.e. 18
+# transits of the domain at U0 and ~36 000 timesteps, and it is what the template
+# says because it is what the paper says.
+#
+# The cases below override it to 'transits': 2 domain transits of transient, then
+# 1.5 of sampling. This is a supersonic beam into a vacuum with no recirculation
+# and nothing slow to equilibrate, so it reaches steady state quickly -- MEASURED
+# on the Kn = 100 case, the parcel count reaches its predicted steady value of
+# 1.155e6 at 1.32 transits and is flat thereafter. Two transits of transient is
+# therefore past steady state with margin, and 1.5 transits of sampling is ~3000
+# timesteps of averaging over ~1.2e6 parcels.
+#
+# This is a departure from the paper's procedure, so it is written here where it
+# can be seen rather than buried in the template, and manifest.yaml records the
+# resulting average_start_s for every case. Set transient_basis: cai to run Cai's
+# 10^4 t0 transient; nothing else changes, and ./Allmesh prints both durations
+# whichever is used.
+kn_cases:
+  - name: Kn100
+    Kn: 100.0
+    enabled: true
+    overrides:
+      dsmc:
+        transient_basis: transits
+        transient_domain_transits: 2.0
+        sampling_domain_transits: 1.5
+        # 12, not 24: this machine has 12 physical cores and Open MPI counts
+        # cores, not hardware threads, when it decides how many slots exist.
+        n_subdomains: 12
+    note: >-
+      The collisionless benchmark. lambda0 = 20 m, a hundred nozzle diameters,
+      so the mesh is set by geometry (mesh.max_core_cell_over_D) rather than by
+      the collision criterion. Collisions stay ON: the point is that DSMC
+      approaches the collisionless solution by itself.
+
+  - name: Kn0p1
+    Kn: 0.1
+    enabled: true
+    overrides:
+      dsmc:
+        transient_basis: transits
+        transient_domain_transits: 2.0
+        sampling_domain_transits: 1.5
+        n_subdomains: 12
+    note: >-
+      lambda0 = 20 mm, so the 10 mm core cell meets Cai's dx/lambda0 = 1 with a
+      factor of two to spare on the same mesh as Kn100 -- the two cases are
+      directly comparable.
+
+  - name: Kn0p01
+    Kn: 0.01
+    enabled: true
+    overrides:
+      mesh:
+        # lambda0 = 2 mm here. A 2 mm core would be ~30e6 cells in this domain,
+        # so the cell is allowed to land wherever the budget puts it --
+        # ./Allmesh reports the resulting cell/lambda0 ratio and the checks warn
+        # on it. This is the one case where Cai's resolution criterion is NOT
+        # met, and that is recorded rather than worked around.
+        max_cells: 4000000
+      dsmc:
+        transient_basis: transits
+        transient_domain_transits: 2.0
+        sampling_domain_transits: 1.5
+        n_subdomains: 12
+    note: >-
+      The most collisional case, and the one where Cai reports the largest
+      departure from his collisionless solution (12.03%). Cai's dx = lambda0 is
+      not affordable in 3-D Cartesian here; the achieved ratio is in the
+      manifest and in docs/cai2012-case.md. Roughly 8e6 parcels over 20 000
+      steps -- hours, not minutes.
+
+meta:
+  reference: Cai and Wang 2012
+  gas: Ar
+  nozzle_diameter_m: 0.2
+  speed_ratio: 2.0
+  collision_model: VHS
+  collision_selection: NTC
+  solver: standard OpenFOAM v2512 dsmcFoam
+  note: >-
+    Kn, S0, D, argon, VHS and NTC are paper values. T0 = 300 K, the VHS
+    coefficients, the domain extents, the mesh grading, the time step and the
+    particle weighting are implementation assumptions -- see
+    docs/cai2012-case.md. Cai used an axisymmetric DSMC code (GRASP) on a
+    uniform grid; this is 3-D Cartesian OpenFOAM.
