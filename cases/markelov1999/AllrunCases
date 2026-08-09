@@ -16,6 +16,11 @@
 # Cases come from manifest.yaml in the order generate_cases.py wrote them, so the
 # sequence is reproducible. Nothing here re-meshes -- ./Allrun never does, and a
 # solver run that changed its own geometry would invalidate its own results.
+#
+# Re-running this CONTINUES each case from its newest time directory rather than
+# restarting it -- see ./Allrun --help. A study interrupted part-way is finished
+# by running this again; cases that already reached endTime report that and are
+# skipped in seconds.
 
 set -uo pipefail
 SELF=${0##*/}
