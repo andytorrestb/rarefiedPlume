@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+# Post-process every generated case and build the combined validation report.
+#
+#   ./AllpostCases               post-process all of them
+#   ./AllpostCases --keep-going  do not stop at the first failure
+#   ./AllpostCases --help
+#
+# Produces:
+#
+#   <case>/results/centerline.csv, density_plane.csv, metrics.yaml, *.png
+#   results/study-table.csv      the combined table
+#
+# Rows follow manifest.yaml order -- decreasing Knudsen number -- so the table is
+# byte-for-byte reproducible, and so the expected TREND reads down the page:
+# Kn = 100 should agree with the collisionless solution almost exactly, and the
+# departure should grow as the flow becomes more collisional.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+KEEP_GOING=0
+case "${1:-}" in
+    "")            ;;
+    --keep-going)  KEEP_GOING=1 ;;
+    -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    *)             echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+
+die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+echo "### post-processing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    if [ -x "$case_path/Allpost" ]; then
+        "$case_path/Allpost" || FAILED+=("$case_path")
+    elif [ -f "$case_path/Allpost" ]; then
+        bash "$case_path/Allpost" || FAILED+=("$case_path")
+    else
+        echo "AllpostCases: $case_path has no Allpost" >&2
+        FAILED+=("$case_path")
+    fi
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Use --keep-going to continue with the rest."
+    fi
+    echo ""
+done
+
+# --------------------------------------------------------------------------- #
+# combined validation table
+# --------------------------------------------------------------------------- #
+
+echo "=============================================================="
+echo "### combined study table"
+
+$PYTHON - <<'PY' || die "could not build the study table"
+from pathlib import Path
+
+import yaml
+
+from plumetools.cai2012 import CAI_REPORTED_MAX_DENSITY_ERROR_PERCENT
+from plumetools.cai2012.post import STUDY_COLUMNS, study_row, write_study_table
+
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+rows = []
+missing = []
+for entry in document.get("cases", []):
+    path = Path(entry["path"]) / "results" / "metrics.yaml"
+    if not path.is_file():
+        missing.append(entry["path"])
+        continue
+    metrics = yaml.safe_load(path.read_text(encoding="utf-8"))
+    metrics.setdefault("case", {}).setdefault("name", entry["name"])
+    metrics["case"].setdefault("Kn", entry["Kn"])
+    rows.append(study_row(metrics))
+
+table = write_study_table(Path("results") / "study-table.csv", rows)
+print(f"    wrote {table}  ({len(rows)} row(s))")
+if missing:
+    print(f"    {len(missing)} case(s) had no results/metrics.yaml: {missing}")
+
+widths = {c: max(len(c), 12) for c in STUDY_COLUMNS}
+print()
+print("    " + "  ".join(f"{c:>{widths[c]}}" for c in STUDY_COLUMNS))
+for row in rows:
+    cells = []
+    for column in STUDY_COLUMNS:
+        value = row.get(column)
+        if value is None:
+            cells.append(f"{'':>{widths[column]}}")
+        elif isinstance(value, float):
+            cells.append(f"{value:>{widths[column]}.4g}")
+        else:
+            cells.append(f"{str(value):>{widths[column]}}")
+    print("    " + "  ".join(cells))
+
+print()
+print("    Cai's own maximum centreline density errors, for reference:")
+for kn, percent in sorted(CAI_REPORTED_MAX_DENSITY_ERROR_PERCENT.items(),
+                          reverse=True):
+    print(f"      Kn = {kn:<6g} {percent:>6.2f}%")
+print()
+print("    These are REFERENCE VALUES, not tolerances. This is a different DSMC")
+print("    code on a Cartesian mesh; the trend across the three cases is what is")
+print("    being validated. See docs/cai2012-case.md.")
+PY
+
+echo ""
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "AllpostCases: ${#FAILED[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+echo "### done"
