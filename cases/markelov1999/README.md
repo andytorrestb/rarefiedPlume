@@ -32,12 +32,42 @@ Per case, from inside `Cases/gap06in/p005psi`:
 ```bash
 ./Allmesh              # dictionaries + mesh + checkMesh + geometry verification
 ./Allmesh --dict-only  # dictionaries only; needs no OpenFOAM
+./Allmesh --force      # re-mesh even though the case has results
 ./Allrun --serial      # one process
 ./Allrun -np 8         # override the subdomain count
 ./Allrun --no-solve    # generate 0/ and verify the flux; needs no solver
 ./Allpost              # statistics, wall pressures, resolution audit
 ./Allclean             # remove solver output (--mesh to remove the mesh too)
 ```
+
+## Runs continue; they do not restart
+
+Re-running `./Allrun` **continues** a case from its newest time directory.
+`system/controlDict` carries `startFrom latestTime`, and the two steps that would
+destroy the state being resumed from are skipped: `dsmcInitialise`, which would
+rebuild the initial parcel cloud, and `decomposePar -force`, which deletes
+`processor*/` before it writes. `reconstructPar -newTimes` leaves earlier writes
+alone.
+
+`fieldAverage` keeps its accumulators in each time directory's
+`uniform/functionObjects/`, so `fDMean` and the rest span the whole sampled
+period rather than only the last leg — which matters here, because the surface
+pressures are read off those means.
+
+An interrupted run is resumed by running `./Allrun` again. A finished run is
+carried further by raising `dsmc.end_time_s` in `case.yaml` and then:
+
+```bash
+./Allmesh --dict-only    # rewrite controlDict; does NOT re-mesh
+./Allrun                 # continue from the latest time
+```
+
+`./Allmesh` refuses to re-mesh a case that already has results: snappyHexMesh
+would replace the geometry they were computed on while leaving them in place,
+addressing cells that no longer exist. `--dict-only` is always allowed and
+`--force` overrides. On a resume `0/` is not regenerated, because the solver
+reads the boundary fields from the resume time — to change the physics, start
+over with `./Allclean`.
 
 ## Layout
 
