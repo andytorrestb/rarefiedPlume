@@ -125,8 +125,14 @@ def solved_case(meshed_case, tmp_path_factory):
         script.chmod(0o755)
 
     # Shorten the run. deltaT is untouched -- the Courant check depends on it --
-    # so this only reduces the number of steps.
-    for entry, value in (("endTime", "4e-05"), ("writeInterval", "2e-05"),
+    # so this only reduces the number of steps: 4e-05 s at deltaT 2e-07 is 200.
+    #
+    # writeInterval is a STEP COUNT, because the generated controlDict uses
+    # `writeControl timeStep` -- the runTime schedule is measured from the start
+    # time of the current run, so it restarts at the resume point and a resumed
+    # leg shorter than one interval writes nothing. 100 of 200 steps gives two
+    # writes, the second exactly at endTime.
+    for entry, value in (("endTime", "4e-05"), ("writeInterval", "100"),
                          ("functions/fieldAverage1/timeStart", "0")):
         run_or_fail(["foamDictionary", "system/controlDict",
                      "-entry", entry, "-set", value], case)

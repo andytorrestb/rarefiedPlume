@@ -211,9 +211,13 @@ def render_control_dict(cfg) -> str:
     post-processing measures.
     """
     d = cfg.dsmc
+    # The write interval in STEPS. dsmc.write_interval_s stays the configured
+    # quantity; this is only how controlDict expresses it.
+    write_steps = max(1, int(round(d.write_interval_s / d.delta_t_s)))
     lines = _header(
         "controlDict",
-        f"dsmcFoam, deltaT {d.delta_t_s:g} s to {d.end_time_s:g} s, averaging from "
+        f"dsmcFoam, deltaT {d.delta_t_s:g} s to {d.end_time_s:g} s "
+        f"(writes every {write_steps} steps), averaging from "
         f"{d.average_start_s:g} s.",
         location="system")
 
@@ -227,14 +231,32 @@ def render_control_dict(cfg) -> str:
         "// no silent fallback to a uniform inflow.",
         f'libs            ( "{PLUME_LIB}" );',
         "",
-        "startFrom       startTime;",
+        "// 'latestTime', not 'startTime': re-running ./Allrun CONTINUES the case",
+        "// from its newest time directory instead of restarting it. On a case",
+        "// with no results this resolves to 0, so a fresh run is unaffected.",
+        "//",
+        "// The whole DSMC state is in each time directory -- lagrangian/dsmc/",
+        "// holds the parcels, and fieldAverage's accumulators are in uniform/ --",
+        "// so a resumed run continues both the flow and the averaging rather",
+        "// than starting either again.",
+        "//",
+        "// purgeWrite 0 below is what makes this safe: no time directory is ever",
+        "// deleted, so there is always something to resume from.",
+        "startFrom       latestTime;",
         "startTime       0;",
         "stopAt          endTime;",
         f"endTime         {d.end_time_s:g};",
         f"deltaT          {d.delta_t_s:g};",
         "",
-        "writeControl    runTime;",
-        f"writeInterval   {d.write_interval_s:g};",
+        "// 'timeStep', not 'runTime'. The runTime write schedule is measured",
+        "// from the START time of the current run, so on a resume it begins",
+        "// again there and a resumed leg shorter than one interval writes",
+        "// nothing. The step index is global and survives a restart.",
+        f"// {write_steps} steps = {write_steps * d.delta_t_s:g} s.",
+        "writeControl    timeStep;",
+        f"writeInterval   {write_steps};",
+        "// Never purge: a deleted time directory is one fewer place to resume",
+        "// from, and ./Allclean is the only thing here that removes one.",
         "purgeWrite      0;",
         "writeFormat     ascii;",
         "writePrecision  10;",

@@ -161,6 +161,21 @@ def test_field_average_covers_the_surface_force_density(cfg):
     assert re.search(r"timeStart\s+0\.002;", text)
 
 
+def test_the_case_resumes_from_the_latest_time(cfg):
+    """`startFrom latestTime` is what makes ./Allrun continue a case instead of
+    restarting it. On a case with no results it resolves to 0, so a fresh run is
+    unaffected -- and `purgeWrite 0` is what keeps something to resume from.
+
+    fieldAverage stores its accumulators in each time directory's
+    uniform/functionObjects/, so a resumed run continues the averaging as well as
+    the flow. That matters here: the surface pressures are read off fDMean.
+    """
+    text = foamdicts.render_control_dict(cfg)
+    assert "startFrom       latestTime;" in text
+    assert "startTime       0;" in text
+    assert "purgeWrite      0;" in text
+
+
 def test_averaging_starts_after_the_transient(cfg):
     assert cfg.dsmc.average_start_s < cfg.dsmc.end_time_s
     text = foamdicts.render_control_dict(cfg)
