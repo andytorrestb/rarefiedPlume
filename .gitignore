@@ -73,6 +73,26 @@ cases/markelov1999/Allclean
 cases/markelov1999/rmCases
 cases/markelov1999/*/case-summary.json
 
+# cai2012, for the same reason: every OpenFOAM dictionary follows from case.yaml,
+# so committing one would create a second source of truth for the physics.
+cases/cai2012/*/system/blockMeshDict
+cases/cai2012/*/system/topoSetDict
+cases/cai2012/*/system/createPatchDict
+cases/cai2012/*/system/meshQualityDict
+cases/cai2012/*/system/controlDict
+cases/cai2012/*/system/dsmcInitialiseDict
+cases/cai2012/*/system/decomposeParDict
+cases/cai2012/*/system/fvSchemes
+cases/cai2012/*/system/fvSolution
+cases/cai2012/*/constant/dsmcProperties
+cases/cai2012/*/constant/polyMesh/
+# ... and the generated Cases/ tree, reproducible with ./generate_cases.py.
+cases/cai2012/Cases/
+cases/cai2012/manifest.yaml
+cases/cai2012/results/
+cases/cai2012/*/results/
+cases/cai2012/*/case-summary.json
+
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a
 # Pointwise export that cannot be reproduced without an interactive licensed

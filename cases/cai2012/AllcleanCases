@@ -1,0 +1,95 @@
+#!/bin/bash
+#
+# Clean every generated case.
+#
+#   ./AllcleanCases              remove solver output from each case
+#   ./AllcleanCases --dry-run    list what would be removed
+#   ./AllcleanCases --mesh       also remove each case's mesh and dictionaries
+#   ./AllcleanCases --purge      DELETE the whole Cases/ tree and manifest.yaml
+#   ./AllcleanCases --help
+#
+# Delegates to each case's own ./Allclean, which refuses to run in a directory
+# without a case.yaml. Nothing here deletes by pattern outside Cases/.
+#
+# NEVER touched:
+#   baseCase/          the template
+#   study.yaml         the case matrix
+#   generate_cases.py, AllmeshCases, AllrunCases, AllpostCases, this script
+#   any other case family under cases/
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+DRY=0
+PURGE=0
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run)  DRY=1; ARGS+=("--dry-run") ;;
+        --mesh)     ARGS+=("--mesh") ;;
+        --purge)    PURGE=1 ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "AllcleanCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllcleanCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if [ "$PURGE" -eq 1 ]; then
+    echo "### purge: this DELETES the generated tree"
+    echo "    $PWD/Cases"
+    echo "    $PWD/manifest.yaml"
+    echo "    $PWD/results"
+    echo ""
+    echo "baseCase/ and study.yaml are NOT touched, so ./generate_cases.py"
+    echo "reproduces everything."
+    if [ "$DRY" -eq 1 ]; then
+        echo ""
+        echo "--dry-run: nothing removed."
+        exit 0
+    fi
+    rm -rf Cases manifest.yaml results
+    echo "removed. Regenerate with ./generate_cases.py"
+    exit 0
+fi
+
+[ -f manifest.yaml ] || die "no manifest.yaml, so there is no record of which
+       cases belong to this study. Nothing cleaned -- use --purge to remove the
+       Cases/ tree outright."
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+echo "### cleaning ${#CASES[@]} case(s)"
+echo ""
+
+for case_path in "${CASES[@]}"; do
+    if [ ! -d "$case_path" ]; then
+        echo "    $case_path is already gone"
+        continue
+    fi
+    if [ -x "$case_path/Allclean" ]; then
+        "$case_path/Allclean" "${ARGS[@]+"${ARGS[@]}"}"
+    elif [ -f "$case_path/Allclean" ]; then
+        bash "$case_path/Allclean" "${ARGS[@]+"${ARGS[@]}"}"
+    else
+        echo "    $case_path has no Allclean; skipped" >&2
+    fi
+done
+
+echo ""
+if [ "$DRY" -eq 1 ]; then
+    echo "--dry-run: nothing removed."
+else
+    echo "### done"
+fi

@@ -8,8 +8,8 @@
 #   ./Allsetup --extras a,b     pip extras to install (default: test)
 #   ./Allsetup --help
 #
-# THREE things have to be in place before a markelov1999 case will run, and pip
-# installs only the first:
+# THREE things have to be in place before a markelov1999 or cai2012 case will
+# run, and pip installs only the first:
 #
 #   1. the plumetools package         pip install -e ".[test]"
 #   2. standard OpenFOAM on PATH      dsmcFoam, dsmcInitialise, blockMesh, ...
@@ -166,8 +166,9 @@ else
         ok "$FOUND"
     else
         bad "$LIB not found in \${FOAM_USER_LIBBIN}, \${FOAM_SITE_LIBBIN} or
-         \${FOAM_LIBBIN}. Every markelov1999 case selects plumeFieldInflow in
-         constant/dsmcProperties and will refuse to run without it."
+         \${FOAM_LIBBIN}. Every markelov1999 and cai2012 case selects
+         plumeFieldInflow in constant/dsmcProperties and will refuse to run
+         without it."
     fi
 fi
 
@@ -182,7 +183,7 @@ if [ "$FAILURES" -eq 0 ]; then
     echo "Next:"
     echo "    pytest -m \"not needs_openfoam\"        # fast suite, no OpenFOAM"
     if [ "$PYTHON_ONLY" -eq 0 ]; then
-        echo "    cd cases/markelov1999"
+        echo "    cd cases/markelov1999    # or cases/cai2012"
         echo "    ./generate_cases.py && ./AllmeshCases && ./AllrunCases"
     fi
     exit 0

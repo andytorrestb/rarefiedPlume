@@ -46,6 +46,8 @@ plumetools/          the analytical model and OpenFOAM I/O, as a package
   inflow.py            orchestration
   markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
                        mesh, flux verification, resolution, checks, post
+  cai2012/             the Cai & Wang 2012 family: collisionless circular plume,
+                       its own config/gas/analytical/mesh/study/post
 applications/        custom OpenFOAM code
   dsmcBoundaryModels/  plumeFieldInflow -- per-face, patch-selected DSMC inflow
 cases/               standard OpenFOAM cases -- see the scope split below
@@ -63,7 +65,7 @@ Cases keep the ordinary OpenFOAM layout (`constant/`, `system/`, `0/`).
 
 | Status | Cases |
 |---|---|
-| **Active** | `markelov1999` (AIAA 99-3455) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
+| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
 | **Archived** | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` · `wake-cylinder` |
 
 Archived cases are one-off studies kept for historical record. They are frozen:
@@ -72,8 +74,8 @@ that do not describe what was actually run — [`cases/ARCHIVE.md`](cases/ARCHIV
 records what is known to be wrong in each, so archived output is never mistaken
 for validated output.
 
-`cases/markelov1999` and `cases/3d-inflow` use `plumetools`. The other seven
-active cases still carry their own copy of the legacy script.
+`cases/markelov1999`, `cases/cai2012` and `cases/3d-inflow` use `plumetools`. The
+other active cases still carry their own copy of the legacy script.
 
 ## The AIAA 99-3455 case family
 
@@ -108,6 +110,38 @@ It also carries the repository's first custom OpenFOAM code:
 an `InflowBoundaryModel` that injects across a named patch list with a per-face
 number density — the two things stock `FreeStream` cannot do, and the reason
 `3d-inflow` has to reflect at its outer boundary.
+
+## The Cai & Wang 2012 case family
+
+`cases/cai2012` reproduces the configuration of Cai & Wang, *Numerical
+Validations for a Set of Collisionless Rocket Plume Solutions*, JSR 49(1), 2012:
+argon expanding from a **circular nozzle exit directly into vacuum**, at
+`D = 0.2 m`, speed ratio 2, and Knudsen numbers 100, 0.1 and 0.01.
+
+```bash
+cd cases/cai2012
+./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
+```
+
+The physical nozzle exit **is** the DSMC inlet — no hemispherical source surface
+and no analytical inflow model — which is the structural difference from the two
+families above. `blockMesh` cannot make a disk, so the exit plane is meshed as
+one patch and `topoSet` + `createPatch` carve the circular `nozzle` out of it;
+the result is a staircase whose area is measured against `πR₀²` and checked.
+
+Only the Knudsen number is a per-case input. `λ0`, `n0`, `U0`, the cell size, the
+particle weight and `deltaT` are all derived, so a case named `Kn0p1` cannot run
+another case's density. DSMC results are compared against Cai's **collisionless
+analytical solution**, re-derived in `plumetools/cai2012/analytical.py` rather
+than digitised from his plots.
+
+It needs no CaseFoam — the study is a flat list of three cases — and it carries
+its own `case.yaml` schema, because `plumetools/config.py` validates a
+source-flow sphere and throat radius this case does not have.
+
+**No result in it has been validated** against Cai's own DSMC numbers; his
+reported errors are carried as reference values, not tolerances. See
+[`docs/cai2012-case.md`](docs/cai2012-case.md).
 
 ## Read this before trusting the model
 
@@ -176,6 +210,10 @@ archived output is not achievable. See
   inflow boundary model, and why standard `dsmcFoam` needs one
 - [`cases/markelov1999/README.md`](cases/markelov1999/README.md) — running the
   case family
+- [`docs/cai2012-case.md`](docs/cai2012-case.md) — the Cai & Wang 2012 family:
+  paper values, assumptions, and every difference from Cai's axisymmetric setup
+- [`cases/cai2012/README.md`](cases/cai2012/README.md) — running the collisionless
+  circular-plume family
 - [`docs/mesh.md`](docs/mesh.md) — geometry, the 5-block O-grid, and why
   generation had to wait for the centroid fix
 - [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,
