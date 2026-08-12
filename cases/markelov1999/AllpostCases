@@ -7,6 +7,7 @@
 #   ./AllpostCases --no-viz      study outputs only, no imagery
 #   ./AllpostCases --viz-only    imagery only, skip the study outputs
 #   ./AllpostCases --viz-spec F  render with sampling configuration F
+#                                (default: ./viz.yaml, this study's own)
 #   ./AllpostCases --help
 #
 # Produces:
@@ -19,10 +20,12 @@
 # Rows follow manifest.yaml order -- sorted by reservoir pressure -- so the table
 # is byte-for-byte reproducible.
 #
-# The imagery is a SURVEY, not a result. It needs ParaView and VifPara; if those
-# are not installed the step says so and everything else is unaffected. The cut
-# is the y = 0 symmetry plane, which is where the cylinder, the plate and the
-# plume axis all are -- see docs/viz-slices.md.
+# The imagery is a SURVEY, not a result. What gets drawn is ./viz.yaml, THIS
+# study's own sampling settings -- cases/cai2012 has its own, and the two no
+# longer share one. The cut is the y = 0 symmetry plane, which is where the
+# cylinder, the plate and the plume axis all are. It needs ParaView and VifPara;
+# if those are not installed the step says so and everything else is unaffected.
+# See docs/viz-slices.md.
 
 set -uo pipefail
 SELF=${0##*/}
@@ -55,14 +58,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # paying them once is the difference between a step you leave switched on and
 # one you turn off.
 #
-# This family has WALLS -- the cylinder and the plate -- so q and fD are real
-# here and are drawn on those surfaces. In cases/cai2012, which has no solid
-# body, the same spec finds them identically zero and skips them.
+# What gets drawn is ./viz.yaml, this study's own settings. cases/cai2012 has a
+# separate file: this family has WALLS -- the cylinder and the plate -- so q and
+# fD are real here and are asked for, and its half domain puts the centre plane
+# on the mesh boundary. Neither is true there.
 # --------------------------------------------------------------------------- #
 render_midplane() {
     local root=../.. renderer spec
     renderer=$root/plumetools/viz/render_slices.py
-    spec=${VIZ_SPEC:-$root/plumetools/viz/midplane.yaml}
+    spec=${VIZ_SPEC:-viz.yaml}    # THIS study's settings, beside this script
 
     echo "=============================================================="
     echo "### mid-plane imagery"

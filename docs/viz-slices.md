@@ -63,25 +63,40 @@ case. ParaView's startup and the reader's mesh scan cost more than the rendering
 does for a small case, and `render_slices.py` therefore takes several case
 directories and resets the session between them.
 
-### The mid-plane spec
+### Each study has its own sampling settings
 
-[`plumetools/viz/midplane.yaml`](../plumetools/viz/midplane.yaml) is what those
-loops use: one cut, `y = 0`, for both families. One file covers both because
-both put the plume on `+x` and their centre plane at `y = 0`:
+| study | spec |
+|---|---|
+| `cases/cai2012` | [`cases/cai2012/viz.yaml`](../cases/cai2012/viz.yaml) |
+| `cases/markelov1999` | [`cases/markelov1999/viz.yaml`](../cases/markelov1999/viz.yaml) |
 
-| | domain | `y = 0` is |
+Each sits beside the `AllpostCases` that uses it, and each is what that study
+draws by default. They are **not** shared: the two families have different
+geometry, different boundaries and different fields worth looking at.
+
+Both `extends: default`, which inherits
+[`plumetools/viz/slices.yaml`](../plumetools/viz/slices.yaml) — image size,
+colour preset, output paths, and the `U`/`Ttra` derivations. Mappings merge key
+by key; `planes` and `fields` are replaced wholesale, so what a study file lists
+is exactly what it draws.
+
+What actually differs:
+
+| | `cai2012` | `markelov1999` |
 |---|---|---|
-| `cases/cai2012` | full 3-D box, `y ∈ [-10 D, +10 D]` | the middle |
-| `cases/markelov1999` | **half** domain, `y ∈ [0, 0.3 m]` | the symmetry plane, on the mesh edge |
+| domain | full 3-D box, `y ∈ [-10 D, +10 D]` | **half** domain, `y ∈ [0, 0.3 m]` |
+| `y = 0` is | the middle of the mesh | the symmetry plane, **on the mesh edge** |
+| solid bodies | none — two vacuums and an inlet | a cylinder and a plate |
+| `q`, `fD` | not asked for; there is no wall to strike | drawn, on the wall patches |
+| averaging | `fieldAverage` output exists | runs stop before `timeStart`, so the fallback applies |
 
-They differ in which fields mean anything, and that is settled by measurement
-rather than by a second config file: `cai2012` has no solid surface, so `q` and
-`fD` are identically zero and get skipped; `markelov1999` has a cylinder and a
-plate, the plume strikes both, and the same two entries are drawn.
-
-Why one plane and not the default three: rendering is roughly half a minute an
+Both cut one plane, not the default three: rendering is roughly half a minute an
 image, so a four-case study on three planes is an hour bolted onto a step that
-otherwise takes seconds. Drop `--spec` to get all three on demand.
+otherwise takes seconds. Pass `--viz-spec` (or `--spec` directly) for anything
+else on demand.
+
+To change what a study draws, edit its `viz.yaml`. To change it for one run
+only, `./AllpostCases --viz-spec mine.yaml`.
 
 ## The configuration file
 
@@ -116,19 +131,40 @@ Everything unstated comes from [`catalog.py`](../plumetools/viz/catalog.py),
 which knows what each `dsmcFoam` field is, its units, and whether it is a volume
 field at all. A bare string (`- rhoM`) is a valid entry.
 
-### Adding a case-specific spec
+### Adding a study, or a one-off
+
+A new study family gets a `viz.yaml` beside its `AllpostCases`, the same way
+the two existing ones do:
 
 ```yaml
-# cases/cai2012/Cases/Kn0p01/viz.yaml
+# cases/<study>/viz.yaml
 extends: default
+planes:
+  - name: midplane
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
 fields:
   - name: rhoN
-    range: [1e14, 1e20]     # pinned, so the three Knudsen cases compare
+    log: true
+    range: [1e14, 1e20]     # pinned, so the cases compare side by side
 ```
 
 Mappings merge key by key; lists (`planes`, `fields`, `derived`) are **replaced**
 wholesale. A spec listing three fields draws three fields, not three plus
 whatever the parent carried.
+
+For a one-off, put the file anywhere and pass it — nothing has to be installed
+or registered:
+
+```bash
+./AllpostCases --viz-spec /tmp/mine.yaml
+```
+
+Do **not** put a spec inside a generated case directory (`Cases/Kn100/`,
+`Cases/gap06in/p005psi/`). Those are gitignored build products that
+`generate_cases.py` deletes and rewrites, so edits there are lost on the next
+regeneration.
 
 ### Derived fields
 

@@ -7,6 +7,7 @@
 #   ./AllpostCases --no-viz      validation outputs only, no imagery
 #   ./AllpostCases --viz-only    imagery only, skip the validation outputs
 #   ./AllpostCases --viz-spec F  render with sampling configuration F
+#                                (default: ./viz.yaml, this study's own)
 #   ./AllpostCases --help
 #
 # Produces:
@@ -22,9 +23,10 @@
 #
 # The imagery is a SURVEY, not a validation output. The four things this family
 # is scored on come out of postProcess.py above; the mid-plane images are there
-# to be looked at. They need ParaView and VifPara, and if those are not
-# installed the step says so and everything else is unaffected --
-# see docs/viz-slices.md.
+# to be looked at. What gets drawn is ./viz.yaml, THIS study's own sampling
+# settings -- cases/markelov1999 has its own, and the two no longer share one.
+# They need ParaView and VifPara, and if those are not installed the step says
+# so and everything else is unaffected -- see docs/viz-slices.md.
 
 set -uo pipefail
 SELF=${0##*/}
@@ -60,7 +62,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 render_midplane() {
     local root=../.. renderer spec
     renderer=$root/plumetools/viz/render_slices.py
-    spec=${VIZ_SPEC:-$root/plumetools/viz/midplane.yaml}
+    spec=${VIZ_SPEC:-viz.yaml}    # THIS study's settings, beside this script
 
     echo "=============================================================="
     echo "### mid-plane imagery"

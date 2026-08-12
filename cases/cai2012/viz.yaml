@@ -1,0 +1,98 @@
+# cases/cai2012/viz.yaml -- sampling settings for THIS study.
+#
+# THE AUTHORITATIVE LIST OF WHAT ./AllpostCases DRAWS for the Cai family. Every
+# PNG under Cases/<case>/results/viz/ came from an entry here.
+#
+#   ./AllpostCases                 post-process, then render this
+#   ./AllpostCases --viz-only      render only
+#   ./AllpostCases --viz-spec F    render something else instead
+#
+# Or directly, for one case:
+#
+#   vifpara ../../plumetools/viz/render_slices.py Cases/Kn100 --spec viz.yaml
+#
+# `extends: default` inherits plumetools/viz/slices.yaml -- the image size,
+# colour preset, output paths and the U/Ttra derivations. Mappings merge key by
+# key; the `planes` and `fields` lists below REPLACE the inherited ones
+# wholesale, so what is written here is exactly what gets drawn.
+#
+# The companion file is cases/markelov1999/viz.yaml. The two studies deliberately
+# no longer share a spec: they have different geometry, different boundaries, and
+# different fields worth looking at. See docs/viz-slices.md.
+
+version: 1
+extends: default
+
+# --- which data ---------------------------------------------------------------
+sampling:
+  time: latest
+  prefer_mean: true        # rhoNMean, not rhoN. LEAVE THIS ON: a single-timestep
+                           # rhoN is one step's worth of parcels, because
+                           # DSMCCloud::resetFields zeroes it every step, so the
+                           # instantaneous image is a picture of shot noise --
+                           # and it looks entirely plausible.
+                           # This family's controlDict sets fieldAverage
+                           # timeStart well before end_time, so the averages are
+                           # there.
+
+# --- the centre plane ---------------------------------------------------------
+# The domain is a FULL 3-D box: geometry.symmetry_mode is 'none' and y runs from
+# -10 D to +10 D, so y = 0 is genuinely the middle of the mesh and cuts cleanly.
+#
+# The camera looks ALONG normal, so screen-right is normal x camera_up:
+# [0,1,0] x [0,0,1] = [1,0,0]. Nozzle at the left, plume to the right, z up.
+# Flipping the normal mirrors the image and changes nothing else, which is not
+# something anyone notices in a plume.
+planes:
+  - name: midplane         # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+
+# --- what to draw -------------------------------------------------------------
+# Unlisted keys come from plumetools/viz/catalog.py, which knows the units and
+# the sensible colour scale for each dsmcFoam field.
+#
+# NOT LISTED, deliberately: q and fD. They are boundary-only fields, accumulated
+# where a molecule strikes a WALL, and this case has no wall -- its three patches
+# are two vacuums and an inlet. They would be identically zero and skipped on
+# every case in the study, so they are simply not asked for here. They ARE drawn
+# in cases/markelov1999, which has a cylinder and a plate.
+#
+# Also not listed: internalE and iDof (identically zero for a monatomic gas, and
+# argon is one), rhoM (exactly m * rhoN, so the image is rhoN's with a relabelled
+# colour bar), and dsmcSigmaTcRMax (the NTC collision-selection ceiling, flat
+# wherever no collision has been attempted).
+fields:
+  - name: rhoN             # the plume itself
+    log: true
+    log_decades: 8         # Kn = 100 empties the far field completely; 6 decades
+                           # crops the plume edge out of the picture
+
+  - name: dsmcRhoN         # PARCEL number density. Times the cell volume this is
+    log: true              # the parcels per cell -- where it thins out, every
+    log_decades: 6         # other image here is noise. Standard dsmcFoam has one
+                           # particle weight for the whole domain, so this is
+                           # exactly rhoN / nParticle and has the same SHAPE as
+                           # the image above; its value is in the numbers on the
+                           # colour bar.
+
+  - name: U                # derived in the inherited spec: momentum / rhoM
+  - name: Ttra             # derived: from linearKE, momentum and rhoM. Should
+                           # read T0 = 300 K at the exit and fall away fast --
+                           # a collisionless expansion cools to nearly nothing.
+
+  - name: linearKE
+    log: true
+    log_decades: 8
+
+# --- comparing the three Knudsen numbers --------------------------------------
+# Colour ranges autoscale to each cut, so the Kn = 100, 0.1 and 0.01 images each
+# use a DIFFERENT scale and cannot be read side by side -- n0 alone moves four
+# decades across the study. To compare them, pin the range:
+#
+#   - name: rhoN
+#     range: [1.0e+12, 1.0e+21]
+#
+# It is left autoscaled by default because the single-case view -- is the plume
+# where it should be, is the far field resolved -- is what this step is for.

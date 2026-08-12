@@ -10,6 +10,7 @@ an image that looks entirely plausible.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 import yaml
@@ -38,8 +39,14 @@ from plumetools.viz.resolve import (
 )
 from plumetools.viz.spec import DerivedSpec, FieldSpec, PlaneSpec, VizSpec
 
-#: The spec ``cases/*/AllpostCases`` renders with, for both study families.
-MIDPLANE_SPEC_PATH = DEFAULT_SPEC_PATH.parent / "midplane.yaml"
+REPO = Path(__file__).resolve().parents[2]
+
+#: The sampling settings each study's ``AllpostCases`` renders with. One per
+#: family, in the family's own directory -- they are not shared.
+STUDY_SPECS = {
+    "cai2012": REPO / "cases" / "cai2012" / "viz.yaml",
+    "markelov1999": REPO / "cases" / "markelov1999" / "viz.yaml",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -551,19 +558,38 @@ def test_a_surface_field_can_be_viewed_from_several_planes(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# the mid-plane spec, shared by both study families
+# the shipped study specs
+#
+# One per family, in the family's own directory. These tests are what stops a
+# spec that ./AllpostCases renders unattended from silently rotting -- an
+# unknown key or a flipped normal would otherwise surface as a wrong picture
+# on somebody's next study run.
 # --------------------------------------------------------------------------- #
 
-def test_the_midplane_spec_draws_exactly_one_plane():
-    """./AllpostCases renders this unattended; three planes would be an hour."""
-    spec = load_spec(MIDPLANE_SPEC_PATH)
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_ships_its_own_sampling_settings(study):
+    assert STUDY_SPECS[study].is_file(), (
+        f"cases/{study}/viz.yaml is missing; its AllpostCases defaults to it")
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_spec_loads_and_validates(study):
+    """Unknown keys are rejected, so this catches a typo in a shipped file."""
+    spec = load_spec(STUDY_SPECS[study])
+    assert spec.fields and spec.planes
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_spec_draws_exactly_one_plane(study):
+    """./AllpostCases renders these unattended; three planes would be an hour."""
+    spec = load_spec(STUDY_SPECS[study])
     assert [plane.name for plane in spec.planes] == ["midplane"]
 
 
-def test_the_midplane_cut_contains_the_plume_axis():
-    """Both families put the plume on +x and their centre plane at y = 0."""
-    spec = load_spec(MIDPLANE_SPEC_PATH)
-    plane = spec.planes[0]
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_cut_contains_the_plume_axis(study):
+    """Both families put the plume on +x with their centre plane at y = 0."""
+    plane = load_spec(STUDY_SPECS[study]).planes[0]
     assert plane.normal == (0.0, 1.0, 0.0)
     assert plane.origin == (0.0, 0.0, 0.0)
     # screen-right = normal x camera_up must be +x, or the plume is mirrored
@@ -574,22 +600,51 @@ def test_the_midplane_cut_contains_the_plume_axis():
     assert right == pytest.approx((1.0, 0.0, 0.0))
 
 
-def test_the_midplane_spec_carries_the_surface_fields_for_markelov():
-    """cases/markelov1999 has walls, so q and fD are real there. cases/cai2012
-    has none, and the same entries are dropped by the constant-field check
-    rather than by a second spec file."""
-    spec = load_spec(MIDPLANE_SPEC_PATH)
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_spec_draws_one_image_per_field(study):
+    spec = load_spec(STUDY_SPECS[study])
+    tasks = spec.tasks()
+    assert len(tasks) == len([f for f in spec.fields if f.enabled])
+    assert {task.plane_name for task in tasks} == {"midplane"}
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_spec_draws_the_plume_and_the_particle_statistics(study):
+    """Whatever else differs, every study wants the plume and the parcel count
+    that says whether the rest of the images are noise."""
+    names = {field.name for field in load_spec(STUDY_SPECS[study]).fields}
+    assert {"rhoN", "dsmcRhoN", "U", "Ttra"} <= names
+
+
+def test_only_the_study_with_walls_asks_for_the_surface_fields():
+    """This is the whole reason the two studies stopped sharing a spec.
+
+    q and fD are accumulated where a molecule strikes a WALL. markelov1999 has
+    a cylinder and a plate; cai2012's three patches are two vacuums and an
+    inlet, so asking for them there would render nothing on every case of every
+    run.
+    """
+    markelov = {f.name for f in load_spec(STUDY_SPECS["markelov1999"]).fields}
+    cai = {f.name for f in load_spec(STUDY_SPECS["cai2012"]).fields}
+    assert {"q", "fD"} <= markelov
+    assert not ({"q", "fD"} & cai)
+
+
+def test_the_surface_fields_are_classified_as_surfaces():
+    spec = load_spec(STUDY_SPECS["markelov1999"])
     derived = spec.derived_by_name
     kinds = {field.name: field.resolve_kind(derived) for field in spec.fields}
     assert kinds["q"] is FieldKind.SURFACE
     assert kinds["fD"] is FieldKind.SURFACE
+    assert kinds["rhoN"] is FieldKind.VOLUME
 
 
-def test_the_midplane_spec_draws_one_image_per_field():
-    spec = load_spec(MIDPLANE_SPEC_PATH)
-    tasks = spec.tasks()
-    assert len(tasks) == len([f for f in spec.fields if f.enabled])
-    assert {task.plane_name for task in tasks} == {"midplane"}
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_spec_inherits_the_derived_fields(study):
+    """U and Ttra come from `extends: default`, not from a copy in each file."""
+    derived = load_spec(STUDY_SPECS[study]).derived_by_name
+    assert "U" in derived and "Ttra" in derived
+    assert "{R}" in derived["Ttra"].expression      # gas taken from the case
 
 
 # --------------------------------------------------------------------------- #

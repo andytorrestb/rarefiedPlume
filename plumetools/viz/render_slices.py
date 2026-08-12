@@ -13,9 +13,10 @@ Examples::
     # everything in the default spec, latest time
     vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
 
-    # a whole study, in ONE ParaView process -- what AllpostCases does
+    # a whole study, in ONE ParaView process -- what AllpostCases does, with
+    # that study's own sampling settings
     vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/* \
-        --spec plumetools/viz/midplane.yaml
+        --spec cases/cai2012/viz.yaml
 
     # one field, one plane
     vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 \
