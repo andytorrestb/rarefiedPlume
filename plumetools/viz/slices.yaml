@@ -1,0 +1,165 @@
+# plumetools/viz/slices.yaml -- the default sampling configuration.
+#
+# THE AUTHORITATIVE LIST OF WHAT GETS DRAWN. Every PNG under a case's
+# results/viz/ came from an entry in this file, or in one that extends it.
+#
+# Run it with:
+#
+#     vifpara plumetools/viz/render_slices.py <case-dir>
+#
+# NOT with python -- see docs/viz-slices.md. `python render_slices.py` cannot
+# work: paraview.simple only exists inside ParaView's own interpreter, and the
+# vifpara launcher is what puts this virtual environment inside it.
+#
+# To draw something else, add to `fields:`. To draw it somewhere else, add to
+# `planes:`. To do either for one case only, write a small file next to the
+# case that says `extends: default` and overrides just those lists.
+#
+# The geometry here assumes a plume along +X, which is what
+# cases/cai2012/baseCase/case.yaml sets with `plume_axis: [1, 0, 0]`.
+
+version: 1
+
+# --- which data ---------------------------------------------------------------
+sampling:
+  time: latest             # 'latest' | 'first' | 'all' | a time in seconds.
+                           # Resolved against the case's real time directories;
+                           # a time that was never written is an error.
+  prefer_mean: true        # draw rhoNMean rather than rhoN wherever
+                           # fieldAverage wrote one. LEAVE THIS ON. A
+                           # single-timestep rhoN is one step's worth of
+                           # parcels -- DSMCCloud::resetFields zeroes it every
+                           # step -- so an instantaneous image is a picture of
+                           # shot noise, and it looks entirely plausible.
+  mesh_regions: [internalMesh]
+  field_type: CELLS        # CELLS shows the DSMC samples as they are: one
+                           # constant value per cell. POINTS interpolates, which
+                           # is prettier and hides precisely the sampling noise
+                           # an image should be showing you.
+  skip_constant_fields: true   # do not write a PNG for a field that is constant
+                           # over the geometry drawn. This is what stops q and
+                           # fD -- boundary-only fields, zero unless the case has
+                           # a WALL -- from producing blank images here.
+  length_scale_m: null     # the L of origin_over_L. null -> the nozzle
+                           # diameter, read from the case's case.yaml.
+
+# --- how the images look ------------------------------------------------------
+image:
+  height: 700              # pixels. Width follows from the slice's aspect ratio.
+  zoom: 1.0
+  preset: Viridis (matplotlib)   # perceptually uniform, and still readable
+                           # printed in greyscale. 'Rainbow Desaturated' is
+                           # ParaView's default and is neither.
+  color_bar: true
+  orientation: Horizontal
+  location: Lower Center
+  bar_size: 0.6
+  legend_format_type: e    # a number density runs from 1e10 to 1e20; 'f' would
+  legend_digits_after: 1   # print 0.0 for most of that
+  show_orientation_axis: false
+
+# --- where the PNGs go --------------------------------------------------------
+output:
+  directory: results/viz   # relative to the case directory
+  filename: "{field}_{plane}"     # + .png. Placeholders: field, plane, case, time
+  log_directory: logs      # relative to directory
+  manifest: true           # results/viz/manifest.yaml: what was drawn, from
+                           # which time, at which colour range. A directory of
+                           # PNGs otherwise records none of that.
+
+# --- the cutting planes -------------------------------------------------------
+# The camera looks ALONG normal with camera_up up, so screen-right is
+# normal x camera_up and THE SIGN OF THE NORMAL DECIDES WHICH WAY THE PICTURE
+# READS. Get it wrong and you get a mirror image that is otherwise perfectly
+# correct, which is not something anyone notices in a plume. Each normal below
+# is signed to put the flow direction on the right.
+planes:
+  - name: xz               # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]      # [0,1,0] x [0,0,1] = [1,0,0]: nozzle at the left,
+    camera_up: [0, 0, 1]   # flow to the right, Z up. [0,-1,0] mirrors it.
+    origin: [0, 0, 0]      # through the plume axis
+
+  - name: xy               # the other centre plane. For an axisymmetric plume
+    normal: [0, 0, -1]     # this should be indistinguishable from xz, which
+    camera_up: [0, 1, 0]   # makes it a free check on the mesh and the inflow.
+    origin: [0, 0, 0]      # [0,0,-1] x [0,1,0] = [1,0,0]
+
+  - name: yz-5D            # a cross-section 5 diameters downstream: the plume's
+    normal: [-1, 0, 0]     # circular symmetry, seen head-on -- looking upstream,
+    camera_up: [0, 0, 1]   # so Y is to the right. A square or lumpy cross-
+    origin_over_L: [5, 0, 0]   # section means the Cartesian mesh is printing
+                           # through into the solution.
+
+# --- fields computed from other fields ----------------------------------------
+# dsmcFoam writes moments, not the quantities anyone wants to look at.
+# {mean} becomes 'Mean' or '' to follow sampling.prefer_mean; {R} is the
+# specific gas constant k_B/m, read from the case's case.yaml.
+derived:
+  - name: U                # u = momentum / rhoM
+    expression: "momentum{mean}/rhoM{mean}"
+    component: Magnitude
+    units: m/s
+    log: false             # velocity spans a factor of a few, not decades
+
+  - name: Ttra             # 3 R T = <v^2> - |u|^2, with <v^2> = 2 linearKE/rhoM
+    expression: "(2*linearKE{mean}/rhoM{mean} - mag(momentum{mean}/rhoM{mean})^2)/(3*{R})"
+    units: K
+    log: false
+
+# --- what to draw -------------------------------------------------------------
+# Unlisted keys come from plumetools/viz/catalog.py, which knows what each
+# dsmcFoam field is, what units it carries, and whether it is a volume field at
+# all. A bare string is a valid entry and means "all defaults".
+fields:
+  - name: rhoN             # the plume itself
+    log: true
+    log_decades: 8         # Kn = 100 empties the far field completely; 6 decades
+                           # crops the plume edge out of the picture
+
+  - name: dsmcRhoN         # PARCEL number density. Times the cell volume this is
+    log: true              # the parcels per cell -- a statistical-quality field,
+    log_decades: 6         # not a physical one. Where this thins out, every
+                           # other image on this list is noise.
+                           #
+                           # Standard dsmcFoam has ONE particle weight for the
+                           # whole domain (DSMCCloud::nParticle_ is a single
+                           # scalar), so dsmcRhoN = rhoN / nParticle EXACTLY and
+                           # this image has the same shape as rhoN's. Its value
+                           # is in the NUMBERS on the colour bar, not the
+                           # pattern: multiply by V to get parcels per cell and
+                           # compare against resolution.target_particles_per_cell.
+
+  - name: U                # derived above
+  - name: Ttra             # derived above
+
+  - name: momentum
+    component: Magnitude
+    log: true
+    log_decades: 8
+
+  - name: linearKE
+    log: true
+    log_decades: 8
+
+  - name: dsmcSigmaTcRMax  # the NTC collision-selection ceiling. Flat where no
+    log: true              # collision has ever been attempted.
+    log_decades: 4
+
+  # --- boundary-only fields -------------------------------------------------- #
+  # These live entirely in their boundaryField; dsmcFoam accumulates them when a
+  # molecule strikes a WALL. cases/cai2012 has no wall -- its three patches are
+  # two vacuums and an inlet -- so both are identically zero and
+  # skip_constant_fields drops them with a message. They are listed anyway
+  # because the same spec run against an impingement case should draw them.
+  - name: q                # heat flux into a boundary [W/m^2]
+  - name: fD               # force density on a boundary [Pa]
+
+  # --- off by default -------------------------------------------------------- #
+  - name: rhoM             # mass density. Exactly m * rhoN, so the image is
+    enabled: false         # rhoN's with a relabelled colour bar.
+    log: true
+
+  - name: internalE        # both identically zero for a monatomic gas, which
+    enabled: false         # argon is (gas.internal_degrees_of_freedom: 0).
+  - name: iDof
+    enabled: false

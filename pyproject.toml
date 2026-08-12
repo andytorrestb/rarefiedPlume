@@ -31,6 +31,12 @@ cases = ["casefoam>=0.2"]
 [tool.setuptools.packages.find]
 include = ["plumetools*"]
 
+# plumetools/viz/slices.yaml is the default sampling configuration and is loaded
+# at runtime, so it has to ship with the package rather than only exist in the
+# source tree.
+[tool.setuptools.package-data]
+plumetools = ["viz/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

@@ -1,0 +1,73 @@
+# plumetools/viz/midplane.yaml -- the centre plane, and nothing else.
+#
+# What ./AllpostCases renders automatically for both study families. One cut, the
+# plane containing the plume axis, for every field the case has.
+#
+#     vifpara plumetools/viz/render_slices.py <case-dir> --spec plumetools/viz/midplane.yaml
+#
+# WHY ONE PLANE. The full slices.yaml draws three planes and takes about half a
+# minute per image; a four-case study is then an hour of rendering bolted onto a
+# post-processing step that otherwise takes seconds. The centre plane is the one
+# that shows the plume, so it is the one that runs unattended. Everything else is
+# still there on demand -- drop --spec and the default draws all three.
+#
+# WHY ONE FILE FOR BOTH FAMILIES. Both put the plume on +x and their centre plane
+# at y = 0:
+#
+#   cases/cai2012        full 3-D box, y in [-10 D, +10 D]  -> y = 0 is the middle
+#   cases/markelov1999   HALF domain,  y in [0, 0.3 m]      -> y = 0 is the
+#                        symmetry plane, so the modelled half is the y > 0 side
+#                        and the centre plane is its boundary face
+#
+# The families differ in which fields mean anything, and that is handled by
+# measurement rather than by configuration: skip_constant_fields drops whatever
+# turns out to be flat. cai2012 has no solid surface, so q and fD are identically
+# zero there and are skipped; markelov1999 has a cylinder and a plate, the plume
+# strikes both, and the same two fields are drawn. Neither file has to say so.
+
+version: 1
+extends: default
+
+# --- the centre plane ---------------------------------------------------------
+# Replaces the three planes of the default spec. Lists are replaced wholesale on
+# extends, so this is the only plane that survives.
+#
+# The camera looks ALONG normal, so screen-right is normal x camera_up:
+# [0,1,0] x [0,0,1] = [1,0,0]. Plume to the right, z up. Flipping the normal
+# mirrors the image and nothing else, which is not something anyone notices.
+planes:
+  - name: midplane
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]      # y = 0. For markelov1999 this is the symmetry plane
+                           # and coincides with the domain boundary; VTK cuts it
+                           # cleanly, which is checked in tests/openfoam.
+
+# --- what to draw -------------------------------------------------------------
+# The flow field, plus the two surface fields that only exist where the plume
+# hits something. Anything flat is skipped and the reason recorded in
+# manifest.yaml, so this list is the same for both families.
+#
+# dsmcSigmaTcRMax is deliberately absent: it is the NTC collision-selection
+# ceiling, it is flat wherever no collision has been attempted, and it says
+# nothing about the flow. Add it back in a case spec if a collision rate is
+# actually in question.
+fields:
+  - name: rhoN             # the plume itself
+    log: true
+    log_decades: 8
+
+  - name: dsmcRhoN         # parcels per unit volume: where this thins out,
+    log: true              # every other image here is noise
+    log_decades: 6
+
+  - name: U                # derived: momentum / rhoM
+  - name: Ttra             # derived: from linearKE, momentum and rhoM
+
+  - name: linearKE
+    log: true
+    log_decades: 8
+
+  - name: q                # heat flux into a surface  [W/m^2]. Zero without a
+                           # wall, so: markelov1999 yes, cai2012 no.
+  - name: fD               # force density on a surface [Pa]. Same.
