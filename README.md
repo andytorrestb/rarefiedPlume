@@ -218,6 +218,8 @@ archived output is not achievable. See
   generation had to wait for the centroid fix
 - [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,
   conventions, and what could not be verified
+- [`docs/viz-slices.md`](docs/viz-slices.md) — YAML-driven slice imagery of any
+  solver field, through VifPara and ParaView, and the four ways it misleads you
 - [`cases/3d-inflow/README.md`](cases/3d-inflow/README.md) — the reference case,
   including two unresolved settings its own descendants later changed
 - [`cases/ARCHIVE.md`](cases/ARCHIVE.md) — frozen cases and their known defects

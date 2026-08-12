@@ -100,12 +100,64 @@ pytest -m needs_openfoam     # only where dsmcFoam and the library are available
 
 ### Post-processing — needs ParaView
 
-`paraview.simple` ships with ParaView and is not pip-installable. Scripts that
-import it are one-offs under `util/` and are not part of the library.
+`paraview.simple` ships with ParaView and is **not pip-installable**. The
+one-offs under `util/` import it directly and are not part of the library.
 
 > **`*.csv` is gitignored**, and no CSV file exists anywhere in the repository —
 > yet six plotting scripts require one as input (finding RP-06). The Fnum
 > resolution study cannot currently be reproduced end to end.
+
+#### Slice imagery — `plumetools.viz` and VifPara
+
+`plumetools/viz` renders slice PNGs of any solver field through
+[VifPara](https://github.com/virtual-vehicle/VifPara), which automates ParaView.
+Three things have to line up, and `pip` does only the third:
+
+| | | |
+|---|---|---|
+| 1 | **ParaView 5.11–5.13** installed and on `PATH` | `pvpython`, `paraview` |
+| 2 | ParaView's *internal* Python minor version **==** the venv's | see below |
+| 3 | the `viz` extra | `pip install -e ".[viz]"` |
+
+**Step 2 is the one that bites.** VifPara layers this virtual environment onto
+ParaView's interpreter, so the two Pythons must match. Check both:
+
+```bash
+pvpython -c "import sys; print(sys.version)"     # ParaView's
+python    -c "import sys; print(sys.version)"    # the venv's
+```
+
+Verified working here: ParaView **5.11.2**, both Pythons **3.12.3**. ParaView 6
+is not supported by VifPara.
+
+If `pvpython` is not on `PATH`, point at it explicitly:
+
+```bash
+export PVPYTHON_PATH=/path/to/pvpython
+```
+
+Then render, **through the `vifpara` launcher, never `python`**:
+
+```bash
+vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
+```
+
+The launcher re-runs the script inside `pvpython` with `PV_VENV` set to this
+environment. Running it with `python` fails at `import paraview.simple`, because
+that module exists only inside ParaView's own interpreter.
+
+> **The `viz` extra downgrades numpy.** `vifpara` 1.3.4 pins `numpy==1.26.4`
+> exactly, which also pulls `scipy` back (1.18 → 1.17 here). The full suite —
+> 956 tests — passes on both, and this was checked rather than assumed, but it is
+> why `viz` is an optional extra and not a core dependency. Install it into the
+> environment you actually render from.
+
+On a headless or WSLg display, `pvpython` dies at exit with `GLXBadContext`
+tearing down its GL contexts, *after* every image is written. `render_slices.py`
+therefore reports its own exit status rather than letting that turn a successful
+render into a failure; see [`viz-slices.md`](viz-slices.md).
+
+Full guide: [`viz-slices.md`](viz-slices.md).
 
 ## Windows notes
 
