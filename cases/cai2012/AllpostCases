@@ -2,34 +2,85 @@
 #
 # Post-process every generated case and build the combined validation report.
 #
-#   ./AllpostCases               post-process all of them
+#   ./AllpostCases               post-process all of them, then render
 #   ./AllpostCases --keep-going  do not stop at the first failure
+#   ./AllpostCases --no-viz      validation outputs only, no imagery
+#   ./AllpostCases --viz-only    imagery only, skip the validation outputs
+#   ./AllpostCases --viz-spec F  render with sampling configuration F
 #   ./AllpostCases --help
 #
 # Produces:
 #
 #   <case>/results/centerline.csv, density_plane.csv, metrics.yaml, *.png
+#   <case>/results/viz/*.png      mid-plane imagery, and manifest.yaml
 #   results/study-table.csv      the combined table
 #
 # Rows follow manifest.yaml order -- decreasing Knudsen number -- so the table is
 # byte-for-byte reproducible, and so the expected TREND reads down the page:
 # Kn = 100 should agree with the collisionless solution almost exactly, and the
 # departure should grow as the flow becomes more collisional.
+#
+# The imagery is a SURVEY, not a validation output. The four things this family
+# is scored on come out of postProcess.py above; the mid-plane images are there
+# to be looked at. They need ParaView and VifPara, and if those are not
+# installed the step says so and everything else is unaffected --
+# see docs/viz-slices.md.
 
 set -uo pipefail
 SELF=${0##*/}
 cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
 
 KEEP_GOING=0
-case "${1:-}" in
-    "")            ;;
-    --keep-going)  KEEP_GOING=1 ;;
-    -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
-    *)             echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
-esac
+VIZ=1
+VIZ_ONLY=0
+VIZ_SPEC=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)  KEEP_GOING=1 ;;
+        --no-viz)      VIZ=0 ;;
+        --viz-only)    VIZ_ONLY=1 ;;
+        --viz-spec)    shift; VIZ_SPEC=${1:?"--viz-spec needs a file"} ;;
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)             echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# --------------------------------------------------------------------------- #
+# mid-plane imagery
+#
+# One vifpara invocation for the whole study, not one per case: ParaView's
+# startup and the reader's mesh scan cost more than the rendering does for a
+# small case, and paying them once is the difference between a step you leave
+# switched on and one you turn off.
+# --------------------------------------------------------------------------- #
+render_midplane() {
+    local root=../.. renderer spec
+    renderer=$root/plumetools/viz/render_slices.py
+    spec=${VIZ_SPEC:-$root/plumetools/viz/midplane.yaml}
+
+    echo "=============================================================="
+    echo "### mid-plane imagery"
+
+    if ! have vifpara; then
+        echo "    skipped: 'vifpara' is not on PATH."
+        echo "             pip install -e \".[viz]\", and install ParaView 5.11-5.13"
+        echo "             separately; see docs/environment.md."
+        echo "             The validation outputs above are unaffected."
+        return 0
+    fi
+    [ -f "$renderer" ] || { echo "AllpostCases: no $renderer" >&2; return 1; }
+    [ -f "$spec" ]     || { echo "AllpostCases: no spec at $spec" >&2; return 1; }
+
+    echo "    spec      $spec"
+    echo ""
+    # NOT 'python': paraview.simple exists only inside ParaView's interpreter,
+    # and the vifpara launcher is what puts this venv in there.
+    vifpara "$renderer" "${CASES[@]}" --spec "$spec"
+}
 
 [ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
        ./generate_cases.py"
@@ -43,6 +94,11 @@ for entry in document.get("cases", []):
     print(entry["path"])
 PY
 ) || die "could not read manifest.yaml"
+
+if [ "$VIZ_ONLY" -eq 1 ]; then
+    render_midplane || die "rendering failed"
+    exit 0
+fi
 
 echo "### post-processing ${#CASES[@]} case(s)"
 echo ""
@@ -124,9 +180,21 @@ print("    being validated. See docs/cai2012-case.md.")
 PY
 
 echo ""
+VIZ_FAILED=0
+if [ "$VIZ" -eq 1 ]; then
+    render_midplane || VIZ_FAILED=1
+    echo ""
+fi
+
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "AllpostCases: ${#FAILED[@]} case(s) failed:" >&2
     printf '    %s\n' "${FAILED[@]}" >&2
     exit 1
 fi
+# A failed render is reported, but only after the validation outputs and the
+# study table are already on disk: the images are a survey and must never cost
+# anyone the numbers.
+[ "$VIZ_FAILED" -eq 0 ] || die "the mid-plane imagery failed (see above).
+       The validation outputs and results/study-table.csv are complete;
+       re-run just the imagery with ./AllpostCases --viz-only"
 echo "### done"
