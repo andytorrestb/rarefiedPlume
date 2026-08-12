@@ -22,6 +22,15 @@ test = ["pytest>=7"]
 # Post-processing only. paraview.simple ships with ParaView and is not pip-installable;
 # see docs/environment.md.
 plots = ["matplotlib>=3.4", "pandas>=1.2"]
+# Slice imagery (plumetools/viz). VifPara drives ParaView, which must already be
+# installed -- 5.11 to 5.13, and its internal Python must match this
+# interpreter's minor version. See docs/viz-slices.md.
+#
+# WARNING: vifpara 1.3.4 pins numpy==1.26.4 exactly, so installing this extra
+# DOWNGRADES numpy (and with it scipy) in the environment. The test suite passes
+# either way -- 956 tests, verified on numpy 1.26.4 -- but the pin is why this is
+# an extra and not a core dependency.
+viz = ["vifpara>=1.3,<2"]
 # Case generation. cases/markelov1999/generate_cases.py REQUIRES CaseFoam
 # (https://github.com/DLR-RY/caseFOAM) -- there is no built-in substitute. It is
 # an extra rather than a core dependency only because it pulls in PyFoam and
