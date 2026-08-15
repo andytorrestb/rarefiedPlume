@@ -79,6 +79,11 @@ def case_rows(manifest: dict, study) -> list:
 # 1. the overlap
 # --------------------------------------------------------------------------- #
 
+def has_output(case_dir: Path) -> bool:
+    """Whether a case has written a reconstructed time directory past 0."""
+    return bool(audit.common_times(case_dir, case_dir))
+
+
 def check_overlap(rows: list) -> dict:
     """Compare every longer case in a weight row against the shorter ones.
 
@@ -92,13 +97,23 @@ def check_overlap(rows: list) -> dict:
         by_row.setdefault(entry["weight_level"], []).append(entry)
 
     results = []
+    skipped = []
     for weight, entries in sorted(by_row.items()):
         ordered = sorted(entries, key=lambda e: e["sampling_domain_transits"])
-        longest = ordered[-1]
-        for shorter in ordered[:-1]:
+        # Compare against the longest case that has actually RUN, not the
+        # longest in the matrix. A part-way study is the normal state -- the
+        # cheap row finishes hours before the expensive one -- and pairing a
+        # finished case with an empty directory would report "nothing
+        # compared" for a check that simply has not become possible yet.
+        finished = [e for e in ordered if has_output(HERE / e["path"])]
+        if len(finished) < 2:
+            skipped.append(
+                f"{weight}: {len(finished)} case(s) with output; a pair needs 2")
+            continue
+
+        longest = finished[-1]
+        for shorter in finished[:-1]:
             long_dir, short_dir = HERE / longest["path"], HERE / shorter["path"]
-            if not (long_dir.is_dir() and short_dir.is_dir()):
-                continue
             try:
                 result = audit.compare_overlap(long_dir, short_dir)
             except PostError as exc:
@@ -112,13 +127,21 @@ def check_overlap(rows: list) -> dict:
                             for line in audit.overlap_report(result)))
             print()
 
+    for note in skipped:
+        print(f"    not yet comparable -- {note}")
+
     disagreed = [r for r in results if not r["all_identical"]]
     untested = [r for r in results if r["n_compared"] == 0]
     return {
         "n_pairs": len(results),
         "n_disagreed": len(disagreed),
         "n_untested": len(untested),
-        "deterministic": bool(results) and not disagreed and not untested,
+        "not_yet_comparable": skipped,
+        # None, not False, when nothing could be compared: "we did not find out"
+        # and "it failed" are different states, and only the second should stop
+        # a study.
+        "deterministic": (None if not results
+                          else not disagreed and not untested),
         "pairs": results,
     }
 
@@ -481,6 +504,10 @@ def main(argv) -> int:
             print(f"    wrote {path}  ({len(curves)} series)")
         print()
 
+    if overlap.get("deterministic") is None and not args.no_overlap:
+        print("analyse: the overlap check found no comparable pair yet. It "
+              "needs two cases\n         of one weight row to have run; the "
+              "matrix is part way through.")
     if overlap.get("deterministic") is False:
         print("analyse: THE OVERLAP CHECK FAILED. Cases in a weight row differ "
               "only in\n         endTime, so agreeing was not optional. The "
