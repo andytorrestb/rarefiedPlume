@@ -372,6 +372,124 @@ def test_the_shipped_template_is_at_the_family_knudsen_number():
         "line up across cases for the overlap check and the contact sheet")
 
 
+@pytest.mark.skipif(not STUDY.is_file(), reason="the family is not generated yet")
+def test_the_write_interval_gives_the_shortest_case_a_usable_curve():
+    """Two frames are not a convergence curve, and 100 frames is a study whose
+    imagery step outlasts its solve. The interval has to serve both ends of a
+    9x sampling axis."""
+    from plumetools.cai2012 import inflow, mesh
+    from plumetools.cai2012.config import load_case_config
+    from plumetools.cai2012.geometry import from_config
+
+    study = health.load_study(STUDY)
+    cfg = load_case_config(STUDY.parent / "baseCase")
+    geom = from_config(cfg)
+    exit_state = inflow.from_config(cfg)
+    plan = mesh.plan(cfg, geom, exit_state)
+
+    counts = {}
+    for level in study.enabled_samplings():
+        run = inflow.derive_run_settings(
+            _sampling(cfg, level.domain_transits), exit_state, geom,
+            min_cell_size_m=plan.min_cell_size_m,
+            exit_cell_volume_m3=plan.exit_cell_volume_m3)
+        counts[level.name] = health.sampled_writes(run)
+
+    assert min(counts.values()) >= 3, (
+        f"the shortest case gets {min(counts.values())} sampled frame(s): "
+        f"{counts}. Fewer than three is not a curve.")
+    assert max(counts.values()) <= 60, (
+        f"the longest case gets {max(counts.values())} sampled frames: "
+        f"{counts}. Every frame is ~255 MB and ~20 s of rendering per field.")
+
+
+def _sampling(cfg, transits):
+    import dataclasses
+
+    return dataclasses.replace(
+        cfg, dsmc=dataclasses.replace(cfg.dsmc,
+                                      sampling_domain_transits=transits))
+
+
+@pytest.mark.skipif(not STUDY.is_file(), reason="the family is not generated yet")
+def test_the_viz_window_matches_the_template_transient():
+    """viz.yaml's time_min is a literal copy of dsmc.average_start_s.
+
+    It has to be: fieldAverage writes no *Mean field before then, and with
+    prefer_mean on those frames fall back to the instantaneous field and the
+    series silently changes quantity part way through. If the template's
+    transient is ever changed and this is not, the study starts drawing shot
+    noise labelled as a running average -- and both look like a plume.
+    """
+    from plumetools.cai2012 import inflow, mesh
+    from plumetools.cai2012.config import load_case_config
+    from plumetools.cai2012.geometry import from_config
+    from plumetools.viz import load_spec
+
+    cfg = load_case_config(STUDY.parent / "baseCase")
+    geom = from_config(cfg)
+    exit_state = inflow.from_config(cfg)
+    plan = mesh.plan(cfg, geom, exit_state)
+    run = inflow.derive_run_settings(
+        cfg, exit_state, geom, min_cell_size_m=plan.min_cell_size_m,
+        exit_cell_volume_m3=plan.exit_cell_volume_m3)
+
+    spec = load_spec(STUDY.parent / "viz.yaml")
+    assert spec.sampling.time_min is not None, (
+        "prefer_mean is on over a series here; without a window the transient "
+        "frames fall back to the instantaneous field")
+    assert spec.sampling.time_min == pytest.approx(run.average_start_s,
+                                                   rel=1e-3), (
+        f"viz.yaml time_min is {spec.sampling.time_min:g} but the template "
+        f"starts averaging at {run.average_start_s:g}")
+
+
+@pytest.mark.skipif(not STUDY.is_file(), reason="the family is not generated yet")
+def test_every_drawn_field_has_a_pinned_range():
+    """Ranges are auto-pinned across the FRAMES of one series but not across
+    cases. Without an explicit range the nine cases get nine colour scales, the
+    contact sheet compares nothing, and it looks entirely fine -- the cells
+    differ visibly, and the differences are the colour maps."""
+    from plumetools.viz import load_spec
+
+    spec = load_spec(STUDY.parent / "viz.yaml")
+    unpinned = [field.name for field in spec.fields if field.range is None]
+    assert not unpinned, (
+        f"{unpinned} would autoscale per case, so no two cells of the contact "
+        f"sheet would be on the same scale")
+
+
+@pytest.mark.skipif(not STUDY.is_file(), reason="the family is not generated yet")
+def test_the_health_spec_averages_where_the_other_studies_do_not():
+    """The one setting that separates this study's imagery from cases/cai2012's.
+    Flipped by accident, the series becomes shot noise and the convergence
+    curve measures nothing -- while still producing plausible plume pictures."""
+    from plumetools.viz import load_spec
+
+    health_spec = load_spec(STUDY.parent / "viz.yaml")
+    cai_spec = load_spec(REPO / "cases" / "cai2012" / "viz.yaml")
+    assert health_spec.sampling.prefer_mean is True
+    assert cai_spec.sampling.prefer_mean is False
+    assert "dsmcRhoN" in [f.name for f in health_spec.fields]
+
+
+@pytest.mark.skipif(not STUDY.is_file(), reason="the family is not generated yet")
+def test_the_shared_runner_scripts_have_not_drifted_from_cases_cai2012():
+    """A health case IS a cai2012 case; the scripts are copies rather than a
+    fork. A fix applied to one and not the other is the failure mode, and it
+    would show up as two families that quietly run differently."""
+    shared = ("Allclean", "Allmesh", "Allpost", "Allrun", "postProcess.py",
+              "runInflow.py")
+    origin = REPO / "cases" / "cai2012" / "baseCase"
+    copy = STUDY.parent / "baseCase"
+    drifted = [name for name in shared
+               if (origin / name).read_bytes() != (copy / name).read_bytes()]
+    assert not drifted, (
+        f"{drifted} differ between cases/cai2012/baseCase and "
+        f"cases/cai2012-health/baseCase. Re-copy, or if the change is "
+        f"deliberate, say so here.")
+
+
 # --------------------------------------------------------------------------- #
 # occupancy
 # --------------------------------------------------------------------------- #

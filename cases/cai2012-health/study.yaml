@@ -1,0 +1,136 @@
+# The statistical-health matrix: parcels per cell x averaging duration.
+#
+# Generate with:
+#     ./generate_cases.py                 the whole matrix
+#     ./generate_cases.py --dry-run       what it would generate, and what it costs
+#     ./generate_cases.py --weight ppc005 only these rows
+#
+# TWO AXES, AND NOTHING ELSE.
+#
+# This file may set exactly two things per case, because everything else has to
+# be IDENTICAL across the matrix for the nine images to be comparable at all --
+# same mesh, same Knudsen number, same time step, same transient, same write
+# schedule. There is deliberately no `overrides:` mechanism here, unlike
+# cases/cai2012/study.yaml: anything else worth changing goes in
+# baseCase/case.yaml, where it necessarily applies to all nine at once and the
+# matrix stays comparable by construction. ./generate_cases.py rejects an
+# `overrides` key by name and says this.
+#
+# The Knudsen number is NOT here either. It is 100 for the whole family and
+# lives in baseCase/case.yaml; generation refuses to run if the template says
+# anything else. See plumetools/cai2012/health.py::FAMILY_KNUDSEN.
+#
+# WHY CASEFOAM, WHEN cases/cai2012 SAYS NO TO IT
+# ----------------------------------------------
+# cases/cai2012/README.md records that family's decision not to use CaseFoam,
+# and the reason holds: it is a FLAT LIST of three Knudsen numbers, and
+# requiring a dependency that would do a copytree and nothing else would make
+# ./generate_cases.py fail on a machine where the core install works.
+#
+# This family is a 3 x 3 HIERARCHY -- weight over sampling duration -- and
+# hierarchies are what CaseFoam is for. It earns the dependency exactly the way
+# cases/markelov1999's <gap>/<pressure> does, and the tree it builds,
+#
+#     Cases/ppc020/s1p5/
+#
+# is CaseFoam's own 'tree' layout. The two decisions do not contradict each
+# other; they are the same rule applied to two different shapes.
+
+base_case: baseCase
+cases_dir: Cases
+manifest_name: manifest.yaml
+
+# --- axis 1: parcels per cell -------------------------------------------------
+#
+# resolution.target_particles_per_cell, which sets dsmc.n_equivalent_particles
+# so the EXIT cell -- the densest in the domain -- reaches this occupancy:
+#
+#     weight = n0 * V_exit / target
+#
+# Standard dsmcFoam has one global weight, so this is met in exactly one place
+# and falls off downstream with the density. How far it falls is the thing the
+# occupancy audit measures rather than estimates.
+#
+# Run time scales with the parcel count, so this axis is where the cost is: the
+# top row is roughly half the matrix whatever else is in it.
+weights:
+  - name: ppc005
+    target_particles_per_cell: 5.0
+    enabled: true
+    note: >-
+      ON the checks.min_particles_per_cell floor, by construction. The row
+      exists to find out what a solution AT the documented minimum actually
+      looks like, which no threshold can answer -- the floor is an assumption
+      in case.yaml, not a measurement.
+
+  - name: ppc020
+    target_particles_per_cell: 20.0
+    enabled: true
+    note: >-
+      THE BASELINE. cases/cai2012 runs every one of its three cases here, so
+      ppc020/s1p5 is that family's Kn100 case re-run at a finer write interval
+      and is the control for this whole matrix: its centreline errors have to
+      reproduce the published 5.59% max / 1.07% mean, and the colour ranges
+      pinned across the sweep are read off it.
+
+  - name: ppc040
+    target_particles_per_cell: 40.0
+    enabled: true
+    note: >-
+      Twice the baseline. TRIMMED FROM 80: at 80 this row alone is ~14 h of
+      solver, taking the matrix past 19 h, and the 8x span from 5 to 40 already
+      brackets both the floor and the baseline. What is lost is the top half of
+      a decade on the weight axis, which weakens the 1/sqrt(N) fit rather than
+      removing it -- and the sampling axis spans 9x on its own.
+
+# --- axis 2: averaging duration -----------------------------------------------
+#
+# dsmc.sampling_domain_transits: how long fieldAverage accumulates after the
+# fixed 2-transit transient. One domain transit is 2.829e-3 s, 2061 timesteps.
+#
+# These three are 1 : 3 : 9, and baseCase/case.yaml's write interval is 1/8 of a
+# transit, so they produce 4 / 13 / 37 sampled frames -- frame k is the same
+# elapsed averaging time in every case of a row. That is what makes the overlap
+# check possible: a 4.5-transit run passes through the 1.5-transit answer, at
+# the same solver time, and the two must agree exactly.
+samplings:
+  - name: s0p5
+    sampling_domain_transits: 0.5
+    enabled: true
+    note: >-
+      A third of the baseline. Deliberately short enough that the running mean
+      should still be visibly moving at the end of it, so the convergence curve
+      has somewhere to start.
+
+  - name: s1p5
+    sampling_domain_transits: 1.5
+    enabled: true
+    note: >-
+      THE BASELINE, matching cases/cai2012/study.yaml -- ~3000 timesteps of
+      averaging over ~1.2e6 parcels.
+
+  - name: s4p5
+    sampling_domain_transits: 4.5
+    enabled: true
+    note: >-
+      Three times the baseline, and the longest affordable. Contains the 1.5-
+      and 0.5-transit answers as earlier frames of the same run, which is what
+      the overlap check exploits and what makes six of the nine cases partly
+      redundant by construction.
+
+meta:
+  reference: Cai and Wang 2012
+  knudsen: 100.0
+  gas: Ar
+  solver: standard OpenFOAM v2512 dsmcFoam
+  question: >-
+    How much statistical noise does the sampled solution carry, how many
+    parcels per cell does it really have away from the exit, which of the two
+    axes buys more, and where does the centreline error stop improving?
+  note: >-
+    Every case runs the same mesh (1,310,720 cells, 10 mm core), the same
+    Kn = 100, the same 1.373e-6 s time step, the same 2 domain transits of
+    transient and the same 3.536e-4 s write interval. manifest.yaml records all
+    of those per case and reports NOT SHARED, loudly, if any of them ever
+    differs -- two cases on two meshes would still generate, still run, and
+    still draw nine plausible pictures.

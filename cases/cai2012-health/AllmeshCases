@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+# Mesh every case of the health matrix.
+#
+#   ./AllmeshCases                 mesh all of them
+#   ./AllmeshCases --dict-only     write dictionaries only (no OpenFOAM needed)
+#   ./AllmeshCases --keep-going    do not stop at the first failure
+#   ./AllmeshCases --help
+#
+# Cases come from manifest.yaml, in the order generate_cases.py wrote them --
+# whole weight rows in increasing cost, so the sequence is reproducible and does
+# not depend on directory iteration order.
+#
+# EVERY CASE HERE HAS THE SAME MESH, and each one still builds its own.
+#
+# The particle-weight axis changes dsmc.n_equivalent_particles only; the mesh
+# follows from Kn and the mesh block, neither of which this family varies. So
+# all nine meshes come out identical -- 1,310,720 cells with a 10 mm core -- and
+# meshing nine times costs about half an hour and ~9 GB more than meshing once
+# and copying.
+#
+# It is still done nine times, on purpose. plumetools.cai2012.study prunes
+# constant/polyMesh out of every clone precisely so that no case can inherit
+# another's geometry, and a study whose comparability rests on the meshes being
+# identical should DEMONSTRATE that rather than arrange it. The cell count of
+# every case is in manifest.yaml, and generate_cases.py fails if they disagree.
+#
+# Each case meshes itself from its own case.yaml. Nothing here writes into a
+# case; it only invokes ./Allmesh in each.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+ARGS=()
+KEEP_GOING=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going) KEEP_GOING=1 ;;
+        --dict-only)  ARGS+=("--dict-only") ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "AllmeshCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllmeshCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+# Read the case paths from the manifest rather than globbing: the manifest is the
+# record of what was generated, and a stale directory from an earlier study must
+# not be picked up as if it belonged to this one.
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+[ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+echo "### meshing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    echo "### $case_path"
+    echo "=============================================================="
+    if [ -x "$case_path/Allmesh" ]; then
+        "$case_path/Allmesh" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    elif [ -f "$case_path/Allmesh" ]; then
+        bash "$case_path/Allmesh" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    else
+        echo "AllmeshCases: $case_path has no Allmesh" >&2
+        FAILED+=("$case_path")
+    fi
+
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Its log files are in that directory.
+       Use --keep-going to mesh the remaining cases anyway."
+    fi
+    echo ""
+done
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "AllmeshCases: ${#FAILED[@]} of ${#CASES[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+
+# The comparability check, on the built meshes rather than on the plan. Two
+# cases on two meshes would still run and still draw two plausible pictures.
+echo "### checking every case really did build the same mesh"
+$PYTHON - "${CASES[@]}" <<'PY' || die "the meshes are not identical"
+import sys
+from pathlib import Path
+
+counts = {}
+for case_path in sys.argv[1:]:
+    owner = Path(case_path) / "constant" / "polyMesh" / "owner"
+    if not owner.is_file():
+        print(f"    {case_path}: no mesh yet (--dict-only?)")
+        continue
+    # The 'note' line of the header carries nPoints/nCells/nFaces, which is
+    # cheaper to read than counting the file and is what checkMesh reports.
+    text = owner.read_text(encoding="utf-8", errors="replace")[:4000]
+    marker = "nCells:"
+    if marker not in text:
+        print(f"    {case_path}: mesh header has no nCells")
+        continue
+    cells = int(text.split(marker)[1].split()[0])
+    counts.setdefault(cells, []).append(case_path)
+
+if len(counts) > 1:
+    print("    THE MESHES DIFFER, so the matrix is not comparable:")
+    for cells, cases in sorted(counts.items()):
+        print(f"      {cells:,} cells: {cases}")
+    raise SystemExit(1)
+for cells, cases in counts.items():
+    print(f"    all {len(cases)} case(s) at {cells:,} cells")
+PY
+
+echo ""
+echo "### all ${#CASES[@]} case(s) meshed"
+echo "    next:  ./AllrunCases"

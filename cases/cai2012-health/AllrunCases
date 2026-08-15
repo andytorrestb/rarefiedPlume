@@ -1,0 +1,219 @@
+#!/bin/bash
+#
+# Run every case of the health matrix, cheapest first, timing each one.
+#
+#   ./AllrunCases                run all of them
+#   ./AllrunCases --only PATH    run one case (repeatable)
+#   ./AllrunCases --serial       one process per case
+#   ./AllrunCases -np 8          override the subdomain count
+#   ./AllrunCases --keep-clouds  do not prune reconstructed parcel clouds
+#   ./AllrunCases --keep-going   do not stop at the first failure
+#   ./AllrunCases --help
+#
+# Sequentially, not in parallel: each case already uses every core it is given,
+# and two DSMC runs competing for memory is how a matrix of nine turns into nine
+# that all get killed.
+#
+# CHEAPEST FIRST. manifest.yaml orders whole weight rows by increasing cost, so
+# ppc005 finishes in under an hour and the expensive rows come last. That order
+# is what makes the machinery testable before the bill is committed: run
+#
+#     ./AllrunCases --only Cases/ppc005/s0p5 --only Cases/ppc005/s1p5
+#
+# and the whole generate -> mesh -> run -> sample -> render chain is exercised on
+# the two cheapest cases in about half an hour.
+#
+# EACH CASE IS TIMED, and the wall clock is recorded in
+# results/cost-model.yaml. ./generate_cases.py --dry-run refits its estimate
+# from those measurements, so the prediction for what is left sharpens as the
+# matrix runs -- and this script prints the revised total after every case.
+#
+# RECONSTRUCTED PARCEL CLOUDS ARE PRUNED as each case finishes, from every time
+# directory except the newest. A cloud is ~200 MB per write at the baseline
+# weight and scales with it, which is 40% of the matrix's disk; nothing in this
+# family reads parcel positions, and the processor*/ trees -- which is what a
+# resume actually reads -- are left untouched. --keep-clouds turns it off.
+#
+# Re-running this CONTINUES each case from its newest time directory rather than
+# restarting it -- see ./Allrun --help. A matrix interrupted part-way is
+# finished by running this again; cases that already reached endTime report that
+# and are skipped in seconds. Their recorded wall clock is then the resumed
+# leg's, not the whole case's, so a resumed case is NOT re-timed.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+ARGS=()
+ONLY=()
+KEEP_GOING=0
+KEEP_CLOUDS=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)  KEEP_GOING=1 ;;
+        --keep-clouds) KEEP_CLOUDS=1 ;;
+        --only)        shift; ONLY+=("${1:?"--only needs a case path"}") ;;
+        -s|--serial)   ARGS+=("--serial") ;;
+        -np)           shift; ARGS+=("-np" "${1:?"-np needs a subdomain count"}") ;;
+        --no-solve)    ARGS+=("--no-solve") ;;
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)             echo "AllrunCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllrunCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
+import sys
+import yaml
+
+wanted = set(sys.argv[1:])
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+paths = [entry["path"] for entry in document.get("cases", [])]
+if wanted:
+    missing = sorted(wanted - set(paths))
+    if missing:
+        # A typo'd --only that silently ran nothing would look exactly like a
+        # study that finished instantly.
+        sys.exit(f"--only names no generated case: {missing}\n"
+                 f"the manifest has: {paths}")
+    paths = [p for p in paths if p in wanted]
+for path in paths:
+    print(path)
+PY
+) || die "could not read manifest.yaml"
+
+[ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+echo "### running ${#CASES[@]} case(s), sequentially, cheapest first"
+$PYTHON - <<'PY'
+from pathlib import Path
+from plumetools.cai2012.health import load_cost_model
+model = load_cost_model(Path("results") / "cost-model.yaml")
+print(f"    cost model  {model.source}")
+PY
+echo ""
+
+START=$(date +%s)
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    echo "### $case_path"
+    echo "=============================================================="
+    [ -d "$case_path/constant/polyMesh" ] || die "$case_path has no mesh.
+       Run ./AllmeshCases first."
+
+    # Whether the case had already finished decides whether this leg's wall
+    # clock is the cost of the case or the cost of noticing it was done.
+    RESUMED=0
+    if $PYTHON -c "
+import sys
+from plumetools.cai2012.study import case_is_complete
+sys.exit(0 if case_is_complete('$case_path') else 1)"; then
+        RESUMED=1
+    fi
+
+    CASE_START=$(date +%s)
+    if [ -x "$case_path/Allrun" ]; then
+        "$case_path/Allrun" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    elif [ -f "$case_path/Allrun" ]; then
+        bash "$case_path/Allrun" "${ARGS[@]+"${ARGS[@]}"}" || FAILED+=("$case_path")
+    else
+        echo "AllrunCases: $case_path has no Allrun" >&2
+        FAILED+=("$case_path")
+    fi
+    ELAPSED=$(( $(date +%s) - CASE_START ))
+    echo "    elapsed ${ELAPSED} s"
+
+    if [ ${#FAILED[@]} -eq 0 ] || [ "$KEEP_GOING" -eq 1 ]; then
+        $PYTHON - "$case_path" "$ELAPSED" "$RESUMED" "$KEEP_CLOUDS" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+import yaml
+
+from plumetools.cai2012.health import load_cost_model, record_measurement
+
+case_path, elapsed, resumed, keep_clouds = (
+    Path(sys.argv[1]), float(sys.argv[2]), sys.argv[3] == "1",
+    sys.argv[4] == "1")
+
+# --- prune reconstructed parcel clouds ---------------------------------- #
+#
+# Every time directory carries lagrangian/dsmc/, which is the parcel cloud.
+# Nothing in this family reads parcel positions -- the audit reads dsmcRhoNMean,
+# a volume field -- and a resume reads processor*/, not this. The newest one is
+# kept anyway: it costs one write and it is what any hand inspection would
+# reach for.
+if not keep_clouds:
+    times = sorted(
+        ((float(entry.name), entry) for entry in case_path.iterdir()
+         if entry.is_dir() and entry.name.replace(".", "").replace("e-", "")
+         .replace("e+", "").isdigit()),
+        key=lambda item: item[0])
+    freed = 0
+    for _, directory in times[:-1]:
+        cloud = directory / "lagrangian"
+        if cloud.is_dir():
+            freed += sum(f.stat().st_size for f in cloud.rglob("*")
+                         if f.is_file())
+            shutil.rmtree(cloud)
+    if freed:
+        print(f"    pruned {freed / 1024 ** 3:.1f} GB of reconstructed parcel "
+              f"clouds ({len(times) - 1} time(s); the newest is kept)")
+
+# --- record the wall clock ----------------------------------------------- #
+if resumed:
+    print("    not timed: this case had already finished, so the elapsed time "
+          "above is\n    the cost of noticing that, not of the run.")
+    raise SystemExit(0)
+
+entry = yaml.safe_load(Path("manifest.yaml").read_text(encoding="utf-8"))
+row = next((c for c in entry.get("cases", [])
+            if c["path"] == str(case_path).replace("\\", "/")), None)
+if row is None:
+    print(f"    not timed: {case_path} is not in the manifest")
+    raise SystemExit(0)
+
+record_measurement(Path("results") / "cost-model.yaml", {
+    "case": row["name"],
+    "path": row["path"],
+    "seconds": elapsed,
+    "parcels": float(row.get("estimated_particles", 0.0)),
+    "cells": int(row.get("n_cells", 0)),
+    "steps": int(row.get("n_steps", 0)),
+    "target_particles_per_cell": row.get("target_particles_per_cell"),
+    "sampling_domain_transits": row.get("sampling_domain_transits"),
+})
+model = load_cost_model(Path("results") / "cost-model.yaml")
+predicted = row.get("predicted_hours")
+if predicted:
+    print(f"    predicted {float(predicted):.2f} h, took {elapsed / 3600:.2f} h "
+          f"({elapsed / 3600 / float(predicted):.2f}x)")
+print(f"    cost model now: {model.source}")
+PY
+    fi
+
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Its log files are in that directory.
+       Use --keep-going to run the remaining cases anyway."
+    fi
+    echo ""
+done
+
+echo "### finished in $(( $(date +%s) - START )) s"
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "AllrunCases: ${#FAILED[@]} of ${#CASES[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+echo "    next:  ./AllpostCases"
