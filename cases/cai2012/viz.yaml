@@ -115,13 +115,22 @@ fields:
     log_decades: 8         # Kn = 100 empties the far field completely; 6 decades
                            # crops the plume edge out of the picture
 
-  - name: dsmcRhoN         # PARCEL number density. Times the cell volume this is
-    log: true              # the parcels per cell -- where it thins out, every
-    log_decades: 6         # other image here is noise. Standard dsmcFoam has one
-                           # particle weight for the whole domain, so this is
-                           # exactly rhoN / nParticle and has the same SHAPE as
-                           # the image above; its value is in the numbers on the
-                           # colour bar.
+  - name: dsmcRhoN         # The PARCEL COUNT in the cell -- dimensionless, NOT a
+    log: true              # number density. Read the colour bar directly: where
+    log_decades: 6         # it falls below checks.min_particles_per_cell = 5,
+                           # every other image here is noise.
+                           #
+                           # rhoN * V / dsmcRhoN is the particle weight (one
+                           # global scalar in standard dsmcFoam), so this image
+                           # has the same SHAPE as the one above and its value
+                           # is what matters. MEASURED on Cases/Kn100: dsmcRhoN
+                           # peaks at 20.47 for a configured 20 parcels per exit
+                           # cell, and the median over the occupied domain is
+                           # 0.37 -- see cases/cai2012-health.
+                           #
+                           # This comment used to read "times the cell volume".
+                           # That is wrong by 1/V = 10^6 here, and it drew a
+                           # picture nobody could tell was wrong.
 
   - name: U                # derived in the inherited spec: momentum / rhoM
   - name: Ttra             # derived: from linearKE, momentum and rhoM. Should

@@ -6,19 +6,34 @@ that already exists on disk.
 **1. The occupancy audit.** :func:`plumetools.cai2012.checks._check_occupancy`
 prints an *estimate* of the exit cell's parcel count and says outright that only
 a post-run audit of the sampled ``dsmcRhoN`` field can say what it was.
-:func:`occupancy_audit` is that audit. Standard ``dsmcFoam`` carries one global
-particle weight, so
+:func:`occupancy_audit` is that audit.
+
+``dsmcRhoN`` is **the parcel count in the cell**, dimensionless -- not a parcel
+number density. ``DSMCCloud::calculateFields`` adds 1 per parcel and never
+divides by the cell volume, where ``rhoN`` accumulates ``nParticle/V``. So with
+one global particle weight:
 
 .. code-block:: text
 
-    dsmcRhoN  = rhoN / nParticle          parcel number density  [1/m^3]
-    dsmcRhoN * V                          parcels in the cell    [-]
+    dsmcRhoN            parcels in the cell     [-]
+    rhoN * V / dsmcRhoN = nParticle             the global weight
 
-exactly, and the time-averaged ``dsmcRhoNMean * V`` is the mean occupancy over
-the sampling window. The identity is **checked**, not assumed
-(:func:`weight_consistency`): if ``rhoNMean / dsmcRhoNMean`` is not the particle
-weight everywhere, the reading of these two fields is wrong and every occupancy
-number here is wrong with it.
+and the time-averaged ``dsmcRhoNMean`` is the mean occupancy over the sampling
+window directly, with no volume factor.
+
+This is worth stating flatly because the repository had it wrong until this
+family measured it: ``catalog.py``, ``slices.yaml`` and ``cases/cai2012/viz.yaml``
+all described ``dsmcRhoN`` as a number density in ``m^-3`` whose product with
+the cell volume was the occupancy. Measured on ``cases/cai2012/Cases/Kn100``,
+``rhoN*V/dsmcRhoN`` is the particle weight to 1.5e-9 and ``dsmcRhoN`` peaks at
+20.47 -- the configured 20 parcels per exit cell. The wrong reading is out by a
+factor of ``1/V``, which on this mesh is 10^6, and on a logarithmic colour scale
+it looks entirely plausible.
+
+The identity is therefore **checked, not assumed** (:func:`weight_consistency`):
+if ``rhoNMean * V / dsmcRhoNMean`` is not the particle weight everywhere, the
+reading of these fields is wrong again and every occupancy number here is wrong
+with it.
 
 **2. The overlap check.** A 4.5-transit run is a 1.5-transit run that kept
 going. Same mesh, same seed, same time step, same decomposition -- so at any
@@ -148,51 +163,58 @@ def region_occupancy(name: str, description: str, occupancy: np.ndarray, *,
     )
 
 
-def weight_consistency(number_density: np.ndarray, parcel_density: np.ndarray,
+def weight_consistency(number_density: np.ndarray, parcel_count: np.ndarray,
+                       volumes: np.ndarray,
                        n_equivalent_particles: float) -> dict:
-    """Check ``rhoN / dsmcRhoN`` really is the global particle weight.
+    """Check ``rhoN * V / dsmcRhoN`` really is the global particle weight.
 
     Args:
-        number_density: ``rhoNMean``.
-        parcel_density: ``dsmcRhoNMean``.
+        number_density: ``rhoNMean`` [1/m^3].
+        parcel_count: ``dsmcRhoNMean`` -- parcels per cell, dimensionless.
+        volumes: cell volumes [m^3].
         n_equivalent_particles: the weight from ``case.yaml``/the manifest.
 
     Returns:
         ``{"n_compared", "measured_weight", "max_rel_error", "consistent"}``.
 
-    Every occupancy figure in this module rests on ``dsmcRhoN`` being the
-    **parcel** number density and one weight covering the whole domain
-    (``DSMCCloud::nParticle_`` is a single scalar). If a future solver -- the
-    MNF fork, say -- introduced radial weighting, or if ``dsmcRhoN`` turned out
-    to mean something else, the ratio would stop being constant and every number
-    here would be wrong while still looking plausible. So it is measured.
+    Every occupancy figure in this module rests on two things: ``dsmcRhoN``
+    being a parcel **count**, and one weight covering the whole domain
+    (``DSMCCloud::nParticle_`` is a single scalar). Both can fail silently. The
+    repository already had the first one wrong -- it read ``dsmcRhoN`` as a
+    number density, which is out by ``1/V`` -- and a solver with radial
+    weighting would break the second. Either way the ratio stops being
+    constant, so it is measured rather than trusted.
 
     Cells with no parcels are skipped: ``0/0`` says nothing about the weight.
     """
     number_density = np.asarray(number_density, dtype=np.float64).ravel()
-    parcel_density = np.asarray(parcel_density, dtype=np.float64).ravel()
-    occupied = (parcel_density > 0.0) & (number_density > 0.0)
+    parcel_count = np.asarray(parcel_count, dtype=np.float64).ravel()
+    volumes = np.asarray(volumes, dtype=np.float64).ravel()
+    occupied = (parcel_count > 0.0) & (number_density > 0.0)
     if not np.any(occupied):
         return {"n_compared": 0, "measured_weight": float("nan"),
                 "max_rel_error": float("nan"), "consistent": False}
 
-    ratio = number_density[occupied] / parcel_density[occupied]
+    ratio = (number_density[occupied] * volumes[occupied]
+             / parcel_count[occupied])
     expected = float(n_equivalent_particles)
-    error = float(np.max(np.abs(ratio - expected)) / expected) if expected else float("inf")
+    error = (float(np.max(np.abs(ratio - expected)) / expected)
+             if expected else float("inf"))
     return {
         "n_compared": int(np.count_nonzero(occupied)),
         "measured_weight": float(np.median(ratio)),
         "max_rel_error": error,
         # Loose, because both fields are written at 10 significant figures and
-        # the ratio of two rounded numbers is not exact. Tight enough that a
-        # second weight, or a different quantity, could not pass.
+        # the ratio of two rounded numbers is not exact -- measured at 1.5e-9
+        # on cases/cai2012/Cases/Kn100. Tight enough that a second weight, or a
+        # missing volume factor, could not pass.
         "consistent": error < 1.0e-6,
     }
 
 
 def occupancy_audit(sampled, cfg, geom, exit_state, *,
                     n_equivalent_particles: float,
-                    parcel_density: np.ndarray,
+                    parcel_count: np.ndarray,
                     averaged_steps: float,
                     core_cell_size_m: float | None = None,
                     x_stations_over_D=(0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0)) -> dict:
@@ -204,7 +226,9 @@ def occupancy_audit(sampled, cfg, geom, exit_state, *,
         geom: the geometry.
         exit_state: the exit state, for ``n0``.
         n_equivalent_particles: the global particle weight.
-        parcel_density: ``dsmcRhoNMean``, one value per cell.
+        parcel_count: ``dsmcRhoNMean`` -- the mean number of parcels in each
+            cell over the sampling window. Dimensionless, and **not** to be
+            multiplied by the cell volume; see the module docstring.
         averaged_steps: time steps ``fieldAverage`` accumulated over.
         core_cell_size_m: the uniform core cell, from
             :func:`plumetools.cai2012.mesh.plan`. ``None`` derives it from the
@@ -232,13 +256,14 @@ def occupancy_audit(sampled, cfg, geom, exit_state, *,
     ``domain``          everything, including the vacuum no parcel ever reached
     ==================  ==========================================================
     """
-    parcel_density = np.asarray(parcel_density, dtype=np.float64).ravel()
-    if parcel_density.size != sampled.n_cells:
+    parcel_count = np.asarray(parcel_count, dtype=np.float64).ravel()
+    if parcel_count.size != sampled.n_cells:
         raise PostError(
-            f"dsmcRhoNMean has {parcel_density.size:,} values against "
+            f"dsmcRhoNMean has {parcel_count.size:,} values against "
             f"{sampled.n_cells:,} cells. These are not the same mesh.")
 
-    occupancy = parcel_density * sampled.volumes
+    # No volume factor. dsmcRhoN IS the count; see the module docstring.
+    occupancy = parcel_count
 
     d = geom.diameter_m
     x = sampled.centres[:, 0]
@@ -255,7 +280,12 @@ def occupancy_audit(sampled, cfg, geom, exit_state, *,
     # weight, so this is the number checks.py was estimating.
     core_cell = float(core_cell_size_m or cfg.mesh.core_cell_size_m
                       or _core_cell(x))
-    first_layer = x <= 1.5 * core_cell
+    # One layer, not 1.5 of them. Cell centres in the uniform core sit at
+    # 0.5, 1.5, 2.5 ... cells, so a 1.5-cell cut takes the second layer too --
+    # and the second layer is not the cell whose volume set the particle
+    # weight, so the "measured against estimated" comparison would be against
+    # a different cell than checks.py estimated.
+    first_layer = x <= core_cell
     tube = radial <= float(cfg.post.centerline_radius_over_D) * d
     in_range = (x >= 0.0) & (x <= float(cfg.post.centerline_x_over_D_max) * d)
 
@@ -295,7 +325,7 @@ def occupancy_audit(sampled, cfg, geom, exit_state, *,
 
     return {
         "weight_check": weight_consistency(sampled.number_density,
-                                           parcel_density,
+                                           parcel_count, sampled.volumes,
                                            n_equivalent_particles),
         "n_equivalent_particles": float(n_equivalent_particles),
         "averaged_steps": float(averaged_steps),
@@ -321,16 +351,18 @@ def occupancy_report(audit: dict) -> list[str]:
     """The audit as printed lines."""
     check = audit["weight_check"]
     lines = [
-        "Measured parcel occupancy (dsmcRhoNMean * V, averaged over the window)",
+        "Measured parcel occupancy (dsmcRhoNMean -- the parcel COUNT per cell)",
         f"  particle weight          {audit['n_equivalent_particles']:.6e}"
         f"   (measured {check['measured_weight']:.6e}, "
         f"max error {check['max_rel_error']:.2e})",
     ]
     if not check["consistent"]:
         lines.append(
-            "  WARNING: rhoNMean / dsmcRhoNMean is NOT the particle weight. "
+            "  WARNING: rhoNMean * V / dsmcRhoNMean is NOT the particle weight. "
             "Every occupancy\n"
-            "           number below assumes it is, and is wrong if it is not.")
+            "           number below assumes dsmcRhoN is a parcel COUNT and "
+            "that one weight\n"
+            "           covers the domain. One of those is false here.")
     lines += [
         f"  averaged over            {audit['averaged_steps']:.0f} time steps",
         "",

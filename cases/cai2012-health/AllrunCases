@@ -154,11 +154,18 @@ case_path, elapsed, resumed, keep_clouds = (
 # kept anyway: it costs one write and it is what any hand inspection would
 # reach for.
 if not keep_clouds:
-    times = sorted(
-        ((float(entry.name), entry) for entry in case_path.iterdir()
-         if entry.is_dir() and entry.name.replace(".", "").replace("e-", "")
-         .replace("e+", "").isdigit()),
-        key=lambda item: item[0])
+    def numeric(entry):
+        """(time, dir) for a time directory, or None. float() is the only
+        honest test: OpenFOAM writes 0.0021211 and 9.9177e-03 alike."""
+        if not entry.is_dir():
+            return None
+        try:
+            return float(entry.name), entry
+        except ValueError:
+            return None
+
+    times = sorted((t for t in map(numeric, case_path.iterdir()) if t),
+                   key=lambda item: item[0])
     freed = 0
     for _, directory in times[:-1]:
         cloud = directory / "lagrangian"

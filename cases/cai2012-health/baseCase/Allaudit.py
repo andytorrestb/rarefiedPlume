@@ -17,10 +17,10 @@ this adds the two things that family does not measure.
 
 **Occupancy.** ``plumetools.cai2012.checks`` prints an *estimate* of the exit
 cell's parcel count and says only a post-run audit of the sampled ``dsmcRhoN``
-field can say what it was. This is that audit: ``dsmcRhoNMean * V`` is the mean
-parcel count per cell over the sampling window, exactly, and it is reported per
-region because the target is met at the exit cell and nowhere else by
-construction.
+field can say what it was. This is that audit: ``dsmcRhoNMean`` IS the mean
+parcel count per cell over the sampling window -- a count, not a density, so
+there is no volume factor -- and it is reported per region because the target is
+met at the exit cell and nowhere else by construction.
 
 **Convergence, physically.** The running mean is written many times across the
 sampling window, so every frame is a shorter average of the same run. Scoring
@@ -137,7 +137,7 @@ def main(argv) -> int:
     parcel_path = HERE / final / "dsmcRhoNMean"
     if not parcel_path.is_file():
         print(f"    no dsmcRhoNMean at {parcel_path}; the occupancy audit "
-              f"needs the\n    PARCEL number density, not just rhoNMean.",
+              f"needs the\n    PARCEL COUNT per cell, not just rhoNMean.",
               file=sys.stderr)
         return 1
 
@@ -145,7 +145,7 @@ def main(argv) -> int:
     occupancy = audit.occupancy_audit(
         sampled, cfg, geom, exit_state,
         n_equivalent_particles=run.n_equivalent_particles,
-        parcel_density=post.read_internal_field(parcel_path),
+        parcel_count=post.read_internal_field(parcel_path),
         averaged_steps=averaged_steps,
         core_cell_size_m=plan.core_cell_size_m)
     occupancy["case"] = label

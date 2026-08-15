@@ -116,18 +116,29 @@ fields:
     log_decades: 8         # Kn = 100 empties the far field completely; 6 decades
                            # crops the plume edge out of the picture
 
-  - name: dsmcRhoN         # PARCEL number density. Times the cell volume this is
-    log: true              # the parcels per cell -- a statistical-quality field,
-    log_decades: 6         # not a physical one. Where this thins out, every
-                           # other image on this list is noise.
+  - name: dsmcRhoN         # The PARCEL COUNT in the cell -- dimensionless, and
+    log: true              # NOT a number density. Read the colour bar directly
+    log_decades: 6         # against resolution.target_particles_per_cell and
+                           # checks.min_particles_per_cell; where it thins out,
+                           # every other image on this list is noise.
                            #
-                           # Standard dsmcFoam has ONE particle weight for the
-                           # whole domain (DSMCCloud::nParticle_ is a single
-                           # scalar), so dsmcRhoN = rhoN / nParticle EXACTLY and
-                           # this image has the same shape as rhoN's. Its value
-                           # is in the NUMBERS on the colour bar, not the
-                           # pattern: multiply by V to get parcels per cell and
-                           # compare against resolution.target_particles_per_cell.
+                           # DSMCCloud::calculateFields adds 1 per parcel and
+                           # never divides by the cell volume, where rhoN
+                           # accumulates nParticle/V. With one global weight
+                           # (DSMCCloud::nParticle_ is a single scalar) that
+                           # makes rhoN * V / dsmcRhoN the particle weight --
+                           # measured to 1.5e-9 on cases/cai2012/Cases/Kn100,
+                           # where dsmcRhoN peaks at 20.47 against a configured
+                           # 20 parcels per exit cell.
+                           #
+                           # This comment used to say "PARCEL number density,
+                           # times the cell volume". That is out by 1/V, which
+                           # on the Cai mesh is a factor of 10^6, and on a
+                           # logarithmic scale it drew a perfectly plausible
+                           # picture. cases/cai2012-health measured it.
+                           #
+                           # The SHAPE is rhoN's, since they differ by V and
+                           # the core is uniform; the value is what matters.
 
   - name: U                # derived above
   - name: Ttra             # derived above

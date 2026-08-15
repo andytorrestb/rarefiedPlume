@@ -507,20 +507,23 @@ def _sampled(n_cells=8, volume=1.0e-6, density=1.0e16):
     )
 
 
-def test_occupancy_is_the_parcel_density_times_the_cell_volume(tmp_path):
-    """dsmcRhoN * V is the parcels in the cell, exactly, with one global weight.
-    Getting the volume factor wrong scales every occupancy figure in the study
-    by a constant and leaves all of them looking reasonable."""
+def test_occupancy_is_dsmcRhoN_itself_with_no_volume_factor(tmp_path):
+    """dsmcRhoN IS the parcel count in the cell -- DSMCCloud::calculateFields
+    adds 1 per parcel and never divides by volume.
+
+    Multiplying by V, which the repository's own catalog and specs used to say
+    to do, is out by 1/V -- a factor of 1e6 on the Cai mesh. On a logarithmic
+    colour scale that produces an entirely plausible picture, and it would
+    scale every occupancy figure in this study by the same constant.
+    """
     cfg, geom, exit_state, plan, _ = derived(tmp_path / "case")
-    sampled = _sampled()
-    weight = 1.0e6
-    parcels = np.full(sampled.n_cells, 20.0)
-    parcel_density = parcels / sampled.volumes
+    sampled = _sampled(volume=1.0e-6)
+    parcel_count = np.full(sampled.n_cells, 20.0)
 
     result = audit.occupancy_audit(
         sampled, cfg, geom, exit_state,
-        n_equivalent_particles=weight,
-        parcel_density=parcel_density,
+        n_equivalent_particles=1.0e6,
+        parcel_count=parcel_count,
         averaged_steps=1000.0,
         core_cell_size_m=plan.core_cell_size_m)
 
@@ -553,24 +556,43 @@ def test_a_parcel_field_from_another_mesh_is_refused(tmp_path):
     with pytest.raises(PostError, match="not the same mesh"):
         audit.occupancy_audit(sampled, cfg, geom, exit_state,
                               n_equivalent_particles=1.0e6,
-                              parcel_density=np.ones(5),
+                              parcel_count=np.ones(5),
                               averaged_steps=1000.0)
 
 
 def test_the_particle_weight_identity_is_checked_not_assumed():
-    """Every occupancy number rests on rhoN/dsmcRhoN being one global weight.
-    A solver with radial weighting would break it, and every figure in the
-    audit would be wrong while still looking entirely plausible."""
-    good = audit.weight_consistency([2.0e16, 4.0e16], [2.0e10, 4.0e10], 1.0e6)
+    """Every occupancy number rests on rhoN*V/dsmcRhoN being one global weight.
+
+    Two things can break it silently: dsmcRhoN not being a count (which is how
+    the repository had it), or a solver with radial weighting. Either way the
+    ratio stops being constant, and every figure in the audit would be wrong
+    while still looking entirely plausible.
+    """
+    volumes = [1.0e-6, 1.0e-6]
+    # weight = rhoN * V / count, so 20 parcels in a 1e-6 m^3 cell at a 1e6
+    # weight is rhoN = 2e13.
+    good = audit.weight_consistency([2.0e13, 4.0e13], [20.0, 40.0], volumes,
+                                    1.0e6)
     assert good["consistent"] and good["measured_weight"] == pytest.approx(1e6)
 
-    bad = audit.weight_consistency([2.0e16, 4.0e16], [2.0e10, 8.0e10], 1.0e6)
+    bad = audit.weight_consistency([2.0e13, 4.0e13], [20.0, 80.0], volumes,
+                                   1.0e6)
     assert not bad["consistent"]
+
+
+def test_reading_dsmcRhoN_as_a_density_fails_the_weight_check():
+    """The specific error this check exists to catch, out by exactly 1/V."""
+    result = audit.weight_consistency([2.0e13], [20.0 / 1.0e-6], [1.0e-6],
+                                      1.0e6)
+    assert not result["consistent"]
+    # out by exactly V
+    assert result["measured_weight"] == pytest.approx(1.0e6 * 1.0e-6)
 
 
 def test_cells_with_no_parcels_do_not_break_the_weight_check():
     """0/0 says nothing about the weight; the far field is full of such cells."""
-    result = audit.weight_consistency([1.0e16, 0.0], [1.0e10, 0.0], 1.0e6)
+    result = audit.weight_consistency([1.0e13, 0.0], [10.0, 0.0], [1.0e-6] * 2,
+                                      1.0e6)
     assert result["consistent"] and result["n_compared"] == 1
 
 

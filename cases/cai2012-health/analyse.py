@@ -30,7 +30,6 @@ can see, and ``overlap.yaml`` is the same statement measured on the fields.
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -128,23 +127,34 @@ def check_overlap(rows: list) -> dict:
 # 2. the sweep table
 # --------------------------------------------------------------------------- #
 
+def steps_per_transit(entry: dict) -> float:
+    """Time steps in one domain transit, from the manifest alone.
+
+    ``(end_time - average_start) / sampling_transits`` is the transit in
+    seconds, and dividing by ``deltaT`` gives the steps. Taken from the
+    manifest rather than from a case's ``convergence.yaml`` so the statistical
+    budget is computable for a case that has been generated but not yet
+    audited -- which is every case, the first time the table is built.
+    """
+    transits = float(entry.get("sampling_domain_transits") or 0.0)
+    delta_t = float(entry.get("deltaT_s") or 0.0)
+    if transits <= 0.0 or delta_t <= 0.0:
+        return 0.0
+    window = float(entry.get("end_time_s", 0.0)) - float(
+        entry.get("average_start_s", 0.0))
+    return (window / transits) / delta_t
+
+
 def build_table(rows: list, manifest: dict) -> list:
     """One row per case, from its metrics and its occupancy audit."""
-    shared = manifest.get("held_fixed") or {}
-    delta_t = shared.get("deltaT_s")
     table = []
     for entry in rows:
         case_dir = HERE / entry["path"]
-        metrics = _read(case_dir / "results" / "metrics.yaml")
-        occupancy = _read(case_dir / "results" / "occupancy.yaml")
-        transit = None
-        convergence = _read(case_dir / "results" / "convergence.yaml")
-        if convergence:
-            transit = convergence.get("domain_transit_s")
-        steps_per_transit = (float(transit) / float(delta_t)
-                             if transit and delta_t else 0.0)
-        table.append(audit.sweep_row(entry, metrics, occupancy,
-                                     steps_per_transit))
+        table.append(audit.sweep_row(
+            entry,
+            _read(case_dir / "results" / "metrics.yaml"),
+            _read(case_dir / "results" / "occupancy.yaml"),
+            steps_per_transit(entry)))
     return table
 
 
@@ -180,6 +190,93 @@ def print_table(table: list) -> None:
             else:
                 cells.append(f"{str(value):>{widths[column]}}")
         print("    " + "  ".join(cells))
+
+
+def plot_sweep(table: list, output: Path) -> list:
+    """Draw the error across both axes. Returns ``[]`` without matplotlib.
+
+    Three panels, and the third is the one the study turns on:
+
+    1. error against **parcels per cell**, one line per sampling duration;
+    2. error against **averaging duration**, one line per weight;
+    3. error against the **statistical budget** -- parcels x steps -- which is
+       the product of the two. If the axes really do trade off, the nine points
+       collapse onto a single curve here, and a ``1/sqrt(N)`` reference line
+       says whether that curve is sampling noise. Where they stop collapsing,
+       something other than statistics is setting the error.
+
+    matplotlib is an optional dependency, as it is for
+    :func:`plumetools.cai2012.post.plot_case`: a missing plotting library must
+    not fail an analysis whose numbers are already in the CSV.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return []
+
+    usable = [r for r in table
+              if r.get("density_mean_rel_error_percent") is not None]
+    if not usable:
+        return []
+
+    figure, axes = plt.subplots(1, 3, figsize=(15.0, 4.6))
+
+    by_sampling = {}
+    by_weight = {}
+    for row in usable:
+        by_sampling.setdefault(row["sampling_transits"], []).append(row)
+        by_weight.setdefault(row["particles_per_cell"], []).append(row)
+
+    for transits, rows in sorted(by_sampling.items()):
+        rows.sort(key=lambda r: r["particles_per_cell"])
+        axes[0].plot([r["particles_per_cell"] for r in rows],
+                     [r["density_mean_rel_error_percent"] for r in rows],
+                     "o-", label=f"{transits:g} transits")
+    axes[0].set_xlabel("target parcels per exit cell")
+
+    for weight, rows in sorted(by_weight.items()):
+        rows.sort(key=lambda r: r["sampling_transits"])
+        axes[1].plot([r["sampling_transits"] for r in rows],
+                     [r["density_mean_rel_error_percent"] for r in rows],
+                     "s-", label=f"{weight:g} parcels/cell")
+    axes[1].set_xlabel("sampling duration [domain transits]")
+
+    budgets = [r["statistical_budget"] for r in usable]
+    errors = [r["density_mean_rel_error_percent"] for r in usable]
+    for weight, rows in sorted(by_weight.items()):
+        axes[2].plot([r["statistical_budget"] for r in rows],
+                     [r["density_mean_rel_error_percent"] for r in rows],
+                     "o", label=f"{weight:g} parcels/cell")
+    if budgets and min(budgets) > 0:
+        # Anchored on the cheapest point, so the line says "if this were pure
+        # sampling noise, the rest would lie here" rather than being fitted to
+        # the data it is supposed to test.
+        anchor = min(zip(budgets, errors))
+        reference = sorted(budgets)
+        axes[2].plot(reference,
+                     [anchor[1] * (anchor[0] / b) ** 0.5 for b in reference],
+                     "k--", linewidth=1.0,
+                     label=r"$1/\sqrt{N}$ from the cheapest case")
+        axes[2].set_xscale("log")
+        axes[2].set_yscale("log")
+    axes[2].set_xlabel("statistical budget: parcels/cell x steps averaged")
+
+    for panel in axes:
+        panel.set_ylabel("centreline density mean relative error [%]")
+        panel.grid(True, which="both", alpha=0.3)
+        panel.legend(fontsize=8)
+    axes[0].set_title("more parcels")
+    axes[1].set_title("more averaging")
+    axes[2].set_title("the same budget, split two ways")
+
+    figure.tight_layout()
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output, dpi=150)
+    plt.close(figure)
+    return [output]
 
 
 # --------------------------------------------------------------------------- #
@@ -335,6 +432,12 @@ def main(argv) -> int:
     print_table(table)
     written = audit.write_sweep_table(results / "sweep-table.csv", table)
     print(f"    wrote {written}")
+    figures = plot_sweep(table, results / "sweep-error.png")
+    for figure in figures:
+        print(f"    wrote {figure}")
+    if not figures:
+        print('    no sweep figure: matplotlib is not installed, or no case '
+              'has metrics yet (pip install -e ".[plots]")')
     print()
 
     if not args.no_sheets:
