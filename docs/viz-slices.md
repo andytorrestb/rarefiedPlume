@@ -188,7 +188,7 @@ the case's `case.yaml`. A spec using `{R}` against a case whose gas is unknown i
 an error, not a substituted default: a temperature computed with the wrong gas
 constant is wrong by a factor nobody would spot in a picture.
 
-## Six things that are easy to get wrong
+## Seven things that are easy to get wrong
 
 ### A symmetry plane is the edge of the mesh, and cuts nothing
 
@@ -202,6 +202,23 @@ ten-thousandth of the domain inward, printing a note. At that distance the
 picture is the symmetry plane to far better than one cell. Only axis-aligned
 normals are adjusted; a tilted plane through a corner could be nudged several
 ways and none is obviously right, so it is reported instead of guessed at.
+
+### A 3-D view is not sized for you
+
+A `Slice` derives its viewport from the cut's own bounding box, so slice images
+are already undistorted. A `Visualization3D` takes an **explicit width**, and
+anything fixed there stretches the geometry by whatever the difference is —
+`height * 4 / 3` drew the markelov cylinder, which is half again as tall as it
+is wide, at 1.33 against a true 0.69. Nearly twice too wide.
+
+The width now comes from the bounding box projected onto the camera's own axes
+(`normal × camera_up` and `camera_up`), so one world unit is the same number of
+pixels across as down. That is the whole of what "represents the geometry" means
+here, and it is worth checking on any new view type: measure the PNG and compare
+its ratio against the extents it is supposed to show.
+
+Note that a colour bar adds a row *below* the image. It changes the file's
+overall ratio without distorting anything inside it.
 
 ### Surface fields are drawn on walls only
 

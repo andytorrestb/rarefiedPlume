@@ -35,7 +35,10 @@ from plumetools.viz.resolve import (
     RenderError,
     nudge_plane_origin,
     resolve_times,
+    scalar_bar_label_budget,
+    view_extents,
     view_half_height,
+    view_shape,
 )
 from plumetools.viz.spec import DerivedSpec, FieldSpec, PlaneSpec, VizSpec
 
@@ -249,6 +252,22 @@ def test_decade_labels_thin_a_wide_range_to_fit_the_bar():
 def test_decade_labels_are_powers_of_ten():
     for value in decade_labels(1e8, 1e16, limit=5):
         assert math.log10(value) == pytest.approx(round(math.log10(value)))
+
+
+def test_a_narrow_colour_bar_gets_no_decade_labels():
+    """A plume down its own axis is a tall narrow slice, and its bar is a couple
+    of hundred pixels wide -- ticks that read on a wide bar overlap into
+    '1.0e+12.0e+14'. The range labels are drawn separately and stay legible."""
+    assert scalar_bar_label_budget(207) == 0
+
+
+def test_a_wide_colour_bar_gets_labels_up_to_the_ceiling():
+    assert scalar_bar_label_budget(400) == 2
+    assert scalar_bar_label_budget(10_000) == 5
+
+
+def test_an_unknown_bar_width_falls_back_to_the_ceiling():
+    assert scalar_bar_label_budget(0) == 5
 
 
 def test_decade_labels_give_up_on_a_range_spanning_no_whole_decade():
@@ -704,28 +723,53 @@ def test_a_degenerate_extent_is_left_alone():
 # framing a 3-D view
 # --------------------------------------------------------------------------- #
 
-def test_the_view_fits_a_tall_body_without_clipping():
-    """The cylinder is 0.457 m along z and the camera looks along y."""
-    bounds = (0.22, 0.53, 0.0, 0.0762, -0.2286, 0.2286)
-    half = view_half_height(bounds, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
-                            aspect=4 / 3)
-    assert half >= 0.2286                    # the half-extent along up
-    assert half == pytest.approx(0.2286 * 1.06)
+#: The cylinder and plate of cases/markelov1999: 0.3175 m along x, 0.4572 m
+#: along z, viewed along -y. Half again as tall as it is wide.
+WALLS = (0.2223, 0.5398, 0.0, 0.0762, -0.2286, 0.2286)
+ALONG_Y = ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 
 
-def test_a_wide_body_is_fitted_by_width_not_height():
-    """Half the largest Cartesian extent would clip this one."""
+def test_the_viewport_is_shaped_by_the_geometry_not_by_a_fixed_ratio():
+    """A fixed 4:3 drew the markelov cylinder nearly twice too wide."""
+    width, _ = view_shape(WALLS, *ALONG_Y, height=700)
+    geometry_aspect = (WALLS[1] - WALLS[0]) / (WALLS[5] - WALLS[4])
+    assert width / 700 == pytest.approx(geometry_aspect, rel=1e-3)
+    assert width != int(round(700 * 4 / 3))
+
+
+def test_one_world_unit_is_the_same_number_of_pixels_across_and_down():
+    """Which is the whole of what 'represents the geometry' means here."""
+    height = 700
+    width, half_height = view_shape(WALLS, *ALONG_Y, height=height)
+    pixels_down = height / (2 * half_height)
+    # the parallel scale carries the padding; the width does not
+    pixels_across = width / ((WALLS[1] - WALLS[0]))
+    assert pixels_across == pytest.approx(pixels_down * 1.06, rel=1e-2)
+
+
+def test_the_viewport_follows_a_wide_body_too():
     bounds = (0.0, 4.0, 0.0, 0.1, -0.2, 0.2)
-    half = view_half_height(bounds, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
-                            aspect=1.0)
-    assert half == pytest.approx(2.0 * 1.06)     # driven by the 4 m x-extent
+    width, _ = view_shape(bounds, *ALONG_Y, height=200)
+    assert width == pytest.approx(200 * (4.0 / 0.4), rel=1e-3)
 
 
-def test_the_view_half_height_is_always_positive():
-    """A degenerate body must not produce a zero parallel scale."""
+def test_the_viewport_never_collapses_on_a_degenerate_body():
     degenerate = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
-    assert view_half_height(degenerate, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
-                            aspect=4 / 3) > 0.0
+    width, half_height = view_shape(degenerate, *ALONG_Y, height=700)
+    assert width >= 1
+    assert half_height > 0.0
+
+
+def test_view_extents_project_onto_the_camera_axes_not_the_cartesian_ones():
+    half_width, half_height = view_extents(WALLS, *ALONG_Y)
+    assert half_width == pytest.approx(0.5 * (WALLS[1] - WALLS[0]))
+    assert half_height == pytest.approx(0.5 * (WALLS[5] - WALLS[4]))
+
+
+def test_the_fixed_aspect_helper_still_fits_a_tall_body():
+    """Kept for a viewport whose width cannot follow the geometry."""
+    half = view_half_height(WALLS, *ALONG_Y, aspect=4 / 3)
+    assert half == pytest.approx(0.2286 * 1.06)
 
 
 # --------------------------------------------------------------------------- #

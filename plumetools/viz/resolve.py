@@ -19,9 +19,35 @@ from typing import Iterable, Sequence
 #: colouring it stretches floating-point noise across the whole palette.
 CONSTANT_TOLERANCE = 1e-12
 
-#: Most tick labels to put on a colour bar. Eight decades at one label each
-#: overlap into an unreadable smear at any bar width this package produces.
+#: Most tick labels to put on a colour bar, however wide it is.
 MAX_SCALAR_BAR_LABELS = 5
+
+#: Pixels an exponential tick label needs before it runs into its neighbour.
+#: Measured against the 16 pt default: "1.0e+14" is about 60 px wide, and the
+#: gap has to be bigger than the label.
+SCALAR_BAR_LABEL_PITCH = 110
+
+
+def scalar_bar_label_budget(bar_width_px: float,
+                            limit: int = MAX_SCALAR_BAR_LABELS) -> int:
+    """How many decade labels fit on a colour bar *bar_width_px* wide.
+
+    A tall narrow slice -- and a plume down its own axis is exactly that -- gets
+    a colour bar only a couple of hundred pixels across, where the decade ticks
+    that read perfectly on a wide one overlap into ``1.0e+12.0e+14``. The
+    minimum and maximum are drawn separately as range labels and are the two
+    that actually have to be legible, so on a narrow bar the answer is none.
+
+    Args:
+        bar_width_px: drawn width of the bar itself, not of the view.
+        limit: ceiling however wide it gets.
+
+    Returns:
+        A label count, possibly 0.
+    """
+    if bar_width_px <= 0:
+        return limit
+    return max(0, min(limit, int(bar_width_px // SCALAR_BAR_LABEL_PITCH) - 1))
 
 #: Names a ParaView Calculator expression may use that are not field arrays.
 CALCULATOR_FUNCTIONS = frozenset({
@@ -265,27 +291,22 @@ def _normalise(vector: Sequence[float]) -> tuple[float, float, float]:
     return tuple(component / length for component in vector)  # type: ignore[return-value]
 
 
-def view_half_height(bounds: Sequence[float], normal: Sequence[float],
-                     camera_up: Sequence[float], aspect: float,
-                     padding: float = VIEW_PADDING) -> float:
-    """The ``CameraParallelScale`` that fits *bounds* in the view.
+def view_extents(bounds: Sequence[float], normal: Sequence[float],
+                 camera_up: Sequence[float]) -> tuple[float, float]:
+    """Half-extents of *bounds* projected onto the camera's own axes.
 
-    ParaView's parallel scale is the half-**height** of the viewport in world
-    units, so fitting a box means projecting it onto the camera's own axes --
-    up, and ``normal x camera_up`` -- and taking whichever of the two needs more
-    room once the width is divided by the aspect ratio. Using half the largest
-    Cartesian extent instead, which is the obvious guess, clips the geometry
-    whenever the box is not square to the camera.
+    The camera sees along ``normal`` with ``camera_up`` up, so what ends up on
+    screen is the box measured along ``normal x camera_up`` (right) and
+    ``camera_up``. Those two numbers -- not any Cartesian extent -- are what
+    both the viewport aspect ratio and the parallel scale have to come from.
 
     Args:
         bounds: ``(x_min, x_max, y_min, y_max, z_min, z_max)``.
         normal: the direction the camera looks along.
         camera_up: the camera's up vector.
-        aspect: viewport width divided by height.
-        padding: fraction of extra room to leave around the geometry.
 
     Returns:
-        The half-height, always strictly positive.
+        ``(half_width, half_height)`` in world units.
     """
     up = _normalise(camera_up)
     right = _normalise((
@@ -299,11 +320,67 @@ def view_half_height(bounds: Sequence[float], normal: Sequence[float],
     along_up = [sum(c * u for c, u in zip(corner, up)) for corner in corners]
     along_right = [sum(c * r for c, r in zip(corner, right)) for corner in corners]
 
-    half_up = 0.5 * (max(along_up) - min(along_up))
-    half_right = 0.5 * (max(along_right) - min(along_right))
+    return (0.5 * (max(along_right) - min(along_right)),
+            0.5 * (max(along_up) - min(along_up)))
 
-    half_height = max(half_up, half_right / aspect if aspect > 0 else half_right)
-    return (half_height * padding) or 1.0
+
+def view_shape(bounds: Sequence[float], normal: Sequence[float],
+               camera_up: Sequence[float], height: int,
+               padding: float = VIEW_PADDING) -> tuple[int, float]:
+    """Viewport width and parallel scale that show *bounds* undistorted.
+
+    A 3-D view is not sized for you the way a ``Slice`` is: VifPara takes an
+    explicit width, and anything fixed there -- ``height * 4 / 3`` was the
+    obvious guess -- stretches the geometry by whatever the difference is. The
+    cylinder of ``cases/markelov1999`` is half again as tall as it is wide, and
+    a 4:3 frame drew it nearly twice too wide.
+
+    Deriving the width from the projected extents instead makes one world unit
+    the same number of pixels across and down, which is the whole of what
+    "represents the geometry" means here.
+
+    Args:
+        bounds: ``(x_min, x_max, y_min, y_max, z_min, z_max)``.
+        normal: the direction the camera looks along.
+        camera_up: the camera's up vector.
+        height: viewport height in pixels.
+        padding: fraction of extra room to leave around the geometry.
+
+    Returns:
+        ``(width_px, camera_parallel_scale)``. The scale is the half-height in
+        world units, which is what ParaView's ``CameraParallelScale`` means.
+    """
+    half_width, half_height = view_extents(bounds, normal, camera_up)
+    if half_height <= 0.0 or half_width <= 0.0:
+        # A flat or degenerate body: keep it square rather than divide by zero.
+        return max(int(height), 1), (max(half_width, half_height) * padding) or 1.0
+
+    width = int(round(height * half_width / half_height))
+    return max(width, 1), half_height * padding
+
+
+def view_half_height(bounds: Sequence[float], normal: Sequence[float],
+                     camera_up: Sequence[float], aspect: float,
+                     padding: float = VIEW_PADDING) -> float:
+    """The ``CameraParallelScale`` that fits *bounds* into a FIXED aspect view.
+
+    Kept for a viewport whose width is not free to follow the geometry. Where
+    it is, :func:`view_shape` is the better answer: it removes the distortion
+    rather than padding around it.
+
+    Args:
+        bounds: ``(x_min, x_max, y_min, y_max, z_min, z_max)``.
+        normal: the direction the camera looks along.
+        camera_up: the camera's up vector.
+        aspect: viewport width divided by height.
+        padding: fraction of extra room to leave around the geometry.
+
+    Returns:
+        The half-height, always strictly positive.
+    """
+    half_width, half_height = view_extents(bounds, normal, camera_up)
+    fitted = max(half_height, half_width / aspect if aspect > 0 else half_width)
+    return (fitted * padding) or 1.0
 
 
 def expression_fields(expression: str) -> set[str]:

@@ -75,7 +75,8 @@ from plumetools.viz.resolve import (
     nudge_plane_origin,
     resolve_field_name,
     resolve_times,
-    view_half_height,
+    scalar_bar_label_budget,
+    view_shape,
 )
 from plumetools.viz.spec import PlaneSpec, RenderTask, VizSpec, VizSpecError
 
@@ -730,13 +731,16 @@ class Renderer:
         if show_bar:
             view.set_color_bar_size(height=self.spec.image.bar_height)
             view.render_color_bar(layout, row=1, col=0)
-            extra.append(view.get_color_bar())
-            self._tune_scalar_bar(view.get_color_bar().get_render_view(),
-                                  log, scale)
+            colour_bar = view.get_color_bar()
+            extra.append(colour_bar)
+            self._tune_scalar_bar(
+                colour_bar.get_render_view(), log, scale,
+                bar_width_px=colour_bar.get_width() * image.bar_size)
         self._save(view, layout, filename, extra_views=extra)
 
     def _tune_scalar_bar(self, render_view: Any, log: bool,
-                         scale: tuple[float, float]) -> None:
+                         scale: tuple[float, float],
+                         bar_width_px: float = 0.0) -> None:
         """Stop a wide range's tick labels from printing on top of each other.
 
         ParaView labels a logarithmic scale at whatever interval it likes, which
@@ -771,10 +775,10 @@ class Renderer:
             put("AddRangeLabels", 1)
 
             if log:
-                labels = decade_labels(float(low), float(high))
-                if labels:
-                    put("UseCustomLabels", 1)
-                    put("CustomLabels", labels)
+                budget = scalar_bar_label_budget(bar_width_px)
+                labels = decade_labels(float(low), float(high), budget) if budget else []
+                put("UseCustomLabels", 1)
+                put("CustomLabels", labels)
 
     def _render_surface(self, plane: PlaneSpec, colour_map: ColorMap,
                         filename: str, show_bar: bool, log: bool,
@@ -794,10 +798,11 @@ class Renderer:
             normal = Vector3.from_list(list(plane.normal)).normalized()
             camera_up = Vector3.from_list(list(plane.camera_up))
             height = plane.height if plane.height is not None else image.height
-            width = int(round(height * 4 / 3))
             zoom = plane.zoom if plane.zoom is not None else image.zoom
-            half_height = view_half_height(bounds, plane.normal, plane.camera_up,
-                                           width / height)
+            # The viewport is sized from the geometry, not fixed at 4:3, so one
+            # world unit is the same number of pixels across as down.
+            width, half_height = view_shape(bounds, plane.normal,
+                                            plane.camera_up, height)
 
             layout = Layout([1])
             view = Visualization3D(
@@ -825,7 +830,8 @@ class Renderer:
             view.get_render_view().CameraParallelScale = half_height / zoom
             view.render(layout, row=0, col=0)
             if show_bar:
-                self._tune_scalar_bar(view.get_render_view(), log, scale)
+                self._tune_scalar_bar(view.get_render_view(), log, scale,
+                                      bar_width_px=width * image.bar_size)
             self._save(view, layout, filename)
         finally:
             self.case.set_mesh_regions(list(self.spec.sampling.mesh_regions))
