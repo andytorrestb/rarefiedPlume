@@ -36,9 +36,22 @@ Get the machinery working before committing the compute:
 ./AllrunCases --only Cases/ppc005/s0p5 --only Cases/ppc005/s1p5
 ```
 
-is the two cheapest cases — about 40 minutes — and exercises the whole
+is the two cheapest cases — about an hour — and exercises the whole
 generate → mesh → run → sample → render → dissect chain, including the
 determinism check on its first real pair.
+
+The matrix takes long enough that looking at it part way through is the normal
+state, not the exception. Everything downstream tolerates it:
+
+```bash
+./AllpostCases --keep-going      # cases that have not run report and are skipped
+./AllpostCases --analyse-only    # re-cut the sheets and tables from what exists
+```
+
+`AllrunCases` **continues** each case from its newest time directory rather than
+restarting it, so an interrupted matrix is finished by running it again; cases
+that already reached `endTime` report that and are skipped in seconds, and are
+not re-timed.
 
 ## The sweep
 
