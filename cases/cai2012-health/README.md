@@ -344,6 +344,19 @@ so a fix applied to one and not the other is caught rather than discovered.
 measures — occupancy per region, and the centreline error at *every* sampled
 frame rather than only the last — are what `cases/cai2012` does not do.
 
+> **A fix to a template script does not reach cases that are already
+> generated.** Cloning is a copy, and `./generate_cases.py --overwrite` would
+> destroy the results. Copy it across instead — the runner scripts are not
+> physical inputs, so replacing one does not invalidate a run that has already
+> happened:
+>
+> ```bash
+> for c in Cases/*/*/; do cp -p baseCase/Allaudit.py "$c"; done
+> ```
+>
+> `cases/cai2012` has the same property; it is noted here because this family
+> has nine copies rather than three.
+
 ## Results
 
 **Not yet run.** The machinery is validated end to end on the two cheapest
