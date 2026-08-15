@@ -197,6 +197,34 @@ The cost is real: these frames are one timestep's parcels and the speckle is
 shot noise. For a single averaged survey image, set `time: latest` and
 `prefer_mean: true`.
 
+### A window, for the series that wants the averaged ones after all
+
+The second reason above — the series changing quantity part way through — is a
+property of *when the frames were written*, not of averaging. Restrict the
+series to the times where the average exists and it goes away:
+
+```yaml
+sampling:
+  time: all
+  time_min: 5.658e-3      # dsmc.average_start_s: before this there is no *Mean
+  prefer_mean: true
+```
+
+`time_min`/`time_max` filter the written times **before** `time` selects from
+them, so `latest` means the latest frame inside the window. Both default to
+unbounded, and `manifest.yaml` records them either way — which frames were left
+out is not recoverable from a directory of images.
+
+This is what [`cases/cai2012-health`](../cases/cai2012-health/) uses, and it is
+the only reason a study can run a series on `prefer_mean: true` at all. That
+study is measuring how the running average converges, so the convergence the
+section above calls a defect is exactly its subject. Both settings are right;
+they answer different questions.
+
+A window that matches no written time is **not** an error — a case still inside
+its transient is a case part way through, and `AllpostCases` must not exit
+non-zero for one.
+
 ## The configuration file
 
 [`plumetools/viz/slices.yaml`](../plumetools/viz/slices.yaml) is the default and

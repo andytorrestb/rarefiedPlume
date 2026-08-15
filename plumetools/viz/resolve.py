@@ -73,7 +73,9 @@ class NothingToRender(RenderError):
     """
 
 
-def resolve_times(available: Sequence[float], wanted: str | float) -> list[float]:
+def resolve_times(available: Sequence[float], wanted: str | float, *,
+                  time_min: float | None = None,
+                  time_max: float | None = None) -> list[float]:
     """Turn ``sampling.time`` into actual time values.
 
     An explicit time is matched against what the solver wrote rather than
@@ -84,12 +86,34 @@ def resolve_times(available: Sequence[float], wanted: str | float) -> list[float
     Args:
         available: the reader's ``TimestepValues``, ascending.
         wanted: ``"latest"``, ``"first"``, ``"all"``, or a time in seconds.
+        time_min: drop times below this, or ``None`` for no lower bound.
+        time_max: drop times above this, or ``None`` for no upper bound.
 
     Returns:
         The times to render, ascending.
 
     Raises:
-        RenderError: if the case has no times, or the requested one is absent.
+        RenderError: if the requested time is absent, or is outside the window.
+        NothingToRender: if the case has no times at all, or none inside the
+            window.
+
+    The window is applied **before** the selector, so ``latest`` means the
+    latest time inside it and ``all`` means all of them inside it.
+
+    Why a window exists at all
+    --------------------------
+    ``fieldAverage`` writes no ``*Mean`` field before its ``timeStart``, so a
+    run that writes throughout its transient produces a series whose early
+    frames have only the instantaneous field to offer. With
+    ``sampling.prefer_mean`` on, those frames silently fall back and the series
+    changes quantity part way through -- the inhomogeneity ``docs/viz-slices.md``
+    warns about, which is invisible in the resulting pictures because both
+    quantities look like a plume.
+
+    ``time_min`` set to ``dsmc.average_start_s`` restricts the series to the
+    frames where the average actually exists. That is what
+    ``cases/cai2012-health`` does, and it is the only reason a study can turn
+    ``prefer_mean`` on over a series at all.
     """
     times = [float(value) for value in available]
     if not times:
@@ -97,20 +121,44 @@ def resolve_times(available: Sequence[float], wanted: str | float) -> list[float
             "the case has no time directories past 0 -- the solver wrote "
             "nothing. Run ./Allrun first.")
 
+    windowed = [value for value in times
+                if (time_min is None or value >= time_min - 1.0e-15)
+                and (time_max is None or value <= time_max + 1.0e-15)]
+    if not windowed:
+        # Not an error: a case part way through its transient has written
+        # times but none in the sampling window yet, and a study routinely
+        # holds cases at different stages. Same reasoning as NothingToRender.
+        raise NothingToRender(
+            f"no time in [{_bound(time_min)}, {_bound(time_max, '+inf')}]; the case "
+            f"wrote {format(times[0], 'g')} .. {format(times[-1], 'g')}. If "
+            f"this case is still running, its sampling window has not been "
+            f"reached yet.")
+
     if wanted == "latest":
-        return [times[-1]]
+        return [windowed[-1]]
     if wanted == "first":
-        return [times[0]]
+        return [windowed[0]]
     if wanted == "all":
-        return times
+        return windowed
 
     target = float(wanted)
-    for value in times:
+    for value in windowed:
         if math.isclose(value, target, rel_tol=1e-9, abs_tol=1e-15):
             return [value]
+    excluded = any(math.isclose(value, target, rel_tol=1e-9, abs_tol=1e-15)
+                   for value in times)
+    if excluded:
+        raise RenderError(
+            f"time {target:g} was written, but the sampling window "
+            f"[{_bound(time_min)}, {_bound(time_max, '+inf')}] excludes it.")
     raise RenderError(
         f"no time {target:g} in this case. It wrote: "
-        f"{', '.join(format(value, 'g') for value in times)}")
+        f"{', '.join(format(value, 'g') for value in windowed)}")
+
+
+def _bound(value: float | None, unbounded: str = "-inf") -> str:
+    """A window edge, for a message. ``None`` is unbounded, not zero."""
+    return unbounded if value is None else format(float(value), "g")
 
 
 def resolve_field_name(candidates: Iterable[str],

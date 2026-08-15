@@ -341,6 +341,76 @@ def test_a_case_that_never_ran_is_not_counted_as_a_failure():
 
 
 # --------------------------------------------------------------------------- #
+# the sampling window
+#
+# Without one, `prefer_mean: true` over a series silently changes quantity part
+# way through: fieldAverage writes no *Mean field before timeStart, so the early
+# frames fall back to the instantaneous field and look exactly as plausible.
+# --------------------------------------------------------------------------- #
+
+def test_the_window_is_applied_before_the_selector():
+    """`latest` inside a window is the latest windowed time, not the latest one.
+
+    Getting this backwards would apply `latest` first and then discard it,
+    rendering nothing at all for a case whose final time is what was wanted.
+    """
+    assert resolve_times(TIMES, "latest", time_max=0.004) == [0.004]
+    assert resolve_times(TIMES, "first", time_min=0.004) == [0.004]
+    assert resolve_times(TIMES, "all", time_min=0.004) == [0.004, 0.006]
+
+
+def test_the_window_edges_are_inclusive():
+    """average_start_s IS a written time, and it is the first averaged frame.
+
+    An exclusive lower edge would drop it, and the series would start one frame
+    late with nothing to say it had.
+    """
+    assert resolve_times(TIMES, "all", time_min=0.002, time_max=0.006) == TIMES
+
+
+def test_a_window_matching_no_frame_is_not_a_failure():
+    """A case still inside its transient has written times, none of them averaged.
+
+    That is a case part way through, not a broken one -- the same reasoning as
+    a case that never ran. Raising a hard error here would make AllpostCases
+    exit non-zero for every case still running.
+    """
+    with pytest.raises(NothingToRender, match="sampling window has not been"):
+        resolve_times(TIMES, "all", time_min=0.01)
+
+
+def test_a_window_excluding_a_requested_time_says_which_of_the_two_is_wrong():
+    """`no time 0.002` and `0.002 is outside the window` are different bugs.
+
+    One means the solver never wrote it; the other means the spec asked for a
+    frame it had already excluded. The same message for both sends you to the
+    wrong file.
+    """
+    with pytest.raises(RenderError, match="window"):
+        resolve_times(TIMES, 0.002, time_min=0.004)
+    with pytest.raises(RenderError, match="no time 0.005"):
+        resolve_times(TIMES, 0.005, time_min=0.004)
+
+
+def test_an_inverted_window_is_rejected_at_load_rather_than_drawing_nothing(tmp_path):
+    """time_min above time_max selects no frame however many were written."""
+    document = dict(MINIMAL, sampling={"time": "all", "time_min": 0.006,
+                                       "time_max": 0.002})
+    with pytest.raises(VizSpecError, match="empty"):
+        load_spec(write_spec(tmp_path, document))
+
+
+def test_the_window_defaults_to_unbounded(tmp_path):
+    """Every existing spec has no window, and must keep rendering every time."""
+    spec = load_spec(write_spec(tmp_path, dict(MINIMAL, sampling={"time": "all"})))
+    assert spec.sampling.time_min is None
+    assert spec.sampling.time_max is None
+    assert resolve_times(TIMES, spec.sampling.time,
+                         time_min=spec.sampling.time_min,
+                         time_max=spec.sampling.time_max) == TIMES
+
+
+# --------------------------------------------------------------------------- #
 # derived expressions
 # --------------------------------------------------------------------------- #
 

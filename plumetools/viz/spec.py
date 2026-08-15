@@ -131,6 +131,17 @@ class SamplingSpec:
             seconds. Resolved against the case's real time directories, so a
             time that was never written is an error rather than a silent
             snap to the nearest one.
+        time_min, time_max: restrict the series to a window in seconds, applied
+            *before* ``time`` selects from it. ``None`` is unbounded.
+
+            The use this exists for is ``prefer_mean`` over a series.
+            ``fieldAverage`` writes no ``*Mean`` field before its ``timeStart``,
+            so a run that writes throughout its transient gives those frames
+            nothing to reach for and they fall back to the instantaneous field
+            -- a series that changes quantity part way through and looks
+            entirely plausible either way. ``time_min: <average_start_s>``
+            keeps only the frames where the average exists. See
+            :func:`plumetools.viz.resolve.resolve_times`.
         prefer_mean: reach for ``<field>Mean`` whenever ``fieldAverage`` wrote
             one. On by default, and it should stay on -- an instantaneous
             ``rhoN`` image is a picture of shot noise.
@@ -148,14 +159,16 @@ class SamplingSpec:
     """
 
     time: str | float = "latest"
+    time_min: float | None = None
+    time_max: float | None = None
     prefer_mean: bool = True
     mesh_regions: tuple[str, ...] = ("internalMesh",)
     field_type: str = "CELLS"
     skip_constant_fields: bool = True
     length_scale_m: float | None = None
 
-    _KEYS = ("time", "prefer_mean", "mesh_regions", "field_type",
-             "skip_constant_fields", "length_scale_m")
+    _KEYS = ("time", "time_min", "time_max", "prefer_mean", "mesh_regions",
+             "field_type", "skip_constant_fields", "length_scale_m")
 
     @classmethod
     def from_raw(cls, raw: Any, where: str = "sampling") -> "SamplingSpec":
@@ -188,8 +201,29 @@ class SamplingSpec:
         if length_scale is not None:
             length_scale = _positive(length_scale, f"{where}.length_scale_m")
 
+        window = {}
+        for edge in ("time_min", "time_max"):
+            value = raw.get(edge)
+            if value is None:
+                window[edge] = None
+                continue
+            try:
+                window[edge] = float(value)
+            except (TypeError, ValueError):
+                raise VizSpecError(
+                    f"{where}.{edge}: expected a time in seconds, "
+                    f"got {value!r}") from None
+        if (window["time_min"] is not None and window["time_max"] is not None
+                and window["time_min"] > window["time_max"]):
+            raise VizSpecError(
+                f"{where}: time_min {window['time_min']:g} is above time_max "
+                f"{window['time_max']:g}, so the window is empty and nothing "
+                f"would ever be drawn")
+
         return cls(
             time=time,
+            time_min=window["time_min"],
+            time_max=window["time_max"],
             prefer_mean=bool(raw.get("prefer_mean", True)),
             mesh_regions=tuple(str(r) for r in regions),
             field_type=field_type,

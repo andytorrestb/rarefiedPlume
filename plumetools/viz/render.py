@@ -482,7 +482,9 @@ class Renderer:
             raise RenderError("the spec produced no images to draw "
                               "(every field disabled, or filtered out)")
 
-        times = resolve_times(self.reader.TimestepValues, self.spec.sampling.time)
+        times = resolve_times(self.reader.TimestepValues, self.spec.sampling.time,
+                              time_min=self.spec.sampling.time_min,
+                              time_max=self.spec.sampling.time_max)
         scene = pv.GetAnimationScene()
         scene.UpdateAnimationUsingDataTimeSteps()
 
@@ -1053,6 +1055,11 @@ class Renderer:
                 "times": [float(time) for time in times],
                 "prefer_mean": self.spec.sampling.prefer_mean,
                 "field_type": self.spec.sampling.field_type,
+                # Recorded even when unset: "which frames were left out" is not
+                # recoverable from a directory of images, and a series drawn
+                # with prefer_mean on is only homogeneous BECAUSE of the window.
+                "time_min": self.spec.sampling.time_min,
+                "time_max": self.spec.sampling.time_max,
             },
             "images": [
                 {
