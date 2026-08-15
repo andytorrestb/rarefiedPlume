@@ -675,12 +675,34 @@ def test_common_times_are_matched_by_name_not_by_float_tolerance(tmp_path):
                               tmp_path / "short") == ["0.0021211"]
 
 
-def test_a_time_the_caller_named_but_neither_case_wrote_is_an_error(tmp_path):
+def test_transient_frames_are_skipped_rather_than_failing_the_check(tmp_path):
+    """Both runs write throughout their transient, and fieldAverage has not
+    started then -- so most shared time directories have no *Mean field in
+    EITHER case. Treating that as a missing file would fail the check on every
+    pair; treating it as a comparison would count 15 empty passes as evidence.
+    """
+    for case in ("long", "short"):
+        _write_field(tmp_path / case / "0.002" / "rhoN", [1.0])       # transient
+        _write_field(tmp_path / case / "0.006" / "rhoNMean", [2.0])   # sampled
+
+    result = audit.compare_overlap(tmp_path / "long", tmp_path / "short",
+                                   fields=("rhoNMean",))
+    assert result["n_shared_times"] == 2
+    assert result["n_times"] == 1          # only the averaged one
+    assert result["n_compared"] == 1
+    assert result["all_identical"]
+
+
+def test_one_run_averaging_a_frame_the_other_did_not_is_a_divergence(tmp_path):
+    """Not a missing file. The two runs differ only in endTime and start
+    averaging at the same timeStart, so one having written rhoNMean where the
+    other did not means they did not do the same thing."""
     _write_field(tmp_path / "long" / "0.006" / "rhoNMean", [1.0])
-    _write_field(tmp_path / "short" / "0.006" / "rhoNMean", [1.0])
-    with pytest.raises(PostError, match="overlap check was told"):
+    (tmp_path / "short" / "0.006").mkdir(parents=True)
+
+    with pytest.raises(PostError, match="divergence"):
         audit.compare_overlap(tmp_path / "long", tmp_path / "short",
-                              fields=("rhoNMean",), times=["0.009"])
+                              fields=("rhoNMean",))
 
 
 # --------------------------------------------------------------------------- #

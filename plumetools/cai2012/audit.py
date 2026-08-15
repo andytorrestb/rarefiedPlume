@@ -437,7 +437,7 @@ def file_digest(path: Path) -> str:
 
 
 def compare_field(long_dir: Path, short_dir: Path, field: str,
-                  time: str) -> FieldComparison:
+                  time: str) -> FieldComparison | None:
     """Compare one field between two cases at one time.
 
     Args:
@@ -447,20 +447,29 @@ def compare_field(long_dir: Path, short_dir: Path, field: str,
         time: a time directory both wrote.
 
     Returns:
-        A :class:`FieldComparison`.
+        A :class:`FieldComparison`, or ``None`` when **neither** case has the
+        field at this time. That is the normal state for a frame written during
+        the transient: ``fieldAverage`` had not started, so no ``*Mean`` field
+        exists in either run and there is nothing to compare. Both cases write
+        throughout their transient, so most shared times are of this kind.
 
     Raises:
-        PostError: if either file is missing -- the caller chose this time
-            because both cases were supposed to have it, so an absent file is a
-            bug in the selection, not a result.
+        PostError: if **one** case has the field and the other does not. That
+            is not a missing comparison, it is a disagreement about what was
+            written -- the two runs are supposed to be the same run truncated,
+            so one having averaged a frame the other did not is exactly the
+            kind of divergence this check exists to find.
     """
     left = Path(long_dir) / time / field
     right = Path(short_dir) / time / field
-    for path in (left, right):
-        if not path.is_file():
-            raise PostError(
-                f"no {field} at {path}; the overlap check was told both cases "
-                f"wrote time {time}")
+    if not left.is_file() and not right.is_file():
+        return None
+    if not left.is_file() or not right.is_file():
+        present, absent = (left, right) if left.is_file() else (right, left)
+        raise PostError(
+            f"{present} exists but {absent} does not. These two runs differ "
+            f"only in endTime, so one averaging a frame the other did not is a "
+            f"divergence, not a missing file.")
 
     if file_digest(left) == file_digest(right):
         return FieldComparison(field=field, time=time, identical=True,
@@ -547,17 +556,29 @@ def compare_overlap(long_dir: Path, short_dir: Path, *,
     selected = list(times) if times is not None else common_times(long_dir,
                                                                   short_dir)
     comparisons = []
+    compared_times = []
     for time in selected:
+        found = False
         for name in fields:
-            comparisons.append(compare_field(long_dir, short_dir, name, time))
+            comparison = compare_field(long_dir, short_dir, name, time)
+            if comparison is None:
+                continue
+            comparisons.append(comparison)
+            found = True
+        if found:
+            compared_times.append(time)
 
     differing = [c for c in comparisons if not c.identical]
     worst = max(differing, key=lambda c: c.max_rel_diff, default=None)
     return {
         "long": str(long_dir).replace("\\", "/"),
         "short": str(short_dir).replace("\\", "/"),
-        "n_times": len(selected),
-        "times": selected,
+        # The times where an averaged field actually existed, not every shared
+        # time directory: both runs write throughout their transient, and those
+        # frames carry no *Mean field in either.
+        "n_times": len(compared_times),
+        "n_shared_times": len(selected),
+        "times": compared_times,
         "n_compared": len(comparisons),
         "all_identical": not differing,
         "worst": worst.as_dict() if worst is not None else None,
@@ -569,16 +590,18 @@ def overlap_report(result: dict) -> list[str]:
     """The overlap check as printed lines, with the verdict spelled out."""
     lines = [
         f"Overlap: {result['short']} against {result['long']}",
-        f"  {result['n_compared']} field(s) over {result['n_times']} shared "
-        f"time(s)",
+        f"  {result['n_compared']} field(s) over {result['n_times']} averaged "
+        f"time(s), of {result.get('n_shared_times', result['n_times'])} shared",
     ]
     if result["n_compared"] == 0:
         lines.append(
-            "  NOTHING COMPARED. The two cases share no time directory, which "
-            "means the\n"
-            "  write schedules differ -- so they are not the same run "
-            "truncated, and the\n"
-            "  matrix's redundancy assumption does not hold.")
+            "  NOTHING COMPARED. The two cases share no time directory with an "
+            "averaged\n"
+            "  field in it. Either the write schedules differ -- so they are "
+            "not the same\n"
+            "  run truncated and the matrix's redundancy assumption does not "
+            "hold -- or\n"
+            "  neither has reached its sampling window.")
         return lines
     if result["all_identical"]:
         lines.append(
