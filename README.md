@@ -47,7 +47,11 @@ plumetools/          the analytical model and OpenFOAM I/O, as a package
   markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
                        mesh, flux verification, resolution, checks, post
   cai2012/             the Cai & Wang 2012 family: collisionless circular plume,
-                       its own config/gas/analytical/mesh/study/post
+                       its own config/gas/analytical/mesh/study/post, plus
+                       health.py (the statistical-quality sweep) and audit.py
+                       (measured parcel occupancy, determinism, the sweep table)
+  viz/                 YAML-driven ParaView slice imagery; video.py and
+                       dissect.py need ffmpeg but not ParaView
 applications/        custom OpenFOAM code
   dsmcBoundaryModels/  plumeFieldInflow -- per-face, patch-selected DSMC inflow
 cases/               standard OpenFOAM cases -- see the scope split below
@@ -65,7 +69,7 @@ Cases keep the ordinary OpenFOAM layout (`constant/`, `system/`, `0/`).
 
 | Status | Cases |
 |---|---|
-| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
+| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `cai2012-health` (statistical health of the above) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
 | **Archived** | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` · `wake-cylinder` |
 
 Archived cases are one-off studies kept for historical record. They are frozen:
@@ -214,6 +218,9 @@ archived output is not achievable. See
   paper values, assumptions, and every difference from Cai's axisymmetric setup
 - [`cases/cai2012/README.md`](cases/cai2012/README.md) — running the collisionless
   circular-plume family
+- [`cases/cai2012-health/README.md`](cases/cai2012-health/README.md) — how much
+  statistical noise that family's answer carries: a 3 × 3 sweep over parcels per
+  cell and averaging duration, judged through imagery
 - [`docs/mesh.md`](docs/mesh.md) — geometry, the 5-block O-grid, and why
   generation had to wait for the centroid fix
 - [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,

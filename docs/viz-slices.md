@@ -69,6 +69,7 @@ directories and resets the session between them.
 |---|---|
 | `cases/cai2012` | [`cases/cai2012/viz.yaml`](../cases/cai2012/viz.yaml) |
 | `cases/markelov1999` | [`cases/markelov1999/viz.yaml`](../cases/markelov1999/viz.yaml) |
+| `cases/cai2012-health` | [`cases/cai2012-health/viz.yaml`](../cases/cai2012-health/viz.yaml) |
 
 Each sits beside the `AllpostCases` that uses it, and each is what that study
 draws by default. They are **not** shared: the two families have different
