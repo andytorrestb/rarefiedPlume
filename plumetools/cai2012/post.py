@@ -199,13 +199,17 @@ class SampledField:
 
 
 def read_case(case_dir: Path, species_mass_kg: float, *,
-              time: str | None = None) -> SampledField:
+              time: str | None = None,
+              mesh_time: str | None = None) -> SampledField:
     """Read the averaged fields and derive velocity and temperature.
 
     Args:
         case_dir: the case directory.
         species_mass_kg: molecular mass, for ``R = k_B/m``.
         time: the time directory, or ``None`` for the latest.
+        mesh_time: where to read ``C`` and ``V`` from, if not from *time*.
+            ``None`` reads them alongside the fields, which is what a single
+            post-processing pass wants.
 
     Returns:
         A :class:`SampledField`.
@@ -214,6 +218,21 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
         PostError: for a missing time directory, a missing field, or missing
             cell centres. The last one names the command that writes them,
             because it is a post-processing step people forget.
+
+    Reading the geometry from another time
+    --------------------------------------
+    ``C`` and ``V`` are properties of the mesh, and the mesh does not move: the
+    same 42 MB of cell centres and 18 MB of volumes are identical in every time
+    directory. ``postProcess -func writeCellCentres`` writes them wherever it is
+    pointed, so a study that post-processes *every* written frame -- which is
+    what ``cases/cai2012-health`` does to get an error-against-time curve --
+    would otherwise carry 60 MB of duplicated geometry per frame, several
+    gigabytes over a matrix, to say the same thing each time.
+
+    ``mesh_time`` points the geometry at one directory and the fields at
+    another. It is checked against the field arrays' length like any other
+    read, so pointing it at a *different mesh* fails on the cell count rather
+    than silently pairing one case's densities with another's cell centres.
 
     Cells with no molecules have ``rhoM = 0``; their velocity and temperature are
     set to zero rather than to ``0/0``. That is not the same as "the gas there is
@@ -227,16 +246,22 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
     if not directory.is_dir():
         raise PostError(f"no time directory {directory}")
 
-    centres_path = directory / "C"
+    geometry_time = mesh_time or time
+    geometry_dir = case_dir / geometry_time
+    if not geometry_dir.is_dir():
+        raise PostError(
+            f"no time directory {geometry_dir} to read the cell centres from")
+
+    centres_path = geometry_dir / "C"
     if not centres_path.is_file():
         raise PostError(
             f"no cell centres at {centres_path}. They are written by\n"
-            f"    postProcess -func writeCellCentres -time {time}\n"
+            f"    postProcess -func writeCellCentres -time {geometry_time}\n"
             f"which ./Allpost runs. Without them there is no way to say where a "
             f"sampled value is.")
     centres = read_internal_field(centres_path)
 
-    volumes_path = directory / "V"
+    volumes_path = geometry_dir / "V"
     if volumes_path.is_file():
         volumes = read_internal_field(volumes_path)
     else:
@@ -257,6 +282,16 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
         array = read_internal_field(path)
         if array.shape[0] == 1 and centres.shape[0] > 1:
             array = np.broadcast_to(array, (centres.shape[0],) + array.shape[1:])
+        elif array.shape[0] != centres.shape[0]:
+            # Only reachable when the geometry came from somewhere else, and
+            # the one failure mode that matters: a cell count that disagrees
+            # means these densities belong to a different mesh, and pairing
+            # them positionally would put every sample in the wrong place
+            # while producing a plot that looks entirely ordinary.
+            raise PostError(
+                f"{path} has {array.shape[0]:,} values but the cell centres in "
+                f"{centres_path} describe {centres.shape[0]:,} cells. These are "
+                f"not the same mesh.")
         values[name] = np.asarray(array, dtype=np.float64)
 
     rho_m = values["rhoMMean"]

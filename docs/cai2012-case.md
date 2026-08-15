@@ -513,6 +513,14 @@ Cell centres and volumes come from OpenFOAM's own function objects
 (`postProcess -func writeCellCentres` / `writeCellVolumes`), which `./Allpost`
 runs.
 
+They are properties of the **mesh**, and the mesh does not move, so `C` and `V`
+are identical in every time directory — 60 MB of them. `./postProcess.py
+--mesh-time` reads them from one directory while reading the fields from
+another, which is what makes it affordable to post-process every written frame
+of a run rather than only the last. The cell count is checked, so pointing it at
+a different mesh fails rather than pairing one case's densities with another's
+cell centres.
+
 ---
 
 ## 8. How to read the numbers

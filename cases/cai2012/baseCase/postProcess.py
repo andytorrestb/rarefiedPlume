@@ -3,6 +3,12 @@
 
     ./postProcess.py                 the latest time
     ./postProcess.py --time 0.05     a specific time directory
+    ./postProcess.py --time 0.05 --mesh-time 0.02
+                                     fields from one time, cell centres from
+                                     another. The mesh does not move, so C and V
+                                     are the same in every time directory and
+                                     writing 60 MB of them into each one only to
+                                     post-process a series is waste.
 
 Produces, under ``results/``:
 
@@ -38,6 +44,13 @@ def main(argv) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--time", default=None,
                         help="time directory to read (default: the latest)")
+    parser.add_argument("--mesh-time", default=None,
+                        help="time directory to read C and V from (default: "
+                             "the same one as the fields)")
+    parser.add_argument("--results", default=None, metavar="DIR",
+                        help="where to write results (default: ./results). A "
+                             "series post-processed frame by frame needs one "
+                             "directory per frame, or each overwrites the last.")
     args = parser.parse_args(argv[1:])
 
     cfg = load_case_config(HERE)
@@ -46,7 +59,8 @@ def main(argv) -> int:
     plan = mesh.plan(cfg, geom, exit_state)
 
     try:
-        sampled = post.read_case(HERE, cfg.gas.mass_kg, time=args.time)
+        sampled = post.read_case(HERE, cfg.gas.mass_kg, time=args.time,
+                                 mesh_time=args.mesh_time)
     except post.PostError as exc:
         print(f"postProcess: {exc}", file=sys.stderr)
         return 1
@@ -101,7 +115,7 @@ def main(argv) -> int:
         "centerline": {k: v for k, v in metrics.items()},
     }
 
-    results = HERE / "results"
+    results = Path(args.results) if args.results else HERE / "results"
     for path in post.write_results(results, profile, plane, document):
         print(f"    wrote {path}")
 

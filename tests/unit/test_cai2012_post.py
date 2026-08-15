@@ -212,6 +212,63 @@ def test_missing_cell_volumes_fall_back_to_unweighted(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# geometry from another time
+#
+# The mesh does not move, so C and V are identical in every time directory.
+# A study that post-processes every written frame -- which is how an
+# error-against-averaging-time curve is built -- would otherwise duplicate
+# 60 MB of geometry per frame.
+# --------------------------------------------------------------------------- #
+
+def test_the_geometry_can_come_from_another_time(tmp_path):
+    """Fields from one directory, C and V from another, same answer.
+
+    If mesh_time were ignored, this would raise on the missing C rather than
+    read it from where it was pointed -- and a study relying on it would write
+    the geometry into every frame after all.
+    """
+    cfg, geom, exit_state, _, _ = derived(tmp_path / "case")
+    directory = make_case(tmp_path / "case", geom, exit_state)
+    reference = post.read_case(directory, MASS, time="0.05")
+
+    (directory / "0.10").mkdir()
+    for name in ("rhoNMean", "rhoMMean", "momentumMean", "linearKEMean"):
+        (directory / "0.05" / name).rename(directory / "0.10" / name)
+
+    sampled = post.read_case(directory, MASS, time="0.10", mesh_time="0.05")
+    assert sampled.time == "0.10"
+    assert np.allclose(sampled.centres, reference.centres)
+    assert np.allclose(sampled.volumes, reference.volumes)
+    assert np.allclose(sampled.number_density, reference.number_density)
+
+
+def test_geometry_from_a_different_mesh_fails_on_the_cell_count(tmp_path):
+    """Pairing one mesh's densities with another's centres would plot cleanly.
+
+    Every sample would sit at the wrong place, and nothing about the resulting
+    centreline would look unusual -- so the cell count is checked rather than
+    trusted.
+    """
+    cfg, geom, exit_state, _, _ = derived(tmp_path / "case")
+    directory = make_case(tmp_path / "case", geom, exit_state)
+    coarse = make_case(tmp_path / "coarse", geom, exit_state, time="0.05", nx=8)
+    (coarse / "0.05" / "C").replace(directory / "0.05" / "C")
+
+    with pytest.raises(post.PostError, match="not the same mesh"):
+        post.read_case(directory, MASS)
+
+
+def test_an_absent_mesh_time_is_named_rather_than_reported_as_missing_centres(
+        tmp_path):
+    """A typo'd --mesh-time should say the directory is absent, not that
+    postProcess -func writeCellCentres was never run: the fix is different."""
+    cfg, geom, exit_state, _, _ = derived(tmp_path / "case")
+    directory = make_case(tmp_path / "case", geom, exit_state)
+    with pytest.raises(post.PostError, match="no time directory"):
+        post.read_case(directory, MASS, mesh_time="0.99")
+
+
+# --------------------------------------------------------------------------- #
 # A / B / C -- the centreline
 # --------------------------------------------------------------------------- #
 
