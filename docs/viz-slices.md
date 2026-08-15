@@ -88,7 +88,7 @@ What actually differs:
 | `y = 0` is | the middle of the mesh | the symmetry plane, **on the mesh edge** |
 | solid bodies | none — two vacuums and an inlet | a cylinder and a plate |
 | `q`, `fD` | not asked for; there is no wall to strike | drawn, on the wall patches |
-| averaging | `fieldAverage` output exists | runs stop before `timeStart`, so the fallback applies |
+| `*Mean` fields | written from `timeStart` onward | none yet — runs stop before `timeStart` |
 
 Both cut one plane, not the default three: rendering is roughly half a minute an
 image, so a four-case study on three planes is an hour bolted onto a step that
@@ -97,6 +97,70 @@ else on demand.
 
 To change what a study draws, edit its `viz.yaml`. To change it for one run
 only, `./AllpostCases --viz-spec mine.yaml`.
+
+## Time series
+
+Both studies render **a frame per written time**, each field in its own folder:
+
+```
+Cases/Kn100/results/viz/
+    rhoN/rhoN_0000.png  rhoN_0001.png  ...  rhoN_0004.png
+    U/U_0000.png        ...
+    Ttra/ ...
+    manifest.yaml
+```
+
+```yaml
+sampling:
+  time: all                     # 'latest' for one frame; ~5x quicker
+output:
+  subdirectory: "{requested}"
+  filename: "{requested}_{index}"
+```
+
+Straight into a video encoder, because the glob is already in order:
+
+```bash
+ffmpeg -framerate 4 -pattern_type glob -i 'rhoN/rhoN_*.png' rhoN.mp4
+```
+
+Three things about a series are not the same as for a single image.
+
+### Order frames by `{index}`, never `{time}`
+
+Times are formatted with `%g`, so `0.0021211` and `0.00990533` come out
+different widths and sort into the wrong order in every shell glob and file
+browser — which is the order the encoder would then use. `{index}` is
+zero-padded and always sorts. The manifest records the real time of every frame.
+
+### The colour range is pinned across the whole series, automatically
+
+Autoscaling each frame to its own data is right for one survey image and ruinous
+for a series: the scale moves underneath the flow, so a plume filling a vacuum
+looks like a plume that is not changing at all, and no two frames can be
+compared. The renderer therefore scans every time first and colours the whole
+series on the union. It costs one slice update per plane per time — one probe
+reports every array at once — which is small beside the rendering it corrects.
+
+Pinning still has to be explicit *across cases*: each case gets its own union,
+so the Kn = 100 and Kn = 0.01 series use different scales. Set `range:` on the
+field to compare them side by side.
+
+### A series wants the instantaneous fields, not the averaged ones
+
+Both study specs set `prefer_mean: false`, which is the opposite of the advice
+for a single image. Two reasons:
+
+- `rhoNMean` is a **running average** accumulated from `fieldAverage`'s
+  `timeStart`. A series of it shows the average converging, not the flow
+  evolving — by construction it barely moves.
+- It keeps the series homogeneous. With `prefer_mean` on, early times have no
+  `*Mean` field and fall back while later ones do not, so the series would
+  silently change quantity part way through.
+
+The cost is real: these frames are one timestep's parcels and the speckle is
+shot noise. For a single averaged survey image, set `time: latest` and
+`prefer_mean: true`.
 
 ## The configuration file
 
@@ -247,16 +311,23 @@ perfectly correct, which is why nobody notices.
 (VifPara's own `camera_up × normal` sizes the viewport. It is not the screen axis
 and it points the other way.)
 
-### `prefer_mean` is on, and should stay on
+### `prefer_mean` depends on whether you are drawing one image or a series
 
-A single-timestep `rhoN` is one step's worth of parcels — `DSMCCloud::resetFields`
-zeroes it every step — so an instantaneous image is a picture of shot noise that
-looks entirely plausible. `--instantaneous` turns it off; it is useful for
-judging particle statistics and for nothing else.
+For **one image**, leave it on. A single-timestep `rhoN` is one step's worth of
+parcels — `DSMCCloud::resetFields` zeroes it every step — so an instantaneous
+image is a picture of shot noise that looks entirely plausible. `--instantaneous`
+turns it off; on a single image that is useful for judging particle statistics
+and for nothing else.
 
-Before `fieldAverage`'s `timeStart` there are no `*Mean` fields at all. The
-renderer falls back to the instantaneous field and prints a `note` line saying
-so, rather than drawing nothing.
+For a **series**, turn it off, as both study specs do — see
+[Time series](#a-series-wants-the-instantaneous-fields-not-the-averaged-ones)
+above. The averaged field is a running average and barely moves; the
+instantaneous one is the only one that evolves.
+
+Before `fieldAverage`'s `timeStart` there are no `*Mean` fields at all. With
+`prefer_mean` on, the renderer falls back to the instantaneous field and prints
+a `note` saying so, rather than drawing nothing — which is also why a series
+left on `prefer_mean` would change quantity part way through.
 
 ### `q` and `fD` cannot be sliced
 

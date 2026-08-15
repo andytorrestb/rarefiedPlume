@@ -280,6 +280,7 @@ class RenderedImage:
     requested_field: str
     plane: str
     time: float
+    frame: int
     value_min: float
     value_max: float
     log: bool
@@ -323,6 +324,8 @@ class Renderer:
         self.skipped: list[SkippedImage] = []
         self._origins: dict[str, tuple[float, float, float]] = {}
         self._surface_regions: list[str] | None = None
+        #: (field, plane) -> the colour range pinned across a whole series.
+        self._series_ranges: dict[tuple[str, str], tuple[float, float]] = {}
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -350,23 +353,49 @@ class Renderer:
             directory = self.facts.directory / directory
         return directory
 
-    def _filename(self, task: RenderTask, resolved_field: str, time: float,
-                  many_times: bool) -> str:
-        name = self.spec.output.filename.format(
-            field=resolved_field,
-            plane=task.plane_name,
-            case=self.facts.name,
-            time=format(time, "g"),
-        )
-        # Rendering several times into one template that does not mention the
-        # time would write each image over the last.
-        if many_times and "{time}" not in self.spec.output.filename:
-            name = f"{name}_t{format(time, 'g')}"
+    def _placeholders(self, task: RenderTask, resolved_field: str, time: float,
+                      index: int) -> dict[str, str]:
+        return {
+            "field": resolved_field,
+            "requested": task.field.name,
+            "plane": task.plane_name,
+            "case": self.facts.name,
+            "time": format(time, "g"),
+            "index": f"{index:04d}",
+        }
+
+    def _image_name(self, task: RenderTask, resolved_field: str, time: float,
+                    index: int, many_times: bool) -> str:
+        """The image's path relative to :attr:`output_dir`, without ``.png``.
+
+        Returned as a relative path rather than a bare name because VifPara's
+        exporter builds its target by string concatenation -- ``plot_path +
+        filename + ".png"`` -- so a subdirectory belongs in the filename. The
+        directory is created here, since nothing downstream will.
+
+        A per-field subdirectory is what makes a time series usable: one folder
+        of frames per field, in index order, ready to hand to a video encoder.
+        """
+        output = self.spec.output
+        fields = self._placeholders(task, resolved_field, time, index)
+
+        name = output.filename.format(**fields)
+        # Several times through a template that distinguishes them by nothing
+        # would write each frame over the last.
+        if (many_times and "{index}" not in output.filename
+                and "{time}" not in output.filename):
+            name = f"{name}_{index:04d}"
+
+        relative = output.subdirectory.format(**fields) if output.subdirectory else ""
+        if relative:
+            (self.output_dir / relative).mkdir(parents=True, exist_ok=True)
+            return f"{relative}/{name}"
         return name
 
     # -- the pipeline ------------------------------------------------------- #
 
-    def _build_derived(self, time: float, available: Iterable[str]) -> Any:
+    def _build_derived(self, time: float, available: Iterable[str],
+                       quiet: bool = False) -> Any:
         """Chain a Calculator per derived field onto the reader.
 
         Returns the tail of the chain, which is the reader itself when the spec
@@ -389,7 +418,8 @@ class Renderer:
                     candidate = entry.resolved_expression(
                         use_mean, self.facts.substitutions)
                 except VizSpecError as exc:
-                    self._skip(entry.name, "-", time, str(exc))
+                    if not quiet:
+                        self._skip(entry.name, "-", time, str(exc))
                     expression = None
                     missing = []
                     break
@@ -399,14 +429,14 @@ class Renderer:
                 absent = sorted(expression_fields(candidate) - present)
                 if not absent:
                     expression = candidate
-                    if use_mean is not prefer_mean:
+                    if use_mean is not prefer_mean and not quiet:
                         print(f"    note  {entry.name}: no averaged fields at "
                               f"this time; derived from the instantaneous ones, "
                               f"which are one timestep's parcels")
                     break
                 missing = missing or absent
             if expression is None:
-                if missing:
+                if missing and not quiet:
                     self._skip(entry.name, "-", time,
                                f"expression needs {missing}, which this time "
                                f"does not have")
@@ -458,19 +488,96 @@ class Renderer:
         print(f"    case        {self.facts.foam_file}")
         print(f"    output      {self.output_dir}")
         print(f"    times       {', '.join(format(t, 'g') for t in times)}")
-        print(f"    tasks       {len(tasks)}")
+        print(f"    tasks       {len(tasks)} x {len(times)} time(s) "
+              f"= {len(tasks) * len(times)} image(s)")
         print()
 
-        for time in times:
+        if len(times) > 1:
+            self._fix_series_ranges(tasks, times)
+
+        for index, time in enumerate(times):
             scene.AnimationTime = time
-            self._render_time(tasks, time, many_times=len(times) > 1)
+            if len(times) > 1:
+                print(f"--- frame {index:04d}   t = {format(time, 'g')}")
+            self._render_time(tasks, time, index, many_times=len(times) > 1)
 
         if self.spec.output.manifest:
             self._write_manifest(times)
         return self.written
 
+    def _fix_series_ranges(self, tasks: Sequence[RenderTask],
+                           times: Sequence[float]) -> None:
+        """Pin each field's colour range across the whole series, once.
+
+        Autoscaling every frame to its own data is right for a single survey
+        image and ruinous for a series: the colour scale changes underneath the
+        flow, so a plume filling a vacuum looks like a plume that is not
+        changing at all, and nothing in the animation can be compared with
+        anything else in it. The range has to be the union over every frame,
+        and it has to be known before the first one is drawn.
+
+        The pass costs one slice update per plane per time -- not per field,
+        because one probe reports every array at once -- so it is small beside
+        the rendering it corrects.
+        """
+        association = self.spec.sampling.field_type
+        derived = self.spec.derived_by_name
+        union: dict[tuple[str, str], tuple[float, float]] = {}
+
+        print(f"    scanning {len(times)} time(s) to pin the colour ranges "
+              f"(a series that rescales every frame cannot be read)")
+
+        for time in times:
+            available = array_ranges(self.reader, time, association)
+            if not available:
+                continue
+            source = self._build_derived(time, available, quiet=True)
+            if source is not self.reader:
+                # The Calculator's own arrays -- U, Ttra -- exist only on its
+                # output. Probing the bare reader would find neither, and they
+                # would be the two fields left rescaling every frame.
+                available = array_ranges(source, time, association)
+            probes: dict[str, dict[str, tuple[float, ...]]] = {}
+
+            for task in tasks:
+                field, plane = task.field, task.plane
+                if plane is None:
+                    continue
+                resolved = resolve_field_name(
+                    field.candidate_names(self.spec.prefer_mean_for(field),
+                                          derived),
+                    available)
+                if resolved is None:
+                    continue
+
+                if field.resolve_kind(derived) is FieldKind.VOLUME:
+                    if plane.name not in probes:
+                        probes[plane.name] = self._probe_slice(
+                            source, plane, time, association, quiet=True)
+                    ranges = probes[plane.name]
+                else:
+                    ranges = self._probe_surface(time, association)
+                if resolved not in ranges:
+                    continue
+
+                low, high = component_range(ranges[resolved],
+                                            field.resolve_component(derived))
+                key = (field.name, plane.name)
+                if key in union:
+                    previous = union[key]
+                    union[key] = (min(previous[0], low), max(previous[1], high))
+                else:
+                    union[key] = (low, high)
+
+            for probe in getattr(self, "_probe_objects", []):
+                pv.Delete(probe)
+            self._probe_objects = []
+
+        self._series_ranges = union
+        print()
+
     def _render_time(self, tasks: Sequence[RenderTask], time: float,
-                     many_times: bool) -> None:
+                     index: int, many_times: bool) -> None:
         association = self.spec.sampling.field_type
 
         available = array_ranges(self.reader, time, association)
@@ -544,6 +651,12 @@ class Renderer:
             low, high = component_range(geometry_ranges[resolved], component)
             log = field.resolve_log(derived)
 
+            # A series is scaled once, over every frame, so the colours mean the
+            # same thing from one to the next.
+            series = self._series_ranges.get((field.name, plane.name))
+            if series is not None:
+                low, high = series
+
             if field.range is not None:
                 scale = field.range
             else:
@@ -559,7 +672,7 @@ class Renderer:
                     scale = (low, high if high > low else low + 1.0)
 
             # -- draw it ------------------------------------------------------ #
-            filename = self._filename(task, resolved, time, many_times)
+            filename = self._image_name(task, resolved, time, index, many_times)
             colour_map = self._colour_map(field, resolved, component, log, scale,
                                           derived)
             show_bar = (field.color_bar if field.color_bar is not None
@@ -574,10 +687,10 @@ class Renderer:
             path = self.output_dir / f"{filename}.png"
             self.written.append(RenderedImage(
                 path=path, field=resolved, requested_field=field.name,
-                plane=task.plane_name, time=time,
+                plane=task.plane_name, time=time, frame=index,
                 value_min=scale[0], value_max=scale[1], log=log,
                 component=component, kind=kind.value))
-            print(f"    wrote {path.name:<44} "
+            print(f"    wrote {filename + '.png':<44} "
                   f"[{scale[0]:.3e}, {scale[1]:.3e}]{'  log' if log else ''}")
 
         for probe in getattr(self, "_probe_objects", []):
@@ -609,7 +722,8 @@ class Renderer:
         return origin
 
     def _probe_slice(self, source: Any, plane: PlaneSpec, time: float,
-                     association: str) -> dict[str, tuple[float, ...]]:
+                     association: str, quiet: bool = False
+                     ) -> dict[str, tuple[float, ...]]:
         """Ranges of every array on this cut, so the colour scale fits the image.
 
         The whole-domain range would be wrong for any plane that misses the
@@ -621,7 +735,7 @@ class Renderer:
         probe.SliceType.Normal = list(plane.normal)
         ranges = array_ranges(probe, time, association)
 
-        if not ranges:
+        if not ranges and not quiet:
             print(f"    note  plane '{plane.name}' cuts nothing: the origin "
                   f"{list(self.plane_origin(plane))} is outside the mesh, whose "
                   f"bounds are "
@@ -904,11 +1018,14 @@ class Renderer:
             },
             "images": [
                 {
-                    "file": entry.path.name,
+                    # Relative, because a series puts each field in its own
+                    # subdirectory and the bare name would not locate it.
+                    "file": entry.path.relative_to(self.output_dir).as_posix(),
                     "field": entry.field,
                     "requested": entry.requested_field,
                     "plane": entry.plane,
                     "time": float(entry.time),
+                    "frame": int(entry.frame),
                     "min": float(entry.value_min),
                     "max": float(entry.value_max),
                     "log": bool(entry.log),

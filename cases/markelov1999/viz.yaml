@@ -25,20 +25,41 @@
 version: 1
 extends: default
 
+# --- where the frames go ------------------------------------------------------
+# One folder per field, frames numbered in time order:
+#
+#   Cases/gap06in/p005psi/results/viz/rhoN/rhoN_0000.png
+#                                          rhoN_0001.png ...
+#                                     q/q_0000.png ...
+#                                     manifest.yaml
+#
+# {index} and NOT {time} in the name: times are formatted with %g and sort into
+# the wrong order in a shell glob, which is the order a video encoder would then
+# use. The manifest records the real time of every frame.
+output:
+  subdirectory: "{requested}"
+  filename: "{requested}_{index}"
+
 # --- which data ---------------------------------------------------------------
 sampling:
-  time: latest
-  prefer_mean: true        # rhoNMean where it exists.
+  time: all                # a frame per written time. `latest` for the last one
+                           # only, which is ~3x quicker here.
+
+  prefer_mean: false       # the instantaneous fields -- what actually varies
+                           # from frame to frame. A series of running averages
+                           # shows the average converging, not the flow.
                            #
-                           # BE AWARE: this family's controlDict starts
-                           # fieldAverage at timeStart 0.002, and the runs
-                           # currently in Cases/ stop at 0.0015 -- BEFORE any
-                           # average is written. The renderer falls back to the
-                           # instantaneous fields and prints a note per field
-                           # saying so, rather than drawing nothing. Those images
-                           # are one timestep's parcels and the speckle in the
-                           # wake is shot noise, not structure. Run further than
-                           # timeStart to get averaged imagery.
+                           # It costs nothing here in any case: this family's
+                           # controlDict starts fieldAverage at timeStart 0.002
+                           # and the runs currently in Cases/ stop at 0.0015, so
+                           # NO average has been written at all yet. With
+                           # prefer_mean on, every field fell back to the
+                           # instantaneous one anyway, one note at a time.
+                           #
+                           # The speckle in the wake is shot noise, not
+                           # structure. Run past timeStart, then set
+                           # `time: latest` and `prefer_mean: true`, for an
+                           # averaged survey image worth reading quantitatively.
 
 # --- the centre plane ---------------------------------------------------------
 # This domain is a HALF domain: mesh.y_min_m is 0.0 and y_max_m is 0.3, with the
@@ -93,13 +114,16 @@ fields:
   - name: q                # heat flux into a surface   [W/m^2]
   - name: fD               # force density on a surface [Pa]
 
-# --- comparing the four reservoir pressures -----------------------------------
-# Colour ranges autoscale to each case, so the 5, 25, 100 and 475 psi images each
-# use a DIFFERENT scale and cannot be read side by side. To compare them, pin the
-# range, e.g.
+# --- colour ranges ------------------------------------------------------------
+# WITHIN a series the range is pinned automatically: the renderer scans every
+# frame first and colours them all on the union, so the colours mean the same
+# thing from one frame to the next.
+#
+# ACROSS cases it is not: the 5, 25, 100 and 475 psi series each get their own
+# range and cannot be read side by side. Pin it explicitly to compare them, e.g.
 #
 #   - name: q
 #     range: [0.0, 5.0e+3]
 #
-# Left autoscaled by default: three of the four cases have not been run yet, so
+# Left unpinned for now because three of the four cases have not been run, so
 # there is no measured range to pin to. See cases/markelov1999/README.md.

@@ -23,17 +23,49 @@
 version: 1
 extends: default
 
+# --- where the frames go ------------------------------------------------------
+# One folder per field, frames numbered in time order:
+#
+#   Cases/Kn100/results/viz/rhoN/rhoN_0000.png
+#                                rhoN_0001.png ...
+#                           U/U_0000.png ...
+#                           manifest.yaml
+#
+# {index} and NOT {time} in the name: times are formatted with %g, so 0.0021211
+# and 0.00990533 are different widths and sort into the wrong order in a shell
+# glob -- which is the order a video encoder would then use. The manifest records
+# the real time of every frame.
+output:
+  subdirectory: "{requested}"     # the name asked for, so a field whose
+                                  # resolved name changes keeps one folder
+  filename: "{requested}_{index}"
+
 # --- which data ---------------------------------------------------------------
 sampling:
-  time: latest
-  prefer_mean: true        # rhoNMean, not rhoN. LEAVE THIS ON: a single-timestep
-                           # rhoN is one step's worth of parcels, because
-                           # DSMCCloud::resetFields zeroes it every step, so the
-                           # instantaneous image is a picture of shot noise --
-                           # and it looks entirely plausible.
-                           # This family's controlDict sets fieldAverage
-                           # timeStart well before end_time, so the averages are
-                           # there.
+  time: all                # A FRAME PER WRITTEN TIME, so each field comes out as
+                           # a time series. `latest` renders the last time only
+                           # and is ~5x quicker -- change this one word if the
+                           # study step is taking too long.
+
+  prefer_mean: false       # THE INSTANTANEOUS FIELDS, and this is the opposite
+                           # of what a single survey image should use.
+                           #
+                           # rhoNMean is a RUNNING AVERAGE accumulated from
+                           # fieldAverage's timeStart, so a series of it shows
+                           # the average converging, not the flow evolving --
+                           # by construction it barely moves. rhoN is one
+                           # timestep's parcels: noisy, and the only one of the
+                           # two that actually varies frame to frame.
+                           #
+                           # It also keeps the series HOMOGENEOUS. With
+                           # prefer_mean on, the early frames have no *Mean
+                           # field to fall back from and the later ones do, so
+                           # the series would silently change quantity part way
+                           # through.
+                           #
+                           # For the averaged single-frame survey instead:
+                           #     time: latest
+                           #     prefer_mean: true
 
 # --- the centre plane ---------------------------------------------------------
 # The domain is a FULL 3-D box: geometry.symmetry_mode is 'none' and y runs from
@@ -86,13 +118,15 @@ fields:
     log: true
     log_decades: 8
 
-# --- comparing the three Knudsen numbers --------------------------------------
-# Colour ranges autoscale to each cut, so the Kn = 100, 0.1 and 0.01 images each
-# use a DIFFERENT scale and cannot be read side by side -- n0 alone moves four
-# decades across the study. To compare them, pin the range:
+# --- colour ranges ------------------------------------------------------------
+# WITHIN a series the range is pinned automatically: the renderer scans every
+# frame first and colours them all on the union, because a scale that rescales
+# under the flow makes a plume filling a vacuum look like a plume that is not
+# changing at all.
+#
+# ACROSS cases it is not. The Kn = 100, 0.1 and 0.01 series each get their own
+# range -- n0 alone moves four decades across the study -- so they cannot be
+# read side by side. To compare them, pin it explicitly:
 #
 #   - name: rhoN
 #     range: [1.0e+12, 1.0e+21]
-#
-# It is left autoscaled by default because the single-case view -- is the plume
-# where it should be, is the far field resolved -- is what this step is for.

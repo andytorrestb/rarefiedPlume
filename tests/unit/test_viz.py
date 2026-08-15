@@ -773,6 +773,53 @@ def test_the_fixed_aspect_helper_still_fits_a_tall_body():
 
 
 # --------------------------------------------------------------------------- #
+# time series
+# --------------------------------------------------------------------------- #
+
+def test_a_frame_index_and_a_per_field_folder_are_valid_output_settings(tmp_path):
+    document = dict(MINIMAL, output={"subdirectory": "{requested}",
+                                     "filename": "{requested}_{index}"})
+    spec = load_spec(write_spec(tmp_path, document))
+    assert spec.output.subdirectory == "{requested}"
+    assert "{index}" in spec.output.filename
+
+
+def test_an_unknown_placeholder_in_the_subdirectory_is_rejected(tmp_path):
+    document = dict(MINIMAL, output={"subdirectory": "{fieldname}"})
+    with pytest.raises(VizSpecError, match="placeholder"):
+        load_spec(write_spec(tmp_path, document))
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_renders_a_frame_per_written_time(study):
+    assert load_spec(STUDY_SPECS[study]).sampling.time == "all"
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_series_gives_every_field_its_own_folder(study):
+    """One directory of frames per field, ready for a video encoder."""
+    output = load_spec(STUDY_SPECS[study]).output
+    assert "{requested}" in output.subdirectory
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_series_orders_frames_by_index_not_by_time(study):
+    """Times are formatted with %g, so 0.0021211 and 0.00990533 are different
+    widths and sort wrongly in the shell glob a video encoder would use."""
+    output = load_spec(STUDY_SPECS[study]).output
+    assert "{index}" in output.filename
+    assert "{time}" not in output.filename
+
+
+@pytest.mark.parametrize("study", sorted(STUDY_SPECS))
+def test_a_study_series_uses_the_instantaneous_fields(study):
+    """A series of running averages shows the average converging, not the flow;
+    and it would change quantity part way through, because the early times have
+    no *Mean field to fall back from."""
+    assert load_spec(STUDY_SPECS[study]).sampling.prefer_mean is False
+
+
+# --------------------------------------------------------------------------- #
 # legend titles
 # --------------------------------------------------------------------------- #
 

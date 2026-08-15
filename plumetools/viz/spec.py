@@ -291,44 +291,69 @@ class OutputSpec:
 
     Attributes:
         directory: relative to the case directory unless absolute.
+        subdirectory: a template for a folder *inside* ``directory``, or empty
+            for a flat layout. ``"{requested}"`` gives every field its own
+            folder, which is what a time series wants -- one directory of
+            frames per field, ready to hand to a video encoder.
         filename: a template. ``{field}`` is the resolved field name (so
             ``rhoNMean``, not ``rhoN``, when the average was used),
-            ``{plane}`` the plane name or ``surface``, ``{case}`` the case
-            directory name, ``{time}`` the time as written by the solver.
+            ``{requested}`` the name the spec asked for, ``{plane}`` the plane
+            name, ``{case}`` the case directory name, ``{time}`` the time as
+            written by the solver, and ``{index}`` the frame number, zero
+            padded.
+
+            **Use ``{index}``, not ``{time}``, to order a series.** Times are
+            formatted with ``%g``, so ``0.0021211`` and ``0.00990533`` are
+            different widths and sort into the wrong order in every file
+            browser and every shell glob -- which is the order a video encoder
+            would then use.
         log_directory: VifPara's log file. Relative to *directory* unless
             absolute.
-        manifest: write ``manifest.yaml`` next to the images, recording what
-            was drawn from what. Absent it, a directory of PNGs says nothing
-            about which time or which field name produced them.
+        manifest: write ``manifest.yaml`` at the top of *directory*, recording
+            what was drawn from what. Absent it, a directory of PNGs says
+            nothing about which time or which field name produced them.
     """
 
     directory: str = "results/viz"
+    subdirectory: str = ""
     filename: str = "{field}_{plane}"
     log_directory: str = "logs"
     manifest: bool = True
 
-    _KEYS = ("directory", "filename", "log_directory", "manifest")
+    _KEYS = ("directory", "subdirectory", "filename", "log_directory",
+             "manifest")
 
-    #: Placeholders :attr:`filename` may use.
-    PLACEHOLDERS = ("field", "plane", "case", "time")
+    #: Placeholders :attr:`filename` and :attr:`subdirectory` may use.
+    PLACEHOLDERS = ("field", "requested", "plane", "case", "time", "index")
 
     @classmethod
     def from_raw(cls, raw: Any, where: str = "output") -> "OutputSpec":
         raw = _mapping(raw, where)
         _reject_unknown(raw, cls._KEYS, where)
 
+        probes = {key: "x" for key in cls.PLACEHOLDERS}
+
         filename = str(raw.get("filename", "{field}_{plane}"))
         try:
-            probe = filename.format(**{key: "x" for key in cls.PLACEHOLDERS})
+            rendered = filename.format(**probes)
         except (KeyError, IndexError) as exc:
             raise VizSpecError(
                 f"{where}.filename: {filename!r} uses an unknown placeholder "
                 f"{exc}; valid: {list(cls.PLACEHOLDERS)}") from None
-        if not probe:
+        if not rendered:
             raise VizSpecError(f"{where}.filename: must not be empty")
+
+        subdirectory = str(raw.get("subdirectory", ""))
+        try:
+            subdirectory.format(**probes)
+        except (KeyError, IndexError) as exc:
+            raise VizSpecError(
+                f"{where}.subdirectory: {subdirectory!r} uses an unknown "
+                f"placeholder {exc}; valid: {list(cls.PLACEHOLDERS)}") from None
 
         return cls(
             directory=str(raw.get("directory", "results/viz")),
+            subdirectory=subdirectory,
             filename=filename,
             log_directory=str(raw.get("log_directory", "logs")),
             manifest=bool(raw.get("manifest", True)),
