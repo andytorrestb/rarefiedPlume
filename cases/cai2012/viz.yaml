@@ -1,0 +1,146 @@
+# cases/cai2012/viz.yaml -- sampling settings for THIS study.
+#
+# THE AUTHORITATIVE LIST OF WHAT ./AllpostCases DRAWS for the Cai family. Every
+# PNG under Cases/<case>/results/viz/ came from an entry here.
+#
+#   ./AllpostCases                 post-process, then render this
+#   ./AllpostCases --viz-only      render only
+#   ./AllpostCases --viz-spec F    render something else instead
+#
+# Or directly, for one case:
+#
+#   vifpara ../../plumetools/viz/render_slices.py Cases/Kn100 --spec viz.yaml
+#
+# `extends: default` inherits plumetools/viz/slices.yaml -- the image size,
+# colour preset, output paths and the U/Ttra derivations. Mappings merge key by
+# key; the `planes` and `fields` lists below REPLACE the inherited ones
+# wholesale, so what is written here is exactly what gets drawn.
+#
+# The companion file is cases/markelov1999/viz.yaml. The two studies deliberately
+# no longer share a spec: they have different geometry, different boundaries, and
+# different fields worth looking at. See docs/viz-slices.md.
+
+version: 1
+extends: default
+
+# --- where the frames go ------------------------------------------------------
+# One folder per field, frames numbered in time order:
+#
+#   Cases/Kn100/results/viz/rhoN/rhoN_0000.png
+#                                rhoN_0001.png ...
+#                           U/U_0000.png ...
+#                           manifest.yaml
+#
+# {index} and NOT {time} in the name: times are formatted with %g, so 0.0021211
+# and 0.00990533 are different widths and sort into the wrong order in a shell
+# glob -- which is the order a video encoder would then use. The manifest records
+# the real time of every frame.
+output:
+  subdirectory: "{requested}"     # the name asked for, so a field whose
+                                  # resolved name changes keeps one folder
+  filename: "{requested}_{index}"
+
+# --- and a video of each ------------------------------------------------------
+# rhoN/rhoN.mp4 beside rhoN/rhoN_0000.png ... Encoding needs ffmpeg but NOT
+# ParaView, so re-encoding at another frame rate is seconds rather than a
+# re-render:
+#
+#   python plumetools/viz/video.py Cases/Kn100/results/viz --framerate 10
+#
+# A missing ffmpeg is a note, not a failure -- the frames are the output.
+video:
+  enabled: true
+  framerate: 4             # 5 frames of transient; fast enough not to be a
+                           # slideshow, slow enough to read
+  quality: 18              # x264 CRF, lower is better
+
+# --- which data ---------------------------------------------------------------
+sampling:
+  time: all                # A FRAME PER WRITTEN TIME, so each field comes out as
+                           # a time series. `latest` renders the last time only
+                           # and is ~5x quicker -- change this one word if the
+                           # study step is taking too long.
+
+  prefer_mean: false       # THE INSTANTANEOUS FIELDS, and this is the opposite
+                           # of what a single survey image should use.
+                           #
+                           # rhoNMean is a RUNNING AVERAGE accumulated from
+                           # fieldAverage's timeStart, so a series of it shows
+                           # the average converging, not the flow evolving --
+                           # by construction it barely moves. rhoN is one
+                           # timestep's parcels: noisy, and the only one of the
+                           # two that actually varies frame to frame.
+                           #
+                           # It also keeps the series HOMOGENEOUS. With
+                           # prefer_mean on, the early frames have no *Mean
+                           # field to fall back from and the later ones do, so
+                           # the series would silently change quantity part way
+                           # through.
+                           #
+                           # For the averaged single-frame survey instead:
+                           #     time: latest
+                           #     prefer_mean: true
+
+# --- the centre plane ---------------------------------------------------------
+# The domain is a FULL 3-D box: geometry.symmetry_mode is 'none' and y runs from
+# -10 D to +10 D, so y = 0 is genuinely the middle of the mesh and cuts cleanly.
+#
+# The camera looks ALONG normal, so screen-right is normal x camera_up:
+# [0,1,0] x [0,0,1] = [1,0,0]. Nozzle at the left, plume to the right, z up.
+# Flipping the normal mirrors the image and changes nothing else, which is not
+# something anyone notices in a plume.
+planes:
+  - name: midplane         # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+
+# --- what to draw -------------------------------------------------------------
+# Unlisted keys come from plumetools/viz/catalog.py, which knows the units and
+# the sensible colour scale for each dsmcFoam field.
+#
+# NOT LISTED, deliberately: q and fD. They are boundary-only fields, accumulated
+# where a molecule strikes a WALL, and this case has no wall -- its three patches
+# are two vacuums and an inlet. They would be identically zero and skipped on
+# every case in the study, so they are simply not asked for here. They ARE drawn
+# in cases/markelov1999, which has a cylinder and a plate.
+#
+# Also not listed: internalE and iDof (identically zero for a monatomic gas, and
+# argon is one), rhoM (exactly m * rhoN, so the image is rhoN's with a relabelled
+# colour bar), and dsmcSigmaTcRMax (the NTC collision-selection ceiling, flat
+# wherever no collision has been attempted).
+fields:
+  - name: rhoN             # the plume itself
+    log: true
+    log_decades: 8         # Kn = 100 empties the far field completely; 6 decades
+                           # crops the plume edge out of the picture
+
+  - name: dsmcRhoN         # PARCEL number density. Times the cell volume this is
+    log: true              # the parcels per cell -- where it thins out, every
+    log_decades: 6         # other image here is noise. Standard dsmcFoam has one
+                           # particle weight for the whole domain, so this is
+                           # exactly rhoN / nParticle and has the same SHAPE as
+                           # the image above; its value is in the numbers on the
+                           # colour bar.
+
+  - name: U                # derived in the inherited spec: momentum / rhoM
+  - name: Ttra             # derived: from linearKE, momentum and rhoM. Should
+                           # read T0 = 300 K at the exit and fall away fast --
+                           # a collisionless expansion cools to nearly nothing.
+
+  - name: linearKE
+    log: true
+    log_decades: 8
+
+# --- colour ranges ------------------------------------------------------------
+# WITHIN a series the range is pinned automatically: the renderer scans every
+# frame first and colours them all on the union, because a scale that rescales
+# under the flow makes a plume filling a vacuum look like a plume that is not
+# changing at all.
+#
+# ACROSS cases it is not. The Kn = 100, 0.1 and 0.01 series each get their own
+# range -- n0 alone moves four decades across the study -- so they cannot be
+# read side by side. To compare them, pin it explicitly:
+#
+#   - name: rhoN
+#     range: [1.0e+12, 1.0e+21]

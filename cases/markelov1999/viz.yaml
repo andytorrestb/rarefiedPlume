@@ -1,0 +1,143 @@
+# cases/markelov1999/viz.yaml -- sampling settings for THIS study.
+#
+# THE AUTHORITATIVE LIST OF WHAT ./AllpostCases DRAWS for the AIAA 99-3455
+# family. Every PNG under Cases/<gap>/<case>/results/viz/ came from an entry
+# here.
+#
+#   ./AllpostCases                 post-process, then render this
+#   ./AllpostCases --viz-only      render only
+#   ./AllpostCases --viz-spec F    render something else instead
+#
+# Or directly, for one case:
+#
+#   vifpara ../../plumetools/viz/render_slices.py Cases/gap06in/p005psi \
+#       --spec viz.yaml
+#
+# `extends: default` inherits plumetools/viz/slices.yaml -- the image size,
+# colour preset, output paths and the U/Ttra derivations. Mappings merge key by
+# key; the `planes` and `fields` lists below REPLACE the inherited ones
+# wholesale, so what is written here is exactly what gets drawn.
+#
+# The companion file is cases/cai2012/viz.yaml. The two studies deliberately no
+# longer share a spec: this one has SOLID BODIES in the flow and a half domain,
+# and neither is true there. See docs/viz-slices.md.
+
+version: 1
+extends: default
+
+# --- where the frames go ------------------------------------------------------
+# One folder per field, frames numbered in time order:
+#
+#   Cases/gap06in/p005psi/results/viz/rhoN/rhoN_0000.png
+#                                          rhoN_0001.png ...
+#                                     q/q_0000.png ...
+#                                     manifest.yaml
+#
+# {index} and NOT {time} in the name: times are formatted with %g and sort into
+# the wrong order in a shell glob, which is the order a video encoder would then
+# use. The manifest records the real time of every frame.
+output:
+  subdirectory: "{requested}"
+  filename: "{requested}_{index}"
+
+# --- and a video of each ------------------------------------------------------
+# rhoN/rhoN.mp4 beside rhoN/rhoN_0000.png ... Encoding needs ffmpeg but NOT
+# ParaView, so re-encoding is seconds rather than a re-render:
+#
+#   python plumetools/viz/video.py Cases/gap06in/p005psi/results/viz --framerate 10
+#
+# A missing ffmpeg is a note, not a failure -- the frames are the output.
+video:
+  enabled: true
+  framerate: 3             # only three written times so far; slower than
+                           # cai2012's so the series is not over before it
+                           # registers
+  quality: 18              # x264 CRF, lower is better
+
+# --- which data ---------------------------------------------------------------
+sampling:
+  time: all                # a frame per written time. `latest` for the last one
+                           # only, which is ~3x quicker here.
+
+  prefer_mean: false       # the instantaneous fields -- what actually varies
+                           # from frame to frame. A series of running averages
+                           # shows the average converging, not the flow.
+                           #
+                           # It costs nothing here in any case: this family's
+                           # controlDict starts fieldAverage at timeStart 0.002
+                           # and the runs currently in Cases/ stop at 0.0015, so
+                           # NO average has been written at all yet. With
+                           # prefer_mean on, every field fell back to the
+                           # instantaneous one anyway, one note at a time.
+                           #
+                           # The speckle in the wake is shot noise, not
+                           # structure. Run past timeStart, then set
+                           # `time: latest` and `prefer_mean: true`, for an
+                           # averaged survey image worth reading quantitatively.
+
+# --- the centre plane ---------------------------------------------------------
+# This domain is a HALF domain: mesh.y_min_m is 0.0 and y_max_m is 0.3, with the
+# symmetry plane at y = 0. So y = 0 is not the middle of the mesh, it is the
+# EDGE of it -- and VTK's cutter finds no cell interiors on a boundary face and
+# returns an empty slice. The renderer detects that and moves the origin a
+# ten-thousandth of the domain inward (3e-5 m here, far inside the first cell),
+# printing a note. Do not "fix" this by writing a nudged origin below; the note
+# is the record that it happened.
+#
+# It is the right plane regardless: the plume axis, the cylinder axis and the
+# plate all lie in it.
+#
+# The camera looks ALONG normal, so screen-right is normal x camera_up:
+# [0,1,0] x [0,0,1] = [1,0,0]. Inflow hemisphere at the left, plume to the
+# right, z up.
+planes:
+  - name: midplane
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]      # the symmetry plane
+
+# --- what to draw -------------------------------------------------------------
+# Unlisted keys come from plumetools/viz/catalog.py.
+fields:
+  - name: rhoN             # the plume, and its wake behind the cylinder
+    log: true
+    log_decades: 8
+
+  - name: dsmcRhoN         # PARCEL number density -- where it thins out, every
+    log: true              # other image here is noise. The wake is the thin
+    log_decades: 6         # part, and the wake is what this study is about, so
+                           # this one is worth reading before the others.
+
+  - name: U                # derived in the inherited spec: momentum / rhoM
+  - name: Ttra             # derived: from linearKE, momentum and rhoM
+
+  - name: linearKE
+    log: true
+    log_decades: 8
+
+  # --- surface fields ------------------------------------------------------- #
+  # Boundary-only: dsmcFoam accumulates these where a molecule strikes a WALL,
+  # and their internalField is uniform 0, so they cannot be sliced. This study
+  # HAS walls -- bodies.cylinder and bodies.plate, both `type wall` in
+  # constant/polyMesh/boundary -- so they are real here and are drawn on those
+  # surfaces, viewed along the plane above. cases/cai2012 has no solid body and
+  # does not ask for them at all.
+  #
+  # They are drawn on the wall patches ONLY. The vacuum box is a boundary too,
+  # and drawing it puts an opaque slab in front of the cylinder.
+  - name: q                # heat flux into a surface   [W/m^2]
+  - name: fD               # force density on a surface [Pa]
+
+# --- colour ranges ------------------------------------------------------------
+# WITHIN a series the range is pinned automatically: the renderer scans every
+# frame first and colours them all on the union, so the colours mean the same
+# thing from one frame to the next.
+#
+# ACROSS cases it is not: the 5, 25, 100 and 475 psi series each get their own
+# range and cannot be read side by side. Pin it explicitly to compare them, e.g.
+#
+#   - name: q
+#     range: [0.0, 5.0e+3]
+#
+# Left unpinned for now because three of the four cases have not been run, so
+# there is no measured range to pin to. See cases/markelov1999/README.md.
