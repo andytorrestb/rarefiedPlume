@@ -650,6 +650,42 @@ cd cases/cai2012
    comparison is against the analytical collisionless solution, which is exact
    for Kn → ∞ and is *supposed* to disagree at Kn = 0.01.
 
+8. **The particle-weight target is met at the exit cell and nowhere else**, and
+   the fall-off away from it is much larger than the configuration suggests.
+   `resolution.target_particles_per_cell: 20` and
+   `checks.min_particles_per_cell: 5` are both about the *exit* cell;
+   `checks.py` says so, and prints an estimate rather than a measurement.
+
+   Measured on the completed `Kn100` run — `dsmcRhoNMean`, which is the parcel
+   **count** per cell (§7a below):
+
+   | region | median parcels/cell | below the floor of 5 |
+   |---|---|---|
+   | exit cells (316 of them) | 18.9 | 0% |
+   | uniform core | 0.40 | 90.8% |
+   | inside Cai's lowest contour (`n/n0 ≥ 10⁻³`) | 1.49 | 96.2% |
+   | the centreline tube the errors are computed over | 5.16 | 43.8% |
+   | whole domain | 0.11 | 98.1% |
+
+   and down the centreline itself, 19.4 at `X/D ≤ 0.5` falling to 2.7 at
+   `X/D = 7–10`, where **every** cell is below the floor. `cases/cai2012-health`
+   sweeps this deliberately and says what it costs the published numbers.
+
+### 7a. `dsmcRhoN` is a parcel count, not a number density
+
+Worth stating because this repository had it wrong. `DSMCCloud::calculateFields`
+adds 1 per parcel and never divides by the cell volume, where `rhoN` accumulates
+`nParticle/V`. Measured over the 1 018 211 occupied cells of `Kn100`:
+
+```
+rhoN * V / dsmcRhoN = 3.3100e+09 = nParticle     to 1.5e-9
+```
+
+So `dsmcRhoN` is dimensionless and is read directly as the occupancy. The
+previous reading — a density in m⁻³, to be multiplied by the cell volume — is
+out by `1/V`, a factor of 10⁶ here, and on a logarithmic colour scale it drew a
+perfectly plausible picture.
+
 ---
 
 ## 11. Related documents

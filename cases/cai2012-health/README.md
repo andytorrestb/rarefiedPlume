@@ -147,6 +147,26 @@ that costs half a day to discover. `AllrunCases` records each case's wall clock
 in `results/cost-model.yaml` and the estimate is refitted from it as the matrix
 runs; until then it is labelled `prior` wherever it is printed.
 
+**Those hours are not all solver, and the prior assumed they were.** Measured on
+`ppc005/s0p5`: `dsmcFoam` took 646 s of the run, and `reconstructPar` took about
+40 s per written time directory — 13 minutes for that case's twenty writes, and
+proportionally more for the 52-write cases. Reconstruction is single-threaded
+and scales with the *number of frames*, which is the one thing this family
+deliberately maximises, so it adds roughly 3.4 h across the matrix.
+
+It cancels out: the solver runs about 1.6× faster than the prior expected and
+reconstruction makes up the difference, so the ~11 h total stands. It is
+recorded because the *composition* is wrong in the prior, and because
+`AllrunCases` times the whole of `Allrun` — solve, reconstruct and all — the
+fitted model absorbs it automatically. A model fitted on solver time alone would
+under-predict every long case in the matrix.
+
+**Rendering is a third cost again.** 165 sampled frames across the nine cases ×
+4 fields ≈ 660 images at ~20 s each ≈ **3.7 h**, in one `vifpara` invocation.
+That is the price of the write interval this family chose, and it is why
+`docs/viz-slices.md`'s warning about the imagery step outlasting the solve is
+taken seriously here rather than quoted.
+
 ### What was trimmed, and what that costs
 
 **The weight axis was cut from 80 to 40.** At 80 that row alone is ~14 h and the
