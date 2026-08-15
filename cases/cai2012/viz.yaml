@@ -40,6 +40,20 @@ output:
                                   # resolved name changes keeps one folder
   filename: "{requested}_{index}"
 
+# --- and a video of each ------------------------------------------------------
+# rhoN/rhoN.mp4 beside rhoN/rhoN_0000.png ... Encoding needs ffmpeg but NOT
+# ParaView, so re-encoding at another frame rate is seconds rather than a
+# re-render:
+#
+#   python plumetools/viz/video.py Cases/Kn100/results/viz --framerate 10
+#
+# A missing ffmpeg is a note, not a failure -- the frames are the output.
+video:
+  enabled: true
+  framerate: 4             # 5 frames of transient; fast enough not to be a
+                           # slideshow, slow enough to read
+  quality: 18              # x264 CRF, lower is better
+
 # --- which data ---------------------------------------------------------------
 sampling:
   time: all                # A FRAME PER WRITTEN TIME, so each field comes out as

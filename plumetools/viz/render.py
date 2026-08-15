@@ -322,6 +322,8 @@ class Renderer:
 
         self.written: list[RenderedImage] = []
         self.skipped: list[SkippedImage] = []
+        #: Videos encoded from :attr:`written`, if the spec asked for any.
+        self.videos: list = []
         self._origins: dict[str, tuple[float, float, float]] = {}
         self._surface_regions: list[str] | None = None
         #: (field, plane) -> the colour range pinned across a whole series.
@@ -501,9 +503,45 @@ class Renderer:
                 print(f"--- frame {index:04d}   t = {format(time, 'g')}")
             self._render_time(tasks, time, index, many_times=len(times) > 1)
 
+        # Encode before writing the manifest, so the manifest can record the
+        # videos as well as the frames.
+        if self.spec.video.enabled:
+            self._encode_videos()
         if self.spec.output.manifest:
             self._write_manifest(times)
         return self.written
+
+    def _encode_videos(self) -> None:
+        """Turn each folder of frames into a video, if ffmpeg is here.
+
+        Driven from :attr:`written` rather than by re-reading the manifest, so
+        it works whether or not one was asked for, and encodes exactly what
+        this run produced.
+
+        A missing ffmpeg is a one-line note, never a failure. The frames are the
+        output; the video is a convenience over them.
+        """
+        from plumetools.viz.video import encode_all, have_ffmpeg, series_from_records
+
+        settings = self.spec.video
+        series = series_from_records(
+            ((entry.path, entry.requested_field, entry.frame)
+             for entry in self.written),
+            min_frames=settings.min_frames)
+        if not series:
+            return
+
+        print()
+        if not have_ffmpeg(settings.ffmpeg):
+            print(f"    no videos: '{settings.ffmpeg}' is not on PATH. The "
+                  f"frames are written; encode them later with")
+            print(f"      python plumetools/viz/video.py {self.output_dir}")
+            return
+
+        self.videos = encode_all(
+            series, framerate=settings.framerate, codec=settings.codec,
+            container=settings.container, quality=settings.quality,
+            ffmpeg=settings.ffmpeg)
 
     def _fix_series_ranges(self, tasks: Sequence[RenderTask],
                            times: Sequence[float]) -> None:
@@ -1042,6 +1080,15 @@ class Renderer:
                     "reason": entry.reason,
                 }
                 for entry in self.skipped
+            ],
+            "videos": [
+                {
+                    "file": entry.path.relative_to(self.output_dir).as_posix(),
+                    "field": entry.name,
+                    "frames": entry.frames,
+                    "framerate": entry.framerate,
+                }
+                for entry in self.videos
             ],
         }
         path.write_text(

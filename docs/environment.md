@@ -118,6 +118,12 @@ Three things have to line up, and `pip` does only the third:
 | 1 | **ParaView 5.11–5.13** installed and on `PATH` | `pvpython`, `paraview` |
 | 2 | ParaView's *internal* Python minor version **==** the venv's | see below |
 | 3 | the `viz` extra | `pip install -e ".[viz]"` |
+| 4 | **ffmpeg**, for the time-series videos only | `apt install ffmpeg` |
+
+Step 4 is optional and is *not* pip-installable. Without it the frames are still
+written and the step prints one line saying no videos were made; encode them
+later with `python plumetools/viz/video.py <viz-dir>`, which needs ffmpeg but not
+ParaView. Verified against ffmpeg 6.1.1 with `libx264`.
 
 **Step 2 is the one that bites.** VifPara layers this virtual environment onto
 ParaView's interpreter, so the two Pythons must match. Check both:

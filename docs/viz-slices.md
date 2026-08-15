@@ -118,13 +118,48 @@ output:
   filename: "{requested}_{index}"
 ```
 
-Straight into a video encoder, because the glob is already in order:
+### The videos
 
-```bash
-ffmpeg -framerate 4 -pattern_type glob -i 'rhoN/rhoN_*.png' rhoN.mp4
+Each folder is encoded into a video beside its own frames, automatically, at the
+end of the render:
+
+```
+results/viz/rhoN/rhoN_0000.png … rhoN_0004.png
+                 rhoN.mp4
 ```
 
-Three things about a series are not the same as for a single image.
+```yaml
+video:
+  enabled: true
+  framerate: 4
+  quality: 18       # x264 CRF, lower is better
+```
+
+Encoding needs **ffmpeg but not ParaView**, which is the point:
+[`plumetools/viz/video.py`](../plumetools/viz/video.py) is importable and runs
+under plain `python`, so changing the frame rate is seconds rather than a
+re-render. Fifteen cai2012 videos re-encode in about six seconds; rendering
+their frames again takes twenty minutes.
+
+```bash
+python plumetools/viz/video.py <viz-dir> --framerate 10
+python plumetools/viz/video.py cases/cai2012/Cases/*/results/viz \
+    --spec cases/cai2012/viz.yaml        # the study's own settings
+```
+
+A missing ffmpeg prints one line and is never fatal — the frames are the output,
+the video is a convenience over them.
+
+Three flags in that command are not optional, and each fails in a way that is
+easy to miss:
+
+| | |
+|---|---|
+| `pad=ceil(iw/2)*2:ceil(ih/2)*2` | `libx264` **refuses** odd dimensions — `width not divisible by 2 (345x800)`. A slice's width follows the geometry, so it is odd about half the time. |
+| `-f concat` with an explicit list | `-pattern_type glob` sorts lexicographically, which is right only while the names happen to be zero-padded. The list is built from the manifest's frame numbers. |
+| `-pix_fmt yuv420p` | not the default for a PNG input; without it the file plays in ffplay and VLC but not in a browser or QuickTime. |
+
+Three more things about a series are not the same as for a single image.
 
 ### Order frames by `{index}`, never `{time}`
 
@@ -416,6 +451,7 @@ you are debugging ParaView rather than using it.
 | `spec.py` | no | schema, YAML, validation |
 | `catalog.py` | no | what the `dsmcFoam` fields are |
 | `resolve.py` | no | which time, which field, what colour scale |
+| `video.py` | no | encodes frames to video; needs ffmpeg, runs standalone |
 | `render.py` | **yes** | turns a spec into PNGs |
 | `render_slices.py` | **yes** | the command-line entry point |
 

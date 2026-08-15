@@ -23,9 +23,15 @@ So the split is strict:
 :mod:`~.spec`           no ParaView           schema, YAML, validation
 :mod:`~.catalog`        no ParaView           what the dsmcFoam fields *are*
 :mod:`~.resolve`        no ParaView           which time, which field, what scale
+:mod:`~.video`          no ParaView           frames -> video, through ffmpeg
 :mod:`~.render`         **imports ParaView**  turns a spec into PNGs
 ``render_slices.py``    **imports ParaView**  the command-line entry point
 ======================  ====================  ==============================
+
+:mod:`~.video` is on the ParaView-free side deliberately, not incidentally:
+re-encoding a study at another frame rate is then seconds of work rather than
+twenty minutes of re-rendering, and it runs on a machine with no ParaView at
+all.
 
 Importing :mod:`plumetools.viz` gives you the first three and never touches
 ParaView. :mod:`plumetools.viz.render` is imported lazily, by name, only by the
@@ -53,14 +59,19 @@ from plumetools.viz.catalog import (
     mean_name,
 )
 from plumetools.viz.resolve import (
+    NothingToRender,
     RenderError,
     colour_range,
     component_range,
     decade_labels,
     expression_fields,
     is_constant,
+    nudge_plane_origin,
     resolve_field_name,
     resolve_times,
+    view_extents,
+    view_half_height,
+    view_shape,
 )
 from plumetools.viz.spec import (
     DEFAULT_SPEC_PATH,
@@ -70,9 +81,22 @@ from plumetools.viz.spec import (
     PlaneSpec,
     RenderTask,
     SamplingSpec,
+    VideoSpec,
     VizSpec,
     VizSpecError,
     load_spec,
+)
+from plumetools.viz.video import (
+    EncodedVideo,
+    Series,
+    VideoError,
+    concat_list,
+    encode_all,
+    encode_series,
+    ffmpeg_command,
+    have_ffmpeg,
+    series_from_manifest,
+    series_from_records,
 )
 
 __all__ = [
@@ -81,22 +105,38 @@ __all__ = [
     "FieldKind",
     "FieldSpec",
     "ImageSpec",
+    "EncodedVideo",
+    "NothingToRender",
     "OutputSpec",
     "PlaneSpec",
     "RenderError",
     "RenderTask",
     "SamplingSpec",
+    "Series",
+    "VideoError",
+    "VideoSpec",
     "VizSpec",
     "VizSpecError",
     "base_name",
     "catalog_entry",
     "colour_range",
     "component_range",
+    "concat_list",
     "decade_labels",
+    "encode_all",
+    "encode_series",
     "expression_fields",
+    "ffmpeg_command",
+    "have_ffmpeg",
     "is_constant",
     "load_spec",
     "mean_name",
+    "nudge_plane_origin",
     "resolve_field_name",
     "resolve_times",
+    "series_from_manifest",
+    "series_from_records",
+    "view_extents",
+    "view_half_height",
+    "view_shape",
 ]

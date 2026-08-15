@@ -361,6 +361,63 @@ class OutputSpec:
 
 
 @dataclass(frozen=True)
+class VideoSpec:
+    """Encoding a folder of frames into a video, once the rendering is done.
+
+    Handled by :mod:`plumetools.viz.video`, which needs ffmpeg but **not**
+    ParaView -- so a series can be re-encoded at a different frame rate without
+    re-rendering it.
+
+    Attributes:
+        enabled: encode after rendering. On by default and harmless when there
+            is nothing to encode: a spec drawing one time produces one frame
+            per field, which is below ``min_frames`` and is left alone.
+        framerate: frames per second. Four is slow enough to read a five-frame
+            transient and fast enough not to feel like a slideshow.
+        codec: an ffmpeg video encoder.
+        container: file extension, and so the muxer.
+        quality: ``-crf``; lower is better. Ignored by codecs without one.
+        min_frames: below this, a series is a still and no video is written.
+        ffmpeg: the binary. A missing one is reported and skipped, never fatal
+            -- the frames are already on disk and are the actual output.
+    """
+
+    enabled: bool = True
+    framerate: float = 4.0
+    codec: str = "libx264"
+    container: str = "mp4"
+    quality: int = 18
+    min_frames: int = 2
+    ffmpeg: str = "ffmpeg"
+
+    _KEYS = ("enabled", "framerate", "codec", "container", "quality",
+             "min_frames", "ffmpeg")
+
+    @classmethod
+    def from_raw(cls, raw: Any, where: str = "video") -> "VideoSpec":
+        raw = _mapping(raw, where)
+        _reject_unknown(raw, cls._KEYS, where)
+
+        container = str(raw.get("container", "mp4")).lstrip(".")
+        if not container:
+            raise VizSpecError(f"{where}.container: must not be empty")
+
+        min_frames = int(raw.get("min_frames", 2))
+        if min_frames < 1:
+            raise VizSpecError(f"{where}.min_frames: must be at least 1")
+
+        return cls(
+            enabled=bool(raw.get("enabled", True)),
+            framerate=_positive(raw.get("framerate", 4.0), f"{where}.framerate"),
+            codec=str(raw.get("codec", "libx264")),
+            container=container,
+            quality=int(raw.get("quality", 18)),
+            min_frames=min_frames,
+            ffmpeg=str(raw.get("ffmpeg", "ffmpeg")),
+        )
+
+
+@dataclass(frozen=True)
 class PlaneSpec:
     """One cutting plane.
 
@@ -811,12 +868,13 @@ class VizSpec:
     sampling: SamplingSpec = dataclass_field(default_factory=SamplingSpec)
     image: ImageSpec = dataclass_field(default_factory=ImageSpec)
     output: OutputSpec = dataclass_field(default_factory=OutputSpec)
+    video: VideoSpec = dataclass_field(default_factory=VideoSpec)
     planes: tuple[PlaneSpec, ...] = ()
     fields: tuple[FieldSpec, ...] = ()
     derived: tuple[DerivedSpec, ...] = ()
     source: Path | None = None
 
-    _KEYS = ("version", "extends", "sampling", "image", "output",
+    _KEYS = ("version", "extends", "sampling", "image", "output", "video",
              "planes", "fields", "derived")
 
     @property
@@ -946,6 +1004,7 @@ class VizSpec:
             sampling=SamplingSpec.from_raw(raw.get("sampling")),
             image=ImageSpec.from_raw(raw.get("image")),
             output=OutputSpec.from_raw(raw.get("output")),
+            video=VideoSpec.from_raw(raw.get("video")),
             planes=planes,
             fields=fields,
             derived=derived,

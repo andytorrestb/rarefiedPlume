@@ -40,6 +40,20 @@ output:
   subdirectory: "{requested}"
   filename: "{requested}_{index}"
 
+# --- and a video of each ------------------------------------------------------
+# rhoN/rhoN.mp4 beside rhoN/rhoN_0000.png ... Encoding needs ffmpeg but NOT
+# ParaView, so re-encoding is seconds rather than a re-render:
+#
+#   python plumetools/viz/video.py Cases/gap06in/p005psi/results/viz --framerate 10
+#
+# A missing ffmpeg is a note, not a failure -- the frames are the output.
+video:
+  enabled: true
+  framerate: 3             # only three written times so far; slower than
+                           # cai2012's so the series is not over before it
+                           # registers
+  quality: 18              # x264 CRF, lower is better
+
 # --- which data ---------------------------------------------------------------
 sampling:
   time: all                # a frame per written time. `latest` for the last one
