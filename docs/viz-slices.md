@@ -150,6 +150,45 @@ python plumetools/viz/video.py cases/cai2012/Cases/*/results/viz \
 A missing ffmpeg prints one line and is never fatal — the frames are the output,
 the video is a convenience over them.
 
+## Dissecting a sweep
+
+[`plumetools/viz/dissect.py`](../plumetools/viz/dissect.py) sits beside
+`video.py` under the same contract — ffmpeg, no ParaView, importable, runnable
+under plain `python` — and does two things to frames that already exist.
+
+```bash
+python plumetools/viz/dissect.py sheet --matrix matrix.yaml --output sheet.png
+python plumetools/viz/dissect.py converge <viz-dir> ... --field dsmcRhoN
+```
+
+**The contact sheet** puts one case per grid cell — `scale`/`pad` to a common
+size, `drawtext` for the label, `xstack` at explicit pixel offsets. A slice's
+pixel width follows its geometry, so cells are not naturally the same size;
+offsets are computed in pixels rather than `xstack`'s `w0`/`h0` arithmetic,
+which silently overlaps cells when an input is not the size assumed.
+`--trim-bottom 110` crops the colour bar off each cell, which is worth doing
+only when the range is pinned across the matrix and all the bars are therefore
+the same legend. A `.yaml` legend is written beside the image: a PNG records
+nothing about where its cells came from, and the sheet is the artefact most
+likely to be pasted somewhere on its own.
+
+**The convergence curve** compares successive frames of a running average with
+`-lavfi psnr` — once the mean has converged, successive frames stop differing.
+Each frame is also compared with the *final* one, because successive
+differences go to zero for a stalled series as readily as a converged one.
+
+> **PSNR between two colour-mapped PNGs is not a physical error.** The scale is
+> logarithmic and clipped to the pinned range, the 8-bit palette hides any
+> change below one colour step (and reports `inf` — recorded as `saturated`,
+> not as a number), and the vacuum counts as many pixels as the plume. It is a
+> perceptual proxy for *has this stopped changing*. The caveat is attached to
+> the written data, not just the report, and `convergence_report` prints a
+> warning in place of the physical column when `results/metrics.yaml` is
+> missing. Where the image metric and the centreline error disagree, that
+> disagreement is the finding.
+
+Both are used by [`cases/cai2012-health`](../cases/cai2012-health/).
+
 Three flags in that command are not optional, and each fails in a way that is
 easy to miss:
 
