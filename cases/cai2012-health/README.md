@@ -160,19 +160,38 @@ that costs half a day to discover. `AllrunCases` records each case's wall clock
 in `results/cost-model.yaml` and the estimate is refitted from it as the matrix
 runs; until then it is labelled `prior` wherever it is printed.
 
-**Those hours are not all solver, and the prior assumed they were.** Measured on
-`ppc005/s0p5`: `dsmcFoam` took 646 s of the run, and `reconstructPar` took about
-40 s per written time directory — 13 minutes for that case's twenty writes, and
-proportionally more for the 52-write cases. Reconstruction is single-threaded
-and scales with the *number of frames*, which is the one thing this family
-deliberately maximises, so it adds roughly 3.4 h across the matrix.
+**Those hours are not all solver, and the prior assumed they were.**
 
-It cancels out: the solver runs about 1.6× faster than the prior expected and
-reconstruction makes up the difference, so the ~11 h total stands. It is
-recorded because the *composition* is wrong in the prior, and because
-`AllrunCases` times the whole of `Allrun` — solve, reconstruct and all — the
-fitted model absorbs it automatically. A model fitted on solver time alone would
-under-predict every long case in the matrix.
+| `ppc005/s0p5` | measured |
+|---|---|
+| `--dry-run` predicted | 1008 s |
+| **actual** | **1936 s** |
+| of which `dsmcFoam` | 646 s |
+| of which `reconstructPar` | ~800 s (20 writes at ~40 s each) |
+| the rest | `decomposePar`, `dsmcInitialise`, `checkMesh` |
+
+`reconstructPar` is single-threaded and scales with the **number of frames**,
+which is the one thing this family deliberately maximises. The solver itself
+ran about 1.6× *faster* than the prior expected; reconstruction more than made
+up the difference. `ppc005/s1p5` came in at 2583 s on the same pattern.
+
+Because `AllrunCases` times the whole of `Allrun` — solve, reconstruct,
+decompose and all — the fitted model absorbs this automatically. A model fitted
+on solver time alone would under-predict every long case in the matrix. The
+practical consequence is that the real total is **1.5–2× the prior's 11.1 h**,
+and `--dry-run` says so once the first case has run.
+
+> **A fit on one weight row cannot separate the two terms.** The design columns
+> are `parcels × steps` and `cells × steps`, which are proportional when every
+> measurement has the same parcels per cell — which is exactly what the
+> cheapest-first run order produces. `lstsq` still answers, with a
+> minimum-norm split that fits the measurements perfectly and means nothing:
+> measured on the first two runs it put 2.6e-07 on the per-*cell* term, which
+> does not change across the weight axis, and predicted the `ppc040/s4p5`
+> corner at 1.8 h instead of 6.2. `fit_cost_model` now checks the rank and
+> falls back to scaling the prior's ratio, which keeps the weight axis in the
+> extrapolation. The estimate only becomes a genuine two-term fit once a second
+> weight row has run.
 
 **Rendering is a third cost again.** 165 sampled frames across the nine cases ×
 4 fields ≈ 660 images at ~20 s each ≈ **3.7 h**, in one `vifpara` invocation.
@@ -372,11 +391,54 @@ frame rather than only the last — are what `cases/cai2012` does not do.
 
 ## Results
 
-**Not yet run.** The machinery is validated end to end on the two cheapest
-cases; the full matrix is 11.1 h of solver and ~2 h of rendering.
+**In progress.** The two `ppc005` cases are complete and the remaining seven are
+running. What is already established:
 
-This section will carry the sweep table, the contact sheets and the answers to
-the five questions the study exists to settle:
+### The pipeline is deterministic
+
+```
+Overlap: Cases/ppc005/s0p5 against Cases/ppc005/s1p5
+  15 field(s) over 5 averaged time(s), of 20 shared
+  IDENTICAL, byte for byte.
+```
+
+`rhoNMean`, `dsmcRhoNMean` and `momentumMean` at every time both runs reached.
+The 0.5-transit case **is** the 1.5-transit case truncated, so the matrix's
+redundancy holds and the differences the sweep finds are attributable to
+statistics rather than to something in the generate → mesh → run → sample chain.
+This is the precondition for everything else here, and it is checked rather than
+assumed.
+
+### The cheapest corner, measured
+
+`ppc005/s0p5` — 5 parcels per exit cell, half a domain transit of averaging:
+
+| region | median parcels/cell | below the floor of 5 |
+|---|---|---|
+| exit cells | 4.70 (`checks.py` estimated 5.0) | 98.7% |
+| inside Cai's lowest contour | 0.37 | **100%** |
+| the centreline tube | 1.33 | 96.2% |
+| whole domain | 0.03 | 100% |
+
+and its running mean settling, frame by frame:
+
+| averaging | density mean rel. error |
+|---|---|
+| 0.003 transits | 16.16% |
+| 0.128 | 5.56% |
+| 0.254 | 4.40% |
+| 0.379 | 3.42% |
+| 0.504 | **2.52%** |
+
+against the baseline `Kn100`'s 1.07% at 20 parcels/cell and 1.5 transits — a 12×
+larger statistical budget for a 2.35× better answer, where pure `1/√N` would
+predict 3.5×. That is the first hint of a floor, on two points; the full matrix
+is what settles it.
+
+### Still to come
+
+The sweep table, both contact sheets and the answers to the five questions the
+study exists to settle:
 
 1. How many parcels per cell does the sampled solution actually have, per
    region, as opposed to the estimate `checks.py` prints?
