@@ -248,14 +248,48 @@ def test_one_measurement_scales_the_prior_and_says_so():
                          steps=7212) == pytest.approx(7200.0)
 
 
-def test_collinear_measurements_fall_back_rather_than_fitting_a_negative_cost():
-    """Two runs at the same weight and mesh do not separate the terms, and the
-    least-squares answer can come out saying a bigger mesh runs faster."""
+def test_measurements_at_one_weight_do_not_pretend_to_separate_the_terms():
+    """Runs sharing a parcels-per-cell ratio make the design matrix rank 1.
+
+    lstsq still answers -- the minimum-norm solution fits them perfectly and
+    splits the cost arbitrarily. Measured on this family's first two runs, both
+    ppc005, that split put nearly all the work on the term that does NOT change
+    across the weight axis and predicted the most expensive case in the matrix
+    at 1.8 h instead of 6.2. Under-predicting the corner case is the worst
+    direction for this number to be wrong in, so rank is checked rather than
+    inferred from a negative coefficient.
+    """
     measurements = [
-        {"case": "a", "parcels": 1.0e6, "cells": 1.3e6, "steps": 1000,
+        {"case": "a", "parcels": 2.89e5, "cells": 1.31e6, "steps": 5160,
+         "seconds": 1936.0},
+        {"case": "b", "parcels": 2.89e5, "cells": 1.31e6, "steps": 7224,
+         "seconds": 2583.0},
+    ]
+    model = health.fit_cost_model(measurements)
+    assert "do not separate" in model.source
+    assert model.per_parcel_s > 0.0 and model.per_cell_s > 0.0
+
+    # ...and the prior's ratio is kept, so the weight axis still scales.
+    prior = health.PRIOR_COST_MODEL
+    assert (model.per_parcel_s / model.per_cell_s) == pytest.approx(
+        prior.per_parcel_s / prior.per_cell_s)
+
+    cheap = model.seconds(parcels=2.89e5, cells=1.31e6, steps=5160)
+    dear = model.seconds(parcels=2.31e6, cells=1.31e6, steps=13416)
+    assert dear / cheap > 5.0, (
+        "the ppc040/s4p5 corner must still come out several times the cheapest "
+        "case; a degenerate fit is what flattens it")
+
+
+def test_a_negative_two_term_fit_falls_back_too():
+    """A negative coefficient says a bigger mesh runs faster."""
+    measurements = [
+        {"case": "a", "parcels": 1.0e6, "cells": 1.0e6, "steps": 1000,
          "seconds": 400.0},
-        {"case": "b", "parcels": 1.0e6, "cells": 1.3e6, "steps": 2000,
-         "seconds": 800.0},
+        {"case": "b", "parcels": 2.0e6, "cells": 1.0e6, "steps": 1000,
+         "seconds": 300.0},
+        {"case": "c", "parcels": 1.0e6, "cells": 3.0e6, "steps": 1000,
+         "seconds": 900.0},
     ]
     model = health.fit_cost_model(measurements)
     assert model.per_parcel_s > 0.0 and model.per_cell_s > 0.0

@@ -363,7 +363,7 @@ def _reject_duplicates(levels, axis, value_of, what, path) -> None:
 # --------------------------------------------------------------------------- #
 
 def clone_cases(root: Path, study: HealthStudy, cases: list) -> list[Path]:
-    """Build the ``<weight>/<sampling>`` hierarchy with CaseFoam.
+    r"""Build the ``<weight>/<sampling>`` hierarchy with CaseFoam.
 
     Args:
         root: the study directory -- the one containing ``baseCase``.
@@ -646,24 +646,46 @@ def fit_cost_model(measurements: list) -> CostModel:
                         float(m["cells"]) * float(m["steps"])]
                        for m in usable], dtype=np.float64)
     observed = np.array([float(m["seconds"]) for m in usable], dtype=np.float64)
-    solution, *_ = np.linalg.lstsq(design, observed, rcond=None)
 
+    # The two columns are ``parcels*steps`` and ``cells*steps``, so they are
+    # proportional whenever every measurement has the same parcels-per-cell --
+    # which is exactly what happens when a whole weight row is measured before
+    # the next one starts, the order this family runs in. lstsq still returns
+    # an answer there: the minimum-norm one, which fits the measurements
+    # perfectly and splits the cost between the two terms arbitrarily.
+    #
+    # MEASURED consequence, on the first two runs of this family (both ppc005):
+    # the split came out 5.8e-08 per parcel and 2.6e-07 per cell, attributing
+    # nearly all the work to the term that does NOT change across the weight
+    # axis -- and predicting the ppc040/s4p5 corner at 1.8 h against the 6.2 h
+    # a correctly-scaled model gives. An under-prediction of the most expensive
+    # case in the matrix is the worst direction for this number to be wrong in.
+    #
+    # So rank is checked rather than inferred from a negative coefficient.
+    singular = np.linalg.svd(design, compute_uv=False)
+    degenerate = (singular[-1] <= 1.0e-8 * singular[0]
+                  or len(usable) < 2)
+
+    solution, *_ = np.linalg.lstsq(design, observed, rcond=None)
     per_parcel, per_cell = (float(solution[0]), float(solution[1]))
-    if per_parcel <= 0.0 or per_cell <= 0.0:
-        # A negative coefficient is a fit, not a cost. It happens when the
-        # measurements are collinear -- two runs at the same weight, say -- and
-        # a model that says a bigger mesh runs faster would mislead worse than
-        # the prior does.
+
+    if degenerate or per_parcel <= 0.0 or per_cell <= 0.0:
+        # A negative coefficient would say a bigger mesh runs faster; a
+        # degenerate one says nothing at all about the split. Both mislead
+        # worse than keeping the prior's ratio and fitting only the scale.
         scale = float(np.mean([
             m["seconds"] / PRIOR_COST_MODEL.seconds(
                 parcels=m["parcels"], cells=m["cells"], steps=m["steps"])
             for m in usable]))
+        reason = ("the measurements do not separate parcel work from cell work "
+                  "(every run so far has the same parcels per cell)"
+                  if degenerate else
+                  "the two-term fit came out negative")
         return CostModel(
             per_parcel_s=PRIOR_COST_MODEL.per_parcel_s * scale,
             per_cell_s=PRIOR_COST_MODEL.per_cell_s * scale,
-            source=f"scaled from {len(usable)} measured run(s); the two-term "
-                   f"fit was degenerate (measurements do not separate parcel "
-                   f"work from cell work)",
+            source=f"scaled x{scale:.2f} from {len(usable)} measured run(s); "
+                   f"{reason}",
             n_measurements=len(usable),
         )
 
