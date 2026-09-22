@@ -78,6 +78,29 @@ particle_levels:
       under the 1e8 that plumetools.cai2012.checks warns at, and it is the
       single most expensive case in the study.
 
+# --- run length and write frequency ------------------------------------------
+#
+# Study-wide, so every member is averaged over the same window and written at
+# the same rate; a sweep whose members disagreed on either would not be
+# comparable member to member. Neither may be set per case through `overrides`.
+#
+# run_time_multiplier scales endTime and NOT average_start_s. The transient is a
+# measured physical statement -- the parcel count is flat after 1.32 domain
+# transits, see the note on transient_basis below -- so it stays where it is and
+# every second the multiplier adds lands inside the averaging window. At 3.0 the
+# run is 3x longer and the SAMPLED window is (3E - A)/(E - A) = 5.7x longer.
+#
+# output_frequency_multiplier divides the write interval. writeControl is
+# timeStep (see plumetools.cai2012.dictionaries.render_control_dict for why it
+# is not runTime), so the interval is a whole number of steps: 1443 -> 361 here,
+# a 3.997x increase rather than exactly 4. The manifest records both the request
+# and what was achieved. This produces ~60 writes per case instead of 5, which
+# is a lot of data on purpose -- the fields are for a convergence and
+# statistical-resolution comparison, and HPC storage is the cheaper half of this
+# study.
+run_time_multiplier: 3.0
+output_frequency_multiplier: 4.0
+
 # [PAPER] the three Knudsen numbers, on the nozzle DIAMETER.
 #
 # Generated most-rarefied-first, which is also the development order §14 of the
