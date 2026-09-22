@@ -45,6 +45,7 @@ Module map
 ``study``             ``study.yaml`` parsing, the Kn matrix crossed with the
                       numerical-particle matrix, and the manifest
 ``checks``            DSMC mesh / time-step / occupancy quality checks
+``verify``            whether the GENERATED tree is the study that describes it
 ``post``              centreline extraction, density plane, error metrics
 ====================  =========================================================
 
@@ -54,7 +55,8 @@ The family sweeps ``Kn`` (the physical matrix, **[PAPER]**) crossed with a
 numerical-particle multiplier (1x, 2x, 5x, 10x parcels). A level changes
 ``nEquivalentParticles = baseline / multiplier`` and nothing else -- not the
 mesh, not ``deltaT``, not the density -- so what it measures is statistical
-resolution rather than an accident.
+resolution rather than an accident. :mod:`plumetools.cai2012.verify` enforces
+that on the generated dictionaries before the cases are submitted.
 
 Provenance labels
 -----------------
