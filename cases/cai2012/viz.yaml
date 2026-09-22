@@ -9,7 +9,7 @@
 #
 # Or directly, for one case:
 #
-#   vifpara ../../plumetools/viz/render_slices.py Cases/Kn100 --spec viz.yaml
+#   vifpara ../../plumetools/viz/render_slices.py Cases/Kn100_np1x --spec viz.yaml
 #
 # `extends: default` inherits plumetools/viz/slices.yaml -- the image size,
 # colour preset, output paths and the U/Ttra derivations. Mappings merge key by
@@ -26,7 +26,7 @@ extends: default
 # --- where the frames go ------------------------------------------------------
 # One folder per field, frames numbered in time order:
 #
-#   Cases/Kn100/results/viz/rhoN/rhoN_0000.png
+#   Cases/Kn100_np1x/results/viz/rhoN/rhoN_0000.png
 #                                rhoN_0001.png ...
 #                           U/U_0000.png ...
 #                           manifest.yaml
@@ -45,7 +45,7 @@ output:
 # ParaView, so re-encoding at another frame rate is seconds rather than a
 # re-render:
 #
-#   python plumetools/viz/video.py Cases/Kn100/results/viz --framerate 10
+#   python plumetools/viz/video.py Cases/Kn100_np1x/results/viz --framerate 10
 #
 # A missing ffmpeg is a note, not a failure -- the frames are the output.
 video:

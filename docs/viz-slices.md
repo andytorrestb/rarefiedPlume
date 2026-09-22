@@ -12,7 +12,7 @@ share no code and answer different questions.
 ## Running it
 
 ```bash
-vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
+vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
 ```
 
 **Not `python`.** `paraview.simple` exists only inside ParaView's own
@@ -104,7 +104,7 @@ only, `./AllpostCases --viz-spec mine.yaml`.
 Both studies render **a frame per written time**, each field in its own folder:
 
 ```
-Cases/Kn100/results/viz/
+Cases/Kn100_np1x/results/viz/
     rhoN/rhoN_0000.png  rhoN_0001.png  ...  rhoN_0004.png
     U/U_0000.png        ...
     Ttra/ ...
@@ -328,7 +328,7 @@ or registered:
 ./AllpostCases --viz-spec /tmp/mine.yaml
 ```
 
-Do **not** put a spec inside a generated case directory (`Cases/Kn100/`,
+Do **not** put a spec inside a generated case directory (`Cases/Kn100_np1x/`,
 `Cases/gap06in/p005psi/`). Those are gitignored build products that
 `generate_cases.py` deletes and rewrites, so edits there are lost on the next
 regeneration.
