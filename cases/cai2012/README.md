@@ -8,6 +8,11 @@ drifting Maxwellian on the disk `r ≤ D/2` at `x = 0`, with `D = 0.2 m` and spe
 ratio `S0 = 2`. Three Knudsen numbers — 100, 0.1, 0.01 — compared against Cai's
 collisionless analytical solution.
 
+Each of those three physical cases is run at **four numerical-particle
+resolutions** — 1×, 2×, 5× and 10× the baseline parcel population — so the
+study is 3 × 4 = 12 cases. That axis varies `nEquivalentParticles` and nothing
+else; see [Two axes](#two-axes-physical-and-numerical) below.
+
 The physical nozzle exit **is** the DSMC inlet. There is no hemispherical source
 surface and no analytical inflow model anywhere in this case family; that is the
 difference from `cases/3d-inflow` and `cases/markelov1999`.
@@ -26,13 +31,24 @@ difference from `cases/3d-inflow` and `cases/markelov1999`.
 cd cases/cai2012
 
 ./generate_cases.py --dry-run    # what would be generated
-./generate_cases.py              # the three Knudsen cases
+./generate_cases.py              # 3 Knudsen cases x 4 particle levels = 12
 ./AllmeshCases                   # blockMesh + topoSet + createPatch
+./validate_cases.py              # check the 12 before spending HPC hours on them
 ./AllrunCases                    # solve
 ./AllpostCases                   # the four validation outputs, plus the study table
 ```
 
-Per case, from inside `Cases/Kn100`:
+Subsets, for a partial run or a job array:
+
+```bash
+./generate_cases.py --knudsen 100        # one physical case, all four levels
+./generate_cases.py --particles 1        # all three cases, the 1x control only
+./AllrunCases --list                     # the 12 cases, numbered
+./AllrunCases --index 0                  # one of them, by that number
+./AllrunCases --case Kn100_np2x          # or by name
+```
+
+Per case, from inside `Cases/Kn100_np1x`:
 
 ```bash
 ./Allmesh              # dictionaries + mesh + nozzle carving + verification
@@ -91,12 +107,14 @@ Two guards come with this:
 
 ```
 cases/cai2012/
-  study.yaml            the case matrix: three Knudsen numbers
-  generate_cases.py     clone baseCase per Kn, derive everything, write manifest
+  study.yaml            the case matrix: three Knudsen numbers x four particle levels
+  generate_cases.py     clone baseCase per pair, derive everything, write manifest
+  validate_cases.py     check the generated tree against study.yaml
   baseCase/             the template — case.yaml plus the scripts
     case.yaml           THE authoritative source of physical inputs
   Cases/                generated; gitignored
-    Kn100/ Kn0p1/ Kn0p01/
+    Kn100_np1x/ Kn100_np2x/ Kn100_np5x/ Kn100_np10x/
+    Kn0p1_np1x/  ...                       12 in total
       results/          centerline.csv, density_plane.csv, metrics.yaml, *.png
   manifest.yaml         generated; the auditable case → inputs map
   results/              generated; study-table.csv
@@ -105,6 +123,101 @@ cases/cai2012/
 `Cases/`, `manifest.yaml` and `results/` are gitignored: they are reproducible
 from `baseCase` and `study.yaml`, and committing a generated tree would let the
 template and its copies drift apart.
+
+## Two axes: physical, and numerical
+
+```
+kn_cases         Kn = 100, 0.1, 0.01                [PAPER]
+particle_levels  np1x, np2x, np5x, np10x            numerical resolution
+```
+
+The product is generated, one directory per pair. A level changes exactly one
+thing:
+
+```
+nEquivalentParticles = baseline / multiplier
+```
+
+because one DSMC parcel stands for `nEquivalentParticles` real molecules, so the
+numerical parcel population goes as the **reciprocal** of the weight and 10× the
+parcels means a tenth of the weight.
+
+**The baseline is never written down.** It is whatever
+`plumetools.cai2012.inflow.derive_run_settings` derives for that case from its
+own `n0` and exit cell volume — the same number this study has always used — so
+`np1x` *is* the case as it was, and the sweep cannot drift away from the study it
+extends. `study.yaml` is refused if it has no 1× level, because without the
+control the other three are unreadable.
+
+| | Kn100 | Kn0p1 | Kn0p01 |
+|---|---|---|---|
+| `np1x` weight | 3.310039e+09 | 3.310039e+12 | 5.066386e+12 |
+| `np2x` | 1.655019e+09 | 1.655019e+12 | 2.533193e+12 |
+| `np5x` | 6.620078e+08 | 6.620078e+11 | 1.013277e+12 |
+| `np10x` | 3.310039e+08 | 3.310039e+11 | 5.066386e+11 |
+| parcels at 10× | 1.2e+07 | 1.2e+07 | 7.5e+07 |
+
+Everything else is **identical across a case's four variants** — mesh, geometry,
+gas, species, boundary conditions, collision model, density, `deltaT`, and the
+transient. That is not a convention, it is checked: `./validate_cases.py`
+compares the generated dictionaries and fails if any of it moved. `study.yaml`
+may not set `dsmc.numerical_particle_multiplier` through a per-case `overrides`
+block, the same way it may not set `exit.knudsen`.
+
+### Longer runs, more frequent writes
+
+Two study-wide scales, in `study.yaml`:
+
+```yaml
+run_time_multiplier: 3.0
+output_frequency_multiplier: 4.0
+```
+
+`run_time_multiplier` scales `endTime` and **not** the averaging start. The
+transient is a measured statement about when the plume is established — the
+parcel count is flat after 1.32 domain transits — so it stays where it is and
+every second the multiplier adds lands inside the averaging window. The run is
+3× longer; the *sampled* window is 5.7× longer.
+
+`output_frequency_multiplier` divides the write interval. `writeControl` stays
+`timeStep` — see below for why it is not `runTime` — so the interval is a whole
+number of steps and 1443 → 361 is a 3.997× increase rather than exactly 4×. The
+manifest records both the request and what was achieved.
+
+| | before | after |
+|---|---|---|
+| `endTime` (Kn100) | 9.90534e-03 s | 2.97366e-02 s |
+| `deltaT` | 1.37288e-06 s | **unchanged** |
+| `writeControl` | `timeStep` | **unchanged** |
+| `writeInterval` | 1443 steps | 361 steps |
+| writes | 5 | 60 |
+| writes inside the averaging window | 3 | 49 |
+
+That is roughly 12× the output of the original study per case, and 18× the
+parcel-seconds across the sweep. Both are intended: these run on HPC, and the
+fields are for a statistical-convergence comparison that needs frames.
+
+### Variance, not just means
+
+`fieldAverage` now keeps `prime2Mean` for the two number densities:
+
+```
+rhoNMean       rhoNPrime2Mean
+dsmcRhoNMean   dsmcRhoNPrime2Mean
+```
+
+so the statistical scatter in a cell can be **measured** off the solution,
+
+```
+CV = sqrt(dsmcRhoNPrime2Mean) / dsmcRhoNMean
+```
+
+rather than estimated from an assumed parcel count — which is the quantity a
+numerical-particle convergence study is about. `dsmcRhoN` is the parcel tally, so
+its CV is the raw sampling noise; `rhoN` is the real number density, so its CV is
+the error on the quantity actually compared with Cai. `prime2Mean` stays **off**
+for the vector fields: their variance is a `symmTensor` per cell per write,
+nothing reads it, and this study writes 60 times per case.
 
 ## Only the Knudsen number is a per-case input
 
@@ -125,7 +238,12 @@ rejected with an error, not merged.
 
 `manifest.yaml` records `Kn`, `D`, `λ0`, `T0`, `U0`, `n0`, the particle weight,
 the minimum cell size and `deltaT` for every case, so a results directory can
-always be traced back to its inputs.
+always be traced back to its inputs. It also records, per case, the physical
+case it belongs to (`cai_case`), its particle level and multiplier, the baseline
+weight the level was derived from, a `mesh_id` that is equal across a group,
+`startTime` / `endTime` / `writeControl` / `writeInterval` and the multipliers
+that produced them, and the whole `fieldAverage` configuration including which
+fields keep a `prime2Mean`.
 
 ## `case.yaml` is the only place physics lives
 
