@@ -48,11 +48,39 @@ GENERATOR = "plumetools.cai2012.dictionaries"
 #: The shared library that provides ``plumeFieldInflow``.
 PLUME_LIB = "libplumeDsmcBoundaryModels.so"
 
-#: Fields ``fieldAverage`` accumulates. ``rhoN`` first: the validation is a
-#: density comparison, and a single-timestep ``rhoN`` is a one-step tally far too
-#: noisy to compare with an analytical curve.
-AVERAGED_FIELDS = ("rhoN", "rhoM", "dsmcRhoN", "momentum", "linearKE",
-                   "internalE", "iDof", "fD", "q")
+#: Fields ``fieldAverage`` accumulates, and whether it also keeps the variance.
+#:
+#: ``rhoN`` first: the validation is a density comparison, and a single-timestep
+#: ``rhoN`` is a one-step tally far too noisy to compare with an analytical
+#: curve.
+#:
+#: ``prime2Mean`` is ON for the two number densities and off for everything else.
+#: It is what turns a sampled mean into a *measured* statistical error: with
+#:
+#: .. code-block:: text
+#:
+#:     CV = sqrt(dsmcRhoNPrime2Mean) / dsmcRhoNMean
+#:
+#: the scatter in a cell can be read off the solution instead of estimated from
+#: an assumed parcel count, which is the whole point of a numerical-particle
+#: sweep. Both are kept: ``dsmcRhoN`` is the parcel tally, so its CV is the raw
+#: sampling noise, while ``rhoN`` is the real number density and its CV is the
+#: error on the quantity actually compared with Cai.
+#:
+#: OFF for the rest. ``prime2Mean`` of a vector is a symmTensor -- six extra
+#: components per cell for ``momentum``, ``fD`` and ``q`` -- and nothing reads
+#: them; the cost is written every write interval, and this study writes often.
+AVERAGED_FIELDS = {
+    "rhoN": True,
+    "rhoM": False,
+    "dsmcRhoN": True,
+    "momentum": False,
+    "linearKE": False,
+    "internalE": False,
+    "iDof": False,
+    "fD": False,
+    "q": False,
+}
 
 
 def _header(object_name: str, note: str, location: str | None = None) -> list[str]:
@@ -230,7 +258,9 @@ def render_control_dict(cfg, run) -> str:
     ``fieldAverage`` is not decoration. ``DSMCCloud::resetFields`` zeroes the
     measurement fields every timestep and ``calculateFields`` refills them, so a
     written ``rhoN`` is one step's worth of parcels -- pure shot noise against an
-    analytical curve. ``rhoNMean`` is what the post-processing reads.
+    analytical curve. ``rhoNMean`` is what the post-processing reads, and
+    ``rhoNPrime2Mean`` is how much that shot noise was -- see
+    :data:`AVERAGED_FIELDS`.
     """
     lines = _header(
         "controlDict",
@@ -299,18 +329,22 @@ def render_control_dict(cfg, run) -> str:
         "        type            fieldAverage;",
         "        libs            (fieldFunctionObjects);",
         "        writeControl    writeTime;",
-        "        // Everything before this is transient and is discarded.",
+        "        // Everything before this is transient and is discarded. It is",
+        "        // NOT moved by dsmc.run_time_multiplier: a longer run buys more",
+        "        // samples after the plume is established, not a longer startup.",
         f"        timeStart       {run.average_start_s:g};",
+        f"        // {run.sampling_time_s:g} s of sampling,"
+        f" {run.n_sampled_writes} of the {run.n_writes} writes.",
         "",
         "        fields",
         "        (",
     ]
-    for name in AVERAGED_FIELDS:
+    for name, prime2mean in AVERAGED_FIELDS.items():
         lines += [
             f"            {name}",
             "            {",
             "                mean        on;",
-            "                prime2Mean  off;",
+            f"                prime2Mean  {'on' if prime2mean else 'off'};",
             "                base        time;",
             "            }",
         ]

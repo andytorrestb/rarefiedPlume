@@ -248,7 +248,9 @@ def _list_arrays(renderer, spec) -> int:
     from plumetools.viz.catalog import catalog_entry
     from plumetools.viz.render import array_ranges, component_range, resolve_times
 
-    times = resolve_times(renderer.reader.TimestepValues, spec.sampling.time)
+    times = resolve_times(renderer.reader.TimestepValues, spec.sampling.time,
+                          time_min=spec.sampling.time_min,
+                          time_max=spec.sampling.time_max)
     time = times[-1]
     available = array_ranges(renderer.reader, time,
                              spec.sampling.field_type)

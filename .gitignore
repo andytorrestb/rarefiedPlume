@@ -93,6 +93,38 @@ cases/cai2012/results/
 cases/cai2012/*/results/
 cases/cai2012/*/case-summary.json
 
+# cai2012-health, the statistical-health sweep. Same rules, one directory level
+# deeper: its Cases/ tree is Cases/<weight>/<sampling>, built by CaseFoam.
+cases/cai2012-health/baseCase/system/blockMeshDict
+cases/cai2012-health/baseCase/system/topoSetDict
+cases/cai2012-health/baseCase/system/createPatchDict
+cases/cai2012-health/baseCase/system/meshQualityDict
+cases/cai2012-health/baseCase/system/controlDict
+cases/cai2012-health/baseCase/system/dsmcInitialiseDict
+cases/cai2012-health/baseCase/system/decomposeParDict
+cases/cai2012-health/baseCase/system/fvSchemes
+cases/cai2012-health/baseCase/system/fvSolution
+cases/cai2012-health/baseCase/constant/
+cases/cai2012-health/Cases/
+cases/cai2012-health/manifest.yaml
+cases/cai2012-health/baseCase/results/
+cases/cai2012-health/baseCase/case-summary.json
+# CaseFoam writes these into the study directory, as it does for markelov1999:
+# mkAllRunClean and mkRmCases open their files relative to the cwd, and
+# clone_cases chdirs here. They are its output, not ours -- and its Allrun
+# launches every case CONCURRENTLY, which for nine DSMC runs on one machine is
+# nine runs that all get killed. Use ./AllrunCases.
+cases/cai2012-health/Allrun
+cases/cai2012-health/Allclean
+cases/cai2012-health/rmCases
+
+# results/ is generated too -- EXCEPT cost-model.yaml, which is the measured
+# wall clock of every case that has run. Eleven hours of solver to reproduce,
+# and it is what turns ./generate_cases.py --dry-run's estimate from a prior
+# into a fit, so it is committed rather than rebuilt.
+cases/cai2012-health/results/*
+!cases/cai2012-health/results/cost-model.yaml
+
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a
 # Pointwise export that cannot be reproduced without an interactive licensed

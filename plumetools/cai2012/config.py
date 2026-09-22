@@ -245,7 +245,30 @@ class DsmcConfig:
             were switched off to make it.
         n_equivalent_particles: particle weight. ``null`` -> derived from
             ``resolution``.
+        numerical_particle_multiplier: how many times the baseline numerical
+            **parcel** population this case carries. One parcel stands for
+            ``nEquivalentParticles`` real molecules, so ``N_numerical`` goes as
+            ``1 / nEquivalentParticles`` and the weight is *divided* by this:
+
+            .. code-block:: text
+
+                nEquivalentParticles = baseline / numerical_particle_multiplier
+
+            ``1.0`` is the baseline and leaves the weight exactly as derived (or
+            exactly as pinned). It changes no physics -- the density, the mesh
+            and the time step are untouched -- only how finely the same physical
+            gas is sampled, which is what a statistical-resolution sweep varies.
+        run_time_multiplier: scale on ``end_time_s``, applied **after** the
+            transient is fixed, so every extra second is sampling time and
+            ``average_start_s`` does not move. ``1.0`` is the baseline.
+        output_frequency_multiplier: how many times more often to write than the
+            baseline schedule. ``writeControl`` is ``timeStep``, so the interval
+            is an integer number of steps and is rounded to the nearest one;
+            :class:`~plumetools.cai2012.inflow.RunSettings` records the ratio
+            actually achieved. ``1.0`` is the baseline.
         delta_t_s: time step [s]. ``null`` -> derived from ``courant_target``.
+            **Not** touched by any of the multipliers above: a particle-count
+            sweep that also moved the time step would confound the two.
         courant_target: fraction of the smallest cell a fast molecule may cross
             per step, used for the derivation.
         end_time_s, average_start_s, write_interval_s: ``null`` -> derived from
@@ -263,6 +286,9 @@ class DsmcConfig:
     binary_collision_model: str = "VariableHardSphere"
     collisions_enabled: bool = True
     n_equivalent_particles: float | None = None
+    numerical_particle_multiplier: float = 1.0
+    run_time_multiplier: float = 1.0
+    output_frequency_multiplier: float = 1.0
     delta_t_s: float | None = None
     courant_target: float = 0.2
     end_time_s: float | None = None
@@ -533,6 +559,10 @@ def validate(cfg: CaiCaseConfig, path: Path | str = "case.yaml") -> None:
             cfg.resolution.target_particles_per_cell,
         "resolution.reference_knudsen": cfg.resolution.reference_knudsen,
         "dsmc.courant_target": cfg.dsmc.courant_target,
+        "dsmc.numerical_particle_multiplier":
+            cfg.dsmc.numerical_particle_multiplier,
+        "dsmc.run_time_multiplier": cfg.dsmc.run_time_multiplier,
+        "dsmc.output_frequency_multiplier": cfg.dsmc.output_frequency_multiplier,
         "dsmc.initial_number_density_per_m3": cfg.dsmc.initial_number_density_per_m3,
         "dsmc.initial_temperature_K": cfg.dsmc.initial_temperature_K,
     }

@@ -7,6 +7,11 @@
 #     ./generate_cases.py                 every enabled case
 #     ./generate_cases.py --dry-run       show what would be generated
 #     ./generate_cases.py --knudsen 100   only these Knudsen numbers
+#     ./generate_cases.py --particles 1   only these numerical-particle levels
+#
+# TWO AXES. The physical matrix below (kn_cases) crossed with the
+# numerical-particle matrix (particle_levels) -- 3 x 4 = 12 generated cases,
+# named Cases/<KnCase>_<level>, e.g. Cases/Kn100_np1x.
 #
 # To skip a case, set enabled: false. The entry STAYS -- it is the record of the
 # intended matrix, and deleting it would lose the fact that the case exists.
@@ -19,6 +24,82 @@
 base_case: baseCase
 cases_dir: Cases
 manifest_name: manifest.yaml
+
+# --- the numerical-particle axis ---------------------------------------------
+#
+# THE PHYSICAL CASES BELOW ARE UNCHANGED BY THIS. Each Knudsen case is generated
+# once per level, and the only thing a level changes is the particle weight:
+#
+#     nEquivalentParticles = baseline / multiplier
+#
+# because one parcel stands for nEquivalentParticles molecules, so the numerical
+# parcel population goes as the reciprocal of the weight. The mesh, the density,
+# the gas, the boundary conditions, the collision model, the time step and the
+# transient are identical across a case's four variants -- which is the only way
+# the comparison between them says anything about statistical resolution.
+#
+# The BASELINE is never written here. It is whatever
+# plumetools.cai2012.inflow.derive_run_settings derives for that case from its
+# own n0 and exit cell volume, so np1x runs at exactly the weight this study has
+# always run at and the sweep cannot drift away from the study it extends. The
+# 1x level is required for that reason: generation refuses a matrix without it.
+#
+# Cost goes as the parcel count, so np10x is roughly ten times np1x and this
+# axis alone is ~18x the parcel-seconds of the original study. That is the
+# intended trade -- see cases/cai2012/README.md.
+particle_levels:
+  - name: np1x
+    multiplier: 1.0
+    enabled: true
+    note: >-
+      THE CONTROL. Exactly the nEquivalentParticles this study has always used,
+      i.e. resolution.target_particles_per_cell = 20 in the exit cell. Every
+      other level is read against it, and its centreline errors must still
+      reproduce the published ones.
+
+  - name: np2x
+    multiplier: 2.0
+    enabled: true
+    note: >-
+      Twice the parcels, so ~sqrt(2) less scatter if the noise is Poisson. The
+      first point that can distinguish statistical noise from a real bias:
+      a discrepancy that halves in variance here was noise, one that does not
+      is not.
+
+  - name: np5x
+    multiplier: 5.0
+    enabled: true
+
+  - name: np10x
+    multiplier: 10.0
+    enabled: true
+    note: >-
+      The converged end of the axis. At Kn = 0.01 this is ~7.5e7 parcels, just
+      under the 1e8 that plumetools.cai2012.checks warns at, and it is the
+      single most expensive case in the study.
+
+# --- run length and write frequency ------------------------------------------
+#
+# Study-wide, so every member is averaged over the same window and written at
+# the same rate; a sweep whose members disagreed on either would not be
+# comparable member to member. Neither may be set per case through `overrides`.
+#
+# run_time_multiplier scales endTime and NOT average_start_s. The transient is a
+# measured physical statement -- the parcel count is flat after 1.32 domain
+# transits, see the note on transient_basis below -- so it stays where it is and
+# every second the multiplier adds lands inside the averaging window. At 3.0 the
+# run is 3x longer and the SAMPLED window is (3E - A)/(E - A) = 5.7x longer.
+#
+# output_frequency_multiplier divides the write interval. writeControl is
+# timeStep (see plumetools.cai2012.dictionaries.render_control_dict for why it
+# is not runTime), so the interval is a whole number of steps: 1443 -> 361 here,
+# a 3.997x increase rather than exactly 4. The manifest records both the request
+# and what was achieved. This produces ~60 writes per case instead of 5, which
+# is a lot of data on purpose -- the fields are for a convergence and
+# statistical-resolution comparison, and HPC storage is the cheaper half of this
+# study.
+run_time_multiplier: 3.0
+output_frequency_multiplier: 4.0
 
 # [PAPER] the three Knudsen numbers, on the nozzle DIAMETER.
 #

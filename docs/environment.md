@@ -145,7 +145,7 @@ export PVPYTHON_PATH=/path/to/pvpython
 Then render, **through the `vifpara` launcher, never `python`**:
 
 ```bash
-vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
+vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
 ```
 
 The launcher re-runs the script inside `pvpython` with `PV_VENV` set to this

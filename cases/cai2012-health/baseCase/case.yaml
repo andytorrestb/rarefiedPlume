@@ -1,0 +1,298 @@
+# cases/cai2012-health/baseCase -- statistical health of the Cai Kn = 100 case.
+#
+# Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless
+# Rocket Plume Solutions", Journal of Spacecraft and Rockets, Vol. 49, No. 1,
+# 2012.
+#
+# THE AUTHORITATIVE SOURCE OF PHYSICAL INPUTS FOR THIS FAMILY.
+#
+# This is cases/cai2012/baseCase/case.yaml with Kn pinned at 100 and four
+# settings changed, each marked [HEALTH] below. Everything else is the same
+# file, so a case here IS a cai2012 case: the same ./Allmesh, ./Allrun,
+# plumetools.cai2012.{config,mesh,inflow,checks,post} and the same generated
+# dictionaries. Nothing about this family is forked.
+#
+# WHAT THIS FAMILY IS FOR
+#
+#   cases/cai2012 measures how well DSMC reproduces Cai's collisionless
+#   solution. It never measures how much STATISTICAL NOISE its own answer
+#   carries. plumetools/cai2012/checks.py::_check_occupancy prints an ESTIMATED
+#   exit-cell occupancy and says outright that only a post-run audit of the
+#   sampled dsmcRhoN field can say what it actually was. This family is that
+#   audit, and the rendered imagery is how it is judged.
+#
+# Values are tagged as in the parent file, with one addition:
+#
+#   [PAPER]       printed in Cai & Wang 2012
+#   [DERIVED]     computed, never a literal
+#   [ASSUMPTION]  not in the paper; an implementation choice
+#   [HEALTH]      changed from cases/cai2012 for THIS study, with the reason
+#   [SWEPT]       written per case by generate_cases.py -- the two axes
+#
+# generate_cases.py writes EXACTLY TWO keys per case:
+#
+#   resolution.target_particles_per_cell     the parcels axis
+#   dsmc.sampling_domain_transits            the averaging axis
+#
+# and nothing else. Everything else here is identical in all nine cases, which
+# is what makes them comparable image to image. study.yaml has no override
+# mechanism at all; to change something for the whole matrix, change it here.
+#
+# See cases/cai2012-health/README.md and docs/cai2012-case.md.
+
+model: cai2012_circular_plume
+
+meta:
+  reference: Cai and Wang 2012
+  title: Numerical Validations for a Set of Collisionless Rocket Plume Solutions
+  authors: Cai, Wang
+  journal: Journal of Spacecraft and Rockets
+  volume: 49
+  number: 1
+  year: 2012
+  study: statistical health sweep -- parcels per cell x averaging duration
+  # generate_cases.py fills in case_name and the two swept values per case.
+
+# --- the circular nozzle exit -------------------------------------------------
+nozzle:
+  diameter_m: 0.2              # [PAPER] D = 0.2 m. R0 = 0.1 m is DERIVED --
+                               # there is deliberately no radius key.
+
+# --- the exit state -----------------------------------------------------------
+exit:
+  speed_ratio: 2.0             # [PAPER] S0 = U0 / sqrt(2 R T0)
+  T0_K: 300.0                  # [ASSUMPTION] as in cases/cai2012; see
+                               # docs/cai2012-case.md §3.1. Changing it rescales
+                               # U0 and n0 together and leaves every normalised
+                               # curve unchanged.
+  knudsen: 100.0               # [HEALTH] PINNED, not swept. This family exists
+                               # to explain the speckle in the Kn = 100 imagery
+                               # -- the most rarefied case in cases/cai2012 and
+                               # therefore the one with the fewest molecules per
+                               # parcel-worth of signal. At another Kn the
+                               # density, the parcel count and the picture all
+                               # change together, and nothing here would be
+                               # comparable with that case.
+                               #
+                               # generate_cases.py REFUSES to run if this is not
+                               # 100: it is the one value the whole matrix
+                               # shares, so a silent edit here would invalidate
+                               # every comparison downstream.
+  characteristic_length: diameter   # [PAPER] Cai states the nozzle DIAMETER.
+
+# --- the gas ------------------------------------------------------------------
+# Unchanged from cases/cai2012. omega = 0.74 is the repository's argon rather
+# than Bird's 0.81; the difference is a 0.4% uniform shift in n0 and cannot
+# affect a sweep in which every case runs the same gas.
+gas:
+  species_name: Ar
+  mass_kg: 6.63e-26
+  diameter_m: 4.17e-10
+  omega: 0.74
+  t_ref_K: 273.0
+  internal_degrees_of_freedom: 0
+  mean_free_path_convention: vhs
+
+# --- the domain ---------------------------------------------------------------
+# Identical to cases/cai2012. The rendered slice is the same cut of the same box
+# in every case of this family AND in that one, which is what lets the contact
+# sheet be compared against the published Kn100 imagery.
+geometry:
+  symmetry_mode: none
+  x_max_over_D: 10.0           # [PAPER] Cai plots 0 <= X/D <= 10
+  y_half_over_D: 10.0          # [PAPER] |Y|/D <= 10
+  z_half_over_D: 10.0          # [PAPER] |Z|/D <= 10
+  plume_axis: [1, 0, 0]
+
+# --- the mesh -----------------------------------------------------------------
+# IDENTICAL to cases/cai2012, deliberately and load-bearingly.
+#
+# 1,310,720 cells with a 10 mm uniform core. The particle-weight axis changes
+# dsmc.n_equivalent_particles ONLY -- the mesh is a function of Kn and the mesh
+# block, neither of which this family varies -- so all nine cases run on the
+# same geometry, the same cell volumes and the same cut plane. Two cases on two
+# meshes would still generate, still run, and still draw nine plausible
+# pictures; manifest.yaml reports n_cells per case for exactly that reason.
+mesh:
+  type: graded_cartesian
+  core_cell_size_m: null       # null -> min(target_cell_over_mfp * lambda0,
+                               #             max_core_cell_over_D * D) = 10 mm
+  target_cell_over_mfp: 1.0    # [PAPER] Cai states dx / lambda0 = 1
+  max_core_cell_over_D: 0.05   # [ASSUMPTION] 20 cells across the diameter, and
+                               # at Kn = 100 this is what sets the cell: lambda0
+                               # is 20 m, a hundred nozzle diameters.
+  core_x_over_D: 2.0
+  core_half_over_D: 1.5
+  outer_x_cells: 40
+  outer_lateral_cells: 34
+  outer_expansion: 40.0
+  max_cells: 4000000
+  min_core_cell_size_m: null
+  patch_names:
+    nozzle: nozzle
+    upstream_vacuum: upstreamVacuum
+    outer: vacuum
+    symmetry: symmetry
+
+# --- DSMC ---------------------------------------------------------------------
+dsmc:
+  binary_collision_model: VariableHardSphere   # [PAPER] VHS, NTC by construction
+  collisions_enabled: true     # ON, as in cases/cai2012. At Kn = 100 the solver
+                               # reports "No collisions" on most steps, and that
+                               # is the point: DSMC approaches the collisionless
+                               # solution by itself rather than by fiat.
+
+  n_equivalent_particles: null # null -> DERIVED so the exit cell reaches
+                               # resolution.target_particles_per_cell. This is
+                               # the one thing the parcels axis actually changes:
+                               #
+                               #   weight = n0 * V_exit / target
+                               #
+                               # so target 5 / 20 / 40 gives four times, one
+                               # times and half the baseline weight, and four
+                               # times, one times and twice the parcel count.
+                               # The mesh, the time step and the physics are
+                               # untouched.
+
+  delta_t_s: null              # null -> DERIVED from courant_target. Identical
+  courant_target: 0.2          # in every case: 1.373e-6 s on this mesh. The
+                               # frames of two cases therefore land at the SAME
+                               # solver times, which the overlap check and the
+                               # contact sheet both depend on.
+
+  end_time_s: null             # null -> average_start + sampling transits
+  average_start_s: null        # null -> the transient below
+
+  write_interval_s: 3.536e-4   # [HEALTH] PINNED, and the most consequential
+                               # choice in this file.
+                               #
+                               # cases/cai2012 leaves this null, which derives an
+                               # interval giving about two writes inside the
+                               # sampling window -- enough to post-process, not
+                               # enough to see anything converge. This family
+                               # needs MANY frames per run: the running mean has
+                               # to be captured repeatedly as it settles, so
+                               # every case carries its own convergence curve.
+                               #
+                               # 3.536e-4 s is ONE EIGHTH of a domain transit
+                               # (x_max / U0 = 2.829e-3 s), which is 258 steps at
+                               # the deltaT above. That gives
+                               #
+                               #     0.5 transits ->  4 sampled frames
+                               #     1.5 transits -> 12 sampled frames
+                               #     4.5 transits -> 36 sampled frames
+                               #
+                               # -- the 1:3:9 ratio of the sampling axis itself,
+                               # so frame k is the same elapsed averaging time in
+                               # every case of a row.
+                               #
+                               # Why not finer: each write is ~255 MB of fields
+                               # plus the parcel cloud, and ~20 s of rendering
+                               # per image. At 1/16 transit the matrix is 300 GB
+                               # and the imagery step takes longer than the
+                               # solve, which is the failure mode this value is
+                               # chosen against. Why not coarser: at 1/4 transit
+                               # the shortest case gets two frames, and two
+                               # points are not a curve.
+                               #
+                               # It is a fixed number of SECONDS, not of frames,
+                               # so every case writes at the same solver times.
+                               # A per-case frame count would put the frames at
+                               # different times in different cases and neither
+                               # the overlap check nor the contact sheet would
+                               # have anything to line up.
+
+  transient_basis: transits    # [HEALTH] 'transits', matching what
+  transient_collision_times: 10000.0   # cases/cai2012/study.yaml overrides its
+  transient_domain_transits: 2.0       # three cases to, rather than the
+                               # template's 'cai' default. The baseline cell of
+                               # this matrix (20 parcels/cell, 1.5 transits) has
+                               # to be the SAME RUN as cases/cai2012's Kn100 or
+                               # it is not a control, and that case runs 2
+                               # transits of transient.
+                               #
+                               # Held fixed across the matrix. The transient is
+                               # not a statistical-quality knob -- it decides
+                               # whether the flow is steady, not how well it is
+                               # sampled -- and varying it would confound the two
+                               # axes with a third. Its cost is real and is
+                               # documented in docs/cai2012-case.md §5.1: at 2
+                               # transits the far field beyond X/D ~ 5 is
+                               # transient-limited, not converged. That bias is
+                               # IDENTICAL in all nine cases, so it cancels in
+                               # every comparison this family makes -- and it is
+                               # why the study's conclusions are stated over
+                               # X/D <= 3 as well as over the whole range.
+
+  sampling_domain_transits: 1.5   # [SWEPT] the averaging axis. 1.5 is the
+                               # baseline -- what cases/cai2012 runs -- and
+                               # generate_cases.py overwrites it per case with
+                               # the values in study.yaml.
+
+  initial_number_density_per_m3: 1.0e+10   # near-vacuum seed, not a physical
+  initial_temperature_K: 300.0             # state
+
+  n_subdomains: 12             # 12, not 24: this machine has 12 physical cores
+                               # and Open MPI counts cores, not hardware
+                               # threads, when it decides how many slots exist.
+                               # Identical in every case -- the decomposition is
+                               # part of what makes two runs bit-identical, and
+                               # the overlap check would fail on a case that
+                               # used a different one.
+
+# --- particle resolution ------------------------------------------------------
+# THE FIRST SWEEP AXIS.
+#
+# Standard dsmcFoam has ONE particle weight for the whole domain
+# (DSMCCloud::nParticle_ is a single scalar). There is no radial or adaptive
+# weighting, so this target can be met in exactly one place, and it is met at
+# the EXIT CELL -- the densest in the domain. Everywhere else the occupancy
+# falls with the density, and how far it falls is one of the things this family
+# exists to measure rather than estimate.
+resolution:
+  target_particles_per_cell: 20.0   # [SWEPT] the parcels axis. 20 is the
+                               # baseline; study.yaml sweeps 5 / 20 / 40 around
+                               # it, bracketing checks.min_particles_per_cell
+                               # below and the baseline above.
+  reference_knudsen: 0.01      # [PAPER] Cai refers dx/lambda0 and dt/t0 to the
+                               # Kn = 0.01 exit properties for EVERY case.
+  report_only: false
+
+# --- DSMC quality checks ------------------------------------------------------
+checks:
+  enabled: true
+  max_cell_over_mfp: 1.0
+  max_courant: 1.0
+  warn_courant: 0.5
+  min_particles_per_cell: 5.0  # [HEALTH] unchanged in value, but note what it
+                               # means here: the ppc005 row of this matrix sits
+                               # exactly ON this floor by construction, so
+                               # ./Allmesh will report it as a pass at the
+                               # boundary. That is intended -- the point of the
+                               # row is to find out what a solution AT the floor
+                               # actually looks like, which no threshold can
+                               # answer.
+  min_nozzle_faces: 12
+  max_nozzle_area_error: 0.05
+
+# --- generated dictionaries ---------------------------------------------------
+output:
+  dialect: standard            # OpenFOAM's own dsmcFoam, v2512
+  inflow_model: plumeFieldInflow   # applications/dsmcBoundaryModels. The case
+                               # FAILS if the library is not compiled; there is
+                               # no fallback. See docs/plume-field-inflow.md.
+
+# --- post-processing ----------------------------------------------------------
+post:
+  centerline_x_over_D_max: 10.0     # [PAPER] Cai Figs. 19-21
+  centerline_points: 200
+  centerline_radius_over_D: 0.10    # [ASSUMPTION] as in cases/cai2012, so the
+                               # centreline errors this family reports are the
+                               # same estimator as that family's published ones
+                               # and the baseline cell can be checked against
+                               # them directly.
+  plane: xz                    # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+  plane_half_over_D: 5.0
+  contour_levels: [0.1, 0.01, 0.001]   # [PAPER] the levels Cai draws
+  plane_points_x: 240
+  plane_points_lateral: 240

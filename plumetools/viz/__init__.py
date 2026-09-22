@@ -24,14 +24,22 @@ So the split is strict:
 :mod:`~.catalog`        no ParaView           what the dsmcFoam fields *are*
 :mod:`~.resolve`        no ParaView           which time, which field, what scale
 :mod:`~.video`          no ParaView           frames -> video, through ffmpeg
+:mod:`~.dissect`        no ParaView           contact sheets and convergence
+                                              curves, through ffmpeg
 :mod:`~.render`         **imports ParaView**  turns a spec into PNGs
 ``render_slices.py``    **imports ParaView**  the command-line entry point
 ======================  ====================  ==============================
 
-:mod:`~.video` is on the ParaView-free side deliberately, not incidentally:
-re-encoding a study at another frame rate is then seconds of work rather than
-twenty minutes of re-rendering, and it runs on a machine with no ParaView at
-all.
+:mod:`~.video` and :mod:`~.dissect` are on the ParaView-free side deliberately,
+not incidentally: re-encoding a study at another frame rate, or re-cutting a
+case matrix into a contact sheet, is then seconds of work rather than twenty
+minutes of re-rendering, and both run on a machine with no ParaView at all.
+
+Neither is imported here. They need ``ffmpeg`` at *run* time but not at import
+time, and keeping them out of the package namespace means importing
+:mod:`plumetools.viz` stays as cheap as it is for the schema modules::
+
+    from plumetools.viz import dissect, video
 
 Importing :mod:`plumetools.viz` gives you the first three and never touches
 ParaView. :mod:`plumetools.viz.render` is imported lazily, by name, only by the

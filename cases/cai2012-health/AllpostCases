@@ -1,0 +1,176 @@
+#!/bin/bash
+#
+# Post-process, audit, render and dissect the whole health matrix.
+#
+#   ./AllpostCases                post-process, audit, render, then dissect
+#   ./AllpostCases --no-viz       everything except the imagery and the sheets
+#   ./AllpostCases --viz-only     imagery only
+#   ./AllpostCases --analyse-only the matrix-level step only (needs the rest done)
+#   ./AllpostCases --no-audit     skip the per-frame audit (much quicker)
+#   ./AllpostCases --stride N     audit every Nth frame
+#   ./AllpostCases --viz-spec F   render with sampling configuration F
+#   ./AllpostCases --keep-going   do not stop at the first failure
+#   ./AllpostCases --help
+#
+# Four steps, in this order:
+#
+#   1. <case>/Allpost      the four Cai validation outputs at the latest time.
+#                          UNCHANGED from cases/cai2012 -- byte-identical script.
+#   2. <case>/Allaudit.py  measured parcel occupancy per region, and the
+#                          centreline error at EVERY sampled frame
+#   3. render              one vifpara invocation for all nine cases, ./viz.yaml
+#   4. ./analyse.py        overlap check, sweep table, contact sheets, curves
+#
+# UNLIKE cases/cai2012, THE IMAGERY IS NOT A SURVEY HERE. That family calls its
+# images "a survey, not a result" and runs them after the numbers so a failed
+# render never costs anyone the validation outputs. This family is judged
+# primarily through imagery: the contact sheet is its headline artefact and the
+# convergence curves are computed from the frames themselves.
+#
+# The ordering is kept anyway, and for the same reason. The physical numbers --
+# metrics.yaml, occupancy.yaml, convergence.yaml -- are on disk before ffmpeg or
+# ParaView is asked for anything, so a machine with neither still produces every
+# quantitative result. An image metric that outlived its physical counterpart
+# would be the one outcome this study must not produce.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+KEEP_GOING=0
+VIZ=1
+VIZ_ONLY=0
+ANALYSE_ONLY=0
+AUDIT=1
+ANALYSE=1
+STRIDE=1
+VIZ_SPEC=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)   KEEP_GOING=1 ;;
+        --no-viz)       VIZ=0 ;;
+        --viz-only)     VIZ_ONLY=1 ;;
+        --analyse-only) ANALYSE_ONLY=1 ;;
+        --no-audit)     AUDIT=0 ;;
+        --no-analyse)   ANALYSE=0 ;;
+        --stride)       shift; STRIDE=${1:?"--stride needs a number"} ;;
+        --viz-spec)     shift; VIZ_SPEC=${1:?"--viz-spec needs a file"} ;;
+        -h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)              echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# --------------------------------------------------------------------------- #
+# mid-plane imagery
+#
+# One vifpara invocation for the whole matrix, not one per case: ParaView's
+# startup and the reader's mesh scan cost more than the rendering does for a
+# small case, and paying them once is the difference between a step you leave
+# switched on and one you turn off.
+# --------------------------------------------------------------------------- #
+render_midplane() {
+    local root=../.. renderer spec
+    renderer=$root/plumetools/viz/render_slices.py
+    spec=${VIZ_SPEC:-viz.yaml}    # THIS study's settings, beside this script
+
+    echo "=============================================================="
+    echo "### mid-plane imagery"
+
+    if ! have vifpara; then
+        echo "    skipped: 'vifpara' is not on PATH."
+        echo "             pip install -e \".[viz]\", and install ParaView 5.11-5.13"
+        echo "             separately; see docs/environment.md."
+        echo "             Every physical result above is unaffected."
+        return 0
+    fi
+    [ -f "$renderer" ] || { echo "AllpostCases: no $renderer" >&2; return 1; }
+    [ -f "$spec" ]     || { echo "AllpostCases: no spec at $spec" >&2; return 1; }
+
+    echo "    spec      $spec"
+    echo "    NOTE      prefer_mean is ON here, and the sampling window keeps"
+    echo "              the series to frames that HAVE a *Mean field. Both are"
+    echo "              the opposite of cases/cai2012's spec, on purpose --"
+    echo "              this study measures the average converging."
+    echo ""
+    # NOT 'python': paraview.simple exists only inside ParaView's interpreter,
+    # and the vifpara launcher is what puts this venv in there.
+    vifpara "$renderer" "${CASES[@]}" --spec "$spec"
+}
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+mapfile -t CASES < <($PYTHON - <<'PY'
+import yaml
+document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
+for entry in document.get("cases", []):
+    print(entry["path"])
+PY
+) || die "could not read manifest.yaml"
+
+[ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+if [ "$VIZ_ONLY" -eq 1 ]; then
+    render_midplane || die "rendering failed"
+    exit 0
+fi
+
+if [ "$ANALYSE_ONLY" -eq 1 ]; then
+    exec $PYTHON analyse.py
+fi
+
+echo "### post-processing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    echo "=============================================================="
+    if [ -f "$case_path/Allpost" ]; then
+        ( [ -x "$case_path/Allpost" ] && "$case_path/Allpost" \
+            || bash "$case_path/Allpost" ) || FAILED+=("$case_path")
+    else
+        echo "AllpostCases: $case_path has no Allpost" >&2
+        FAILED+=("$case_path")
+    fi
+
+    if [ "$AUDIT" -eq 1 ] && [ -f "$case_path/Allaudit.py" ]; then
+        echo ""
+        ( cd "$case_path" && $PYTHON Allaudit.py --stride "$STRIDE" ) \
+            || FAILED+=("$case_path (audit)")
+    fi
+
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Use --keep-going to continue with the rest."
+    fi
+    echo ""
+done
+
+VIZ_FAILED=0
+if [ "$VIZ" -eq 1 ]; then
+    render_midplane || VIZ_FAILED=1
+    echo ""
+fi
+
+if [ "$ANALYSE" -eq 1 ]; then
+    echo "=============================================================="
+    ANALYSE_ARGS=()
+    [ "$VIZ" -eq 1 ] || ANALYSE_ARGS+=("--no-sheets")
+    $PYTHON analyse.py "${ANALYSE_ARGS[@]+"${ANALYSE_ARGS[@]}"}" \
+        || die "the matrix-level analysis failed (see above)"
+fi
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "AllpostCases: ${#FAILED[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+[ "$VIZ_FAILED" -eq 0 ] || die "the mid-plane imagery failed (see above).
+       Every physical result is complete; re-run just the imagery with
+       ./AllpostCases --viz-only, then ./AllpostCases --analyse-only"
+echo "### done"

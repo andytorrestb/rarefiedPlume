@@ -1,31 +1,29 @@
 #!/bin/bash
 #
-# Mesh every generated case.
+# Mesh every case of the health matrix.
 #
 #   ./AllmeshCases                 mesh all of them
 #   ./AllmeshCases --dict-only     write dictionaries only (no OpenFOAM needed)
 #   ./AllmeshCases --keep-going    do not stop at the first failure
 #   ./AllmeshCases --help
 #
-# SELECTING CASES -- for a job array
-#
-#   ./AllmeshCases --list              the case list, numbered, one per line
-#   ./AllmeshCases --index 0           only case 0 (0-based, as --list prints it)
-#   ./AllmeshCases --case Kn100_np2x   only this case, by name or by path
-#
-# --index is what an array task uses. With 12 cases:
-#
-#   #SBATCH --array=0-11
-#   ./AllmeshCases --index "$SLURM_ARRAY_TASK_ID"
-#
-# The order is manifest.yaml's, which generate_cases.py fixed: decreasing
-# Knudsen number, and within each case increasing particle multiplier. It does
-# not depend on directory iteration order, so index N means the same case on
-# every node and in every rerun.
-#
 # Cases come from manifest.yaml, in the order generate_cases.py wrote them --
-# sorted by decreasing Knudsen number, so the sequence is reproducible and does
+# whole weight rows in increasing cost, so the sequence is reproducible and does
 # not depend on directory iteration order.
+#
+# EVERY CASE HERE HAS THE SAME MESH, and each one still builds its own.
+#
+# The particle-weight axis changes dsmc.n_equivalent_particles only; the mesh
+# follows from Kn and the mesh block, neither of which this family varies. So
+# all nine meshes come out identical -- 1,310,720 cells with a 10 mm core -- and
+# meshing nine times costs about half an hour and ~9 GB more than meshing once
+# and copying.
+#
+# It is still done nine times, on purpose. plumetools.cai2012.study prunes
+# constant/polyMesh out of every clone precisely so that no case can inherit
+# another's geometry, and a study whose comparability rests on the meshes being
+# identical should DEMONSTRATE that rather than arrange it. The cell count of
+# every case is in manifest.yaml, and generate_cases.py fails if they disagree.
 #
 # Each case meshes itself from its own case.yaml. Nothing here writes into a
 # case; it only invokes ./Allmesh in each.
@@ -35,16 +33,11 @@ SELF=${0##*/}
 cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
 
 ARGS=()
-SELECT=()
-LIST=0
 KEEP_GOING=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --keep-going) KEEP_GOING=1 ;;
         --dict-only)  ARGS+=("--dict-only") ;;
-        --list)        LIST=1 ;;
-        --index)       shift; SELECT+=("${1:?"--index needs a case number"}") ;;
-        --case)        shift; SELECT+=("${1:?"--case needs a case name"}") ;;
         -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
         *)            echo "AllmeshCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
@@ -71,48 +64,6 @@ PY
 ) || die "could not read manifest.yaml"
 
 [ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
-
-# --------------------------------------------------------------------------- #
-# case selection
-# --------------------------------------------------------------------------- #
-#
-# The manifest order is the contract -- see --help. Selecting by index rather
-# than by globbing is what lets a job array address one case per task without
-# every task having to agree about how a shell sorts names.
-
-if [ "$LIST" -eq 1 ]; then
-    for i in "${!CASES[@]}"; do
-        printf '%d\t%s\n' "$i" "${CASES[$i]}"
-    done
-    exit 0
-fi
-
-if [ ${#SELECT[@]} -gt 0 ]; then
-    PICKED=()
-    for want in "${SELECT[@]}"; do
-        FOUND=""
-        case "$want" in
-            ''|*[!0-9]*)
-                # A name or a path.
-                for case_path in "${CASES[@]}"; do
-                    if [ "$case_path" = "$want" ] || [ "${case_path##*/}" = "$want" ]; then
-                        FOUND=$case_path
-                        break
-                    fi
-                done
-                [ -n "$FOUND" ] || die "no case '$want' in manifest.yaml.
-       Use --list to see the ${#CASES[@]} case(s) it holds." ;;
-            *)
-                # An index, 0-based.
-                [ "$want" -lt ${#CASES[@]} ] || die "--index $want is past the
-       end: manifest.yaml holds ${#CASES[@]} case(s), so the valid range is
-       0-$(( ${#CASES[@]} - 1 )). Use --list to see them."
-                FOUND=${CASES[$want]} ;;
-        esac
-        PICKED+=("$FOUND")
-    done
-    CASES=("${PICKED[@]}")
-fi
 
 echo "### meshing ${#CASES[@]} case(s)"
 echo ""
@@ -145,5 +96,38 @@ if [ ${#FAILED[@]} -gt 0 ]; then
     exit 1
 fi
 
+# The comparability check, on the built meshes rather than on the plan. Two
+# cases on two meshes would still run and still draw two plausible pictures.
+echo "### checking every case really did build the same mesh"
+$PYTHON - "${CASES[@]}" <<'PY' || die "the meshes are not identical"
+import sys
+from pathlib import Path
+
+counts = {}
+for case_path in sys.argv[1:]:
+    owner = Path(case_path) / "constant" / "polyMesh" / "owner"
+    if not owner.is_file():
+        print(f"    {case_path}: no mesh yet (--dict-only?)")
+        continue
+    # The 'note' line of the header carries nPoints/nCells/nFaces, which is
+    # cheaper to read than counting the file and is what checkMesh reports.
+    text = owner.read_text(encoding="utf-8", errors="replace")[:4000]
+    marker = "nCells:"
+    if marker not in text:
+        print(f"    {case_path}: mesh header has no nCells")
+        continue
+    cells = int(text.split(marker)[1].split()[0])
+    counts.setdefault(cells, []).append(case_path)
+
+if len(counts) > 1:
+    print("    THE MESHES DIFFER, so the matrix is not comparable:")
+    for cells, cases in sorted(counts.items()):
+        print(f"      {cells:,} cells: {cases}")
+    raise SystemExit(1)
+for cells, cases in counts.items():
+    print(f"    all {len(cases)} case(s) at {cells:,} cells")
+PY
+
+echo ""
 echo "### all ${#CASES[@]} case(s) meshed"
 echo "    next:  ./AllrunCases"

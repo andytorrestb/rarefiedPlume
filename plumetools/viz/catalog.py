@@ -117,10 +117,20 @@ FIELD_CATALOG: dict[str, CatalogEntry] = {
         description="internal degrees of freedom density; 0 for a monatomic gas"),
 
     # --- DSMC statistics, not physics -------------------------------------- #
+    # dsmcRhoN is a COUNT, not a density: DSMCCloud::calculateFields adds 1 per
+    # parcel and never divides by the cell volume, where rhoN accumulates
+    # nParticle/V. So rhoN*V/dsmcRhoN is the particle weight -- measured to
+    # 1.5e-9 on cases/cai2012/Cases/Kn100, where dsmcRhoN peaks at 20.47 for a
+    # configured 20 parcels per exit cell.
+    #
+    # This entry used to say "m^-3" and "times cell volume". That reading is
+    # out by 1/V -- a factor of 10^6 on the Cai mesh -- and on a logarithmic
+    # colour scale it produced an entirely plausible picture.
     "dsmcRhoN": CatalogEntry(
-        units="m^-3", log=True,
-        description="PARCEL number density -- times cell volume, the parcels "
-                    "per cell. A statistical-quality field, not a physical one"),
+        units="parcels/cell", log=True,
+        description="PARCEL COUNT per cell (dimensionless, NOT a density). A "
+                    "statistical-quality field, not a physical one: below "
+                    "~5 the fields in that cell are shot noise"),
     "dsmcSigmaTcRMax": CatalogEntry(
         units="m^3/s", log=True,
         description="(sigma_T c_r)_max, the NTC collision-selection ceiling"),

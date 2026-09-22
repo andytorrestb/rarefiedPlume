@@ -1,0 +1,217 @@
+# cases/cai2012-health/viz.yaml -- sampling settings for THIS study.
+#
+# THE AUTHORITATIVE LIST OF WHAT ./AllpostCases DRAWS for the health matrix.
+# Every PNG under Cases/<weight>/<sampling>/results/viz/ came from an entry
+# here, and the contact sheets in results/ are built from those PNGs.
+#
+#   ./AllpostCases                 post-process, audit, render this, dissect
+#   ./AllpostCases --viz-only      render only
+#   ./AllpostCases --viz-spec F    render something else instead
+#
+# Or directly, for one case:
+#
+#   vifpara ../../plumetools/viz/render_slices.py Cases/ppc020/s1p5 --spec viz.yaml
+#
+# THE IMAGERY IS THE MEASUREMENT HERE, not a survey. cases/cai2012 calls its
+# images "a survey, not a result"; this family judges the health of the solution
+# data primarily through them. Three settings therefore differ from that file,
+# and each one is load-bearing. They are marked [HEALTH] below.
+#
+# `extends: default` inherits plumetools/viz/slices.yaml -- image size, colour
+# preset, output paths and the U/Ttra derivations. Mappings merge key by key;
+# `planes` and `fields` REPLACE the inherited lists wholesale.
+
+version: 1
+extends: default
+
+# --- where the frames go ------------------------------------------------------
+# One folder per field, frames numbered in time order. {index} and NOT {time}:
+# times are formatted with %g, so 0.0056581 and 0.00990533 are different widths
+# and sort into the wrong order in a shell glob -- which is the order a video
+# encoder, and plumetools.viz.dissect, would otherwise use. Both read the
+# manifest instead, and the manifest records the real time of every frame.
+output:
+  subdirectory: "{requested}"
+  filename: "{requested}_{index}"
+
+video:
+  enabled: true
+  framerate: 6             # up to 37 frames here rather than cases/cai2012's 5;
+                           # 4 fps would make the longest case a six-second
+                           # slideshow of a picture that barely moves
+  quality: 18              # x264 CRF, lower is better
+
+# --- which data ---------------------------------------------------------------
+sampling:
+  time: all                # a frame per written time, so each field comes out
+                           # as a time series -- 4, 13 or 37 frames depending on
+                           # the case's sampling duration
+
+  # ---------------------------------------------------------------- [HEALTH] --
+  prefer_mean: true        # THE AVERAGED FIELDS, which is the OPPOSITE of both
+                           # existing study specs and of the advice in
+                           # docs/viz-slices.md. Both are right; they answer
+                           # different questions.
+                           #
+                           # That document argues a series should use the
+                           # INSTANTANEOUS field, because rhoNMean is a running
+                           # average accumulated from fieldAverage's timeStart
+                           # and "a series of it shows the average converging,
+                           # not the flow evolving -- by construction it barely
+                           # moves."
+                           #
+                           # Every word of that is true, and here THE
+                           # CONVERGENCE IS THE MEASUREMENT. This family is not
+                           # watching a plume fill a vacuum; it is watching a
+                           # running mean settle, and how fast it settles is
+                           # precisely what the two swept axes are supposed to
+                           # change. The property that makes an averaged series
+                           # useless for that study is the property this one
+                           # exists to look at.
+                           #
+                           # For the flow evolving, render with the other
+                           # study's spec:
+                           #     ./AllpostCases --viz-spec ../cai2012/viz.yaml
+
+  # ---------------------------------------------------------------- [HEALTH] --
+  time_min: 5.658e-3       # = dsmc.average_start_s, 2 domain transits. THE
+                           # SAMPLING WINDOW, and prefer_mean above is only
+                           # honest because of it.
+                           #
+                           # fieldAverage writes no *Mean field before its
+                           # timeStart, and these runs write throughout their
+                           # transient -- 15 frames of it. With prefer_mean on
+                           # and no window, those frames have nothing to reach
+                           # for and fall back to the INSTANTANEOUS field: the
+                           # series would start as shot noise and become a
+                           # running average part way through, with nothing in
+                           # the pictures to say so. Both halves look like a
+                           # plume.
+                           #
+                           # The value is a literal because it is the same in
+                           # every case of this matrix -- the transient is held
+                           # fixed at 2 transits, so average_start_s is
+                           # 5.658085e-3 s everywhere. If baseCase/case.yaml's
+                           # transient ever changes, THIS NUMBER MUST CHANGE
+                           # WITH IT; tests/unit/test_cai2012_health.py checks
+                           # the two against each other for exactly that reason.
+
+# --- the centre plane ---------------------------------------------------------
+# Identical to cases/cai2012/viz.yaml, deliberately: the same cut of the same
+# box, so a cell of this study's contact sheet can be held against that study's
+# Kn100 imagery directly.
+#
+# The camera looks ALONG normal, so screen-right is normal x camera_up:
+# [0,1,0] x [0,0,1] = [1,0,0]. Nozzle at the left, plume to the right, z up.
+planes:
+  - name: midplane         # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+
+# --- what to draw -------------------------------------------------------------
+#
+# ------------------------------------------------------------------ [HEALTH] --
+# EVERY FIELD CARRIES AN EXPLICIT range. This is not tidiness; without it the
+# study cannot be read at all.
+#
+# Within one series the renderer pins the range automatically -- it scans every
+# frame and colours them on the union. ACROSS CASES it does not, and it cannot:
+# each case gets its own union. Nine cases would therefore be drawn on nine
+# different colour scales, and a contact sheet of nine differently-scaled images
+# is nine pictures of nothing. Worse, it would look fine: the cells would differ
+# visibly, and the differences would be the colour maps rather than the physics.
+#
+# The ranges below are read off the BASELINE case -- ppc020/s1p5, the cell whose
+# settings match cases/cai2012's Kn100 -- and held everywhere. They are rounded
+# outward to whole decades so a case that happens to exceed the baseline is
+# clipped visibly at the ends of the bar rather than silently rescaled.
+# EVERY RANGE BELOW WAS MEASURED, not chosen. They come from the baseline case
+# at its final frame (see the README): guessing them is how the first draft of
+# this file pinned dsmcRhoN three decades too high and drew nine black
+# rectangles that were, on a logarithmic scale, entirely plausible.
+fields:
+  # --------------------------------------------------------------- [HEALTH] --
+  # dsmcRhoN FIRST, and it is the point of this study.
+  #
+  # IT IS THE PARCEL COUNT IN THE CELL. Dimensionless, and NOT a number
+  # density: DSMCCloud::calculateFields adds 1 per parcel and never divides by
+  # the cell volume, where rhoN accumulates nParticle/V. With one global weight
+  # (DSMCCloud::nParticle_ is a single scalar),
+  #
+  #     rhoN * V / dsmcRhoN = nParticle      measured here to 1.5e-9
+  #
+  # so this image needs no cell volume and no arithmetic. THE COLOUR BAR IS THE
+  # PARCELS PER CELL, read directly against
+  # resolution.target_particles_per_cell (5/20/40 across the matrix) and
+  # checks.min_particles_per_cell (5). It is axis 1 of the sweep, mapped over
+  # the domain, and the one field here whose ABSOLUTE NUMBERS matter rather
+  # than its shape -- the shape is rhoN's, since the two differ by V.
+  #
+  # plumetools/viz/catalog.py, plumetools/viz/slices.yaml and
+  # cases/cai2012/viz.yaml all described this as a number density in m^-3 until
+  # this study measured it. The wrong reading is out by 1/V, a factor of 10^6
+  # on this mesh.
+  #
+  # The range is pinned in absolute parcels, so the four-fold weight steps
+  # between rows show up as four-fold shifts in colour.
+  - name: dsmcRhoN
+    log: true
+    range: [1.0e-03, 3.0e+01]   # MEASURED on ppc020/s1p5's final frame: peak
+                                # 20.47 parcels/cell at the exit, median 0.373
+                                # over the occupied domain, min 3.2e-4. The top
+                                # is 30 so the ppc040 row (peak ~41) clips
+                                # visibly at the bar rather than rescaling, and
+                                # the floor of 1e-3 keeps the plume edge in the
+                                # picture. checks.min_particles_per_cell = 5 is
+                                # four fifths of the way UP this bar.
+
+  # The plume itself, in real molecules. Same shape as dsmcRhoN by construction;
+  # this is the one to compare against cases/cai2012's published imagery and
+  # against Cai's contours.
+  - name: rhoN
+    log: true
+    range: [1.0e+13, 1.0e+17]   # MEASURED: peak 6.78e16 (n0 = 6.62e16), p99
+                                # 1.67e16, median 4.77e13 over occupied cells.
+                                # Four decades, not eight: the far field of a
+                                # Kn = 100 plume runs to 1e-288 and every decade
+                                # spent on vacuum is a decade not spent on the
+                                # plume.
+
+  # Derived in the inherited spec as momentum{mean}/rhoM{mean}. With prefer_mean
+  # on, {mean} expands to Mean, so this is the AVERAGED velocity -- the only one
+  # worth drawing: an instantaneous DSMC velocity in a cell holding five parcels
+  # is five samples of a Maxwellian.
+  - name: U
+    range: [0.0, 900.0]         # MEASURED p99 877 m/s (max 1488 in near-empty
+                                # cells, which is noise, not flow). U0 = 707 at
+                                # the exit and the collisionless centreline
+                                # rises to ~862 downstream, so 900 covers the
+                                # plume and clips only the empty cells.
+
+  # Derived from linearKE, momentum and rhoM. THE MOST NOISE-SENSITIVE FIELD
+  # DRAWN HERE: it is a difference of two large moments, <v^2> - |u|^2, so a
+  # cell with few parcels gives the small difference of two noisy numbers. If
+  # any field shows the ppc005 row falling apart, it is this one.
+  - name: Ttra
+    range: [0.0, 320.0]         # MEASURED p99 152.9 K (max 451 K in near-empty
+                                # cells -- again noise). 320 keeps T0 = 300 K at
+                                # the exit inside the bar with a little headroom.
+
+# --- not drawn, and why -------------------------------------------------------
+#
+# q, fD, boundaryT, boundaryU  -- boundary-only fields, accumulated where a
+#   molecule strikes a WALL. This case has no wall: its three patches are two
+#   vacuums and an inlet. They are identically zero and would be skipped on
+#   every case in the matrix.
+#
+# rhoM  -- exactly m * rhoN, so the image is rhoN's with a relabelled colour bar.
+#
+# linearKE  -- drawn by cases/cai2012, dropped here. Ttra is the same
+#   information in a form whose noise can be judged by eye, and every extra
+#   field is 53 more renders across the matrix at ~20 s each.
+#
+# internalE, iDof  -- identically zero for a monatomic gas, and argon is one.
+#
+# dsmcSigmaTcRMax  -- the NTC collision-selection ceiling, flat wherever no
+#   collision has been attempted, which at Kn = 100 is nearly everywhere.

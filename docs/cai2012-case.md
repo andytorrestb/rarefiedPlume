@@ -399,7 +399,9 @@ proportionally longer). A molecule reaching `x` by the time sampling starts at
 | 7 | 1.4 m | 247 m/s | −1.8 σ | ~3% | 3.2% |
 | 10 | 2.0 m | 354 m/s | −1.4 σ | ~8% | 5–6% |
 
-The measured Kn = 100 centreline (`Cases/Kn100/results/centerline.csv`) agrees
+The measured Kn = 100 centreline (`Cases/Kn100/results/centerline.csv`, from
+before the particle axis was added; the same case is now `Cases/Kn100_np1x`)
+agrees
 with the analytical solution to **~1% out to X/D ≈ 3** and then falls
 progressively below it, reaching −5.6% at `X/D = 9.7`. That is not a collisional
 effect and not a mesh effect: it is the slow tail of the exit distribution not
@@ -412,6 +414,117 @@ re-running `./Allrun` — which is the resume workflow doing its job.)
 converged.** Setting `dsmc.transient_basis: cai` in `study.yaml` fixes it at
 about three times the run time. This is recorded rather than trimmed out of the
 comparison range.
+
+---
+
+## 5a. The numerical-particle axis
+
+Every physical case above is run at **four parcel populations**. The axis exists
+because §7 reports how well the sampled fields match Cai's solution but nothing
+in the study says how much of the residual is *statistical noise* — and that
+question cannot be answered from a single run at a single particle weight.
+
+### What a level changes
+
+One thing:
+
+```
+nEquivalentParticles = baseline / multiplier
+```
+
+One DSMC parcel stands for `nEquivalentParticles` real molecules, so the
+numerical population goes as the reciprocal of the weight: 10× the parcels is a
+tenth of the weight. Standard `dsmcFoam` has a single global
+`DSMCCloud::nParticle_`, so this is a domain-wide scale and the exit-cell
+occupancy target of §3 moves with it — 20, 40, 100, 200 parcels in the exit cell.
+
+The **baseline is derived, not stored**. It is whatever
+`inflow.derive_run_settings` produces from that case's own `n0` and exit cell
+volume, which is the number this study has always run at, so `np1x` is the case
+unchanged and the sweep stays synchronised with it by construction.
+
+| | Kn100 | Kn0p1 | Kn0p01 |
+|---|---|---|---|
+| `np1x` (baseline) | 3.310039e+09 | 3.310039e+12 | 5.066386e+12 |
+| `np2x` | 1.655019e+09 | 1.655019e+12 | 2.533193e+12 |
+| `np5x` | 6.620078e+08 | 6.620078e+11 | 1.013277e+12 |
+| `np10x` | 3.310039e+08 | 3.310039e+11 | 5.066386e+11 |
+| parcels, `np1x` | 1.2e+06 | 1.2e+06 | 7.5e+06 |
+| parcels, `np10x` | 1.2e+07 | 1.2e+07 | 7.5e+07 |
+
+The weights are written with `%.6e`, seven significant figures, so a ratio of two
+written values is exact to ~1e-7. That is the precision the ratios are checked
+to; it is not a physical uncertainty.
+
+### What a level does not change
+
+`Δt` above all. A sweep that moved the time step as well would confound
+statistical resolution with discretisation, and neither number would mean
+anything on its own. Also unchanged: the mesh, the geometry, the gas and its VHS
+constants, the boundary conditions, the collision model, `n0`, and the transient.
+`cases/cai2012/validate_cases.py` compares the generated dictionaries across each
+group and fails if any of it moved.
+
+### Longer runs, at the same transient
+
+`endTime` is 3× what it was, and `dsmc.average_start_s` is **not** moved. The
+transient is a measured statement — the parcel count reaches its predicted steady
+value at 1.32 domain transits and the study runs 2 — so every second the
+multiplier adds lands inside the averaging window:
+
+```
+before:  transient 2.0 transits   sampling 1.5 transits    E/A = 1.75
+after:   transient 2.0 transits   sampling 8.5 transits    E/A = 5.25
+```
+
+The run is 3× longer; the *sampled* window is 5.7× longer. That is deliberate:
+the objective is more post-steady-state samples, not a longer startup.
+
+This does **not** repair limitation §10.2. The far-field deficit there is caused
+by the *transient* being shorter than Cai's, not by the sampling window being
+short, and it is not fixed by sampling the same under-filled far field for
+longer. What does change is the balance: the slow tail of the exit distribution
+continues to arrive during the sampling window, so a much larger fraction of the
+averaged frames are taken after the far field has filled than before. The mean is
+still a time-average over a window that begins before it has, and §10.2 stands.
+`dsmc.transient_basis: cai` remains the fix.
+
+### Four times the writes
+
+`writeControl` stays `timeStep` — §5.2 is why, and a resumed run under `runTime`
+writes nothing — so the interval is a whole number of steps and the requested 4×
+is met to within that rounding:
+
+| | before | after |
+|---|---|---|
+| `writeInterval` (Kn100) | 1443 steps | 361 steps |
+| in seconds | 1.98e-03 s | 4.96e-04 s |
+| achieved ratio | — | 3.997× |
+| writes | 5 | 60 |
+| writes inside the averaging window | 3 | 49 |
+
+`manifest.yaml` records the request and the achieved ratio separately, because
+they are not the same number and rounding one into the other is how a schedule
+stops being reconstructible.
+
+### Variance, not only means
+
+`fieldAverage` keeps `prime2Mean` for `rhoN` and `dsmcRhoN`, so each write now
+carries `rhoNPrime2Mean` and `dsmcRhoNPrime2Mean` alongside the means. That makes
+
+```
+CV = sqrt(dsmcRhoNPrime2Mean) / dsmcRhoNMean
+```
+
+a *measured* quantity rather than one estimated from an assumed parcel count.
+Both densities are kept: `dsmcRhoN` is the parcel tally, so its CV is the raw
+sampling noise, and `rhoN` is the number density, so its CV is the error bar on
+the quantity §7 actually compares with Cai. `prime2Mean` stays off for the vector
+fields — a `symmTensor` per cell per write, that nothing reads, 60 times a case.
+
+Nothing here computes a CV. The point of the change is that the information
+survives in the written fields, so the analysis can be done later without
+re-running anything.
 
 ---
 
@@ -513,6 +626,14 @@ Cell centres and volumes come from OpenFOAM's own function objects
 (`postProcess -func writeCellCentres` / `writeCellVolumes`), which `./Allpost`
 runs.
 
+They are properties of the **mesh**, and the mesh does not move, so `C` and `V`
+are identical in every time directory — 60 MB of them. `./postProcess.py
+--mesh-time` reads them from one directory while reading the fields from
+another, which is what makes it affordable to post-process every written frame
+of a run rather than only the last. The cell count is checked, so pointing it at
+a different mesh fails rather than pairing one case's densities with another's
+cell centres.
+
 ---
 
 ## 8. How to read the numbers
@@ -595,8 +716,13 @@ Reproduce with:
 
 ```bash
 cd cases/cai2012
-./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
+./generate_cases.py && ./AllmeshCases && ./validate_cases.py \
+    && ./AllrunCases && ./AllpostCases
 ```
+
+Those numbers were measured before §5a, i.e. at `np1x` and at the shorter run
+length. `Cases/Kn100_np1x` is the same physical case; it now runs 3× longer and
+writes 4× more often, so the sampling noise on the comparison should be lower.
 
 ---
 
@@ -614,7 +740,7 @@ cd cases/cai2012
 | Collision selection | NTC | NTC — the only one `dsmcFoam` implements |
 | VHS argon | not stated | `d = 4.17e-10 m`, `ω = 0.74`, `T_ref = 273 K` |
 | `T0` | not stated | 300 K, assumed |
-| Particle weighting | not stated | one global weight, 20 parcels in the exit cell |
+| Particle weighting | not stated | one global weight, 20 parcels in the exit cell at `np1x`; swept 1/2/5/10x (§5a) |
 
 ---
 
@@ -641,6 +767,42 @@ cd cases/cai2012
 7. **Nothing here has been compared with an independent DSMC code.** The
    comparison is against the analytical collisionless solution, which is exact
    for Kn → ∞ and is *supposed* to disagree at Kn = 0.01.
+
+8. **The particle-weight target is met at the exit cell and nowhere else**, and
+   the fall-off away from it is much larger than the configuration suggests.
+   `resolution.target_particles_per_cell: 20` and
+   `checks.min_particles_per_cell: 5` are both about the *exit* cell;
+   `checks.py` says so, and prints an estimate rather than a measurement.
+
+   Measured on the completed `Kn100` run — `dsmcRhoNMean`, which is the parcel
+   **count** per cell (§7a below):
+
+   | region | median parcels/cell | below the floor of 5 |
+   |---|---|---|
+   | exit cells (316 of them) | 18.9 | 0% |
+   | uniform core | 0.40 | 90.8% |
+   | inside Cai's lowest contour (`n/n0 ≥ 10⁻³`) | 1.49 | 96.2% |
+   | the centreline tube the errors are computed over | 5.16 | 43.8% |
+   | whole domain | 0.11 | 98.1% |
+
+   and down the centreline itself, 19.4 at `X/D ≤ 0.5` falling to 2.7 at
+   `X/D = 7–10`, where **every** cell is below the floor. `cases/cai2012-health`
+   sweeps this deliberately and says what it costs the published numbers.
+
+### 7a. `dsmcRhoN` is a parcel count, not a number density
+
+Worth stating because this repository had it wrong. `DSMCCloud::calculateFields`
+adds 1 per parcel and never divides by the cell volume, where `rhoN` accumulates
+`nParticle/V`. Measured over the 1 018 211 occupied cells of `Kn100`:
+
+```
+rhoN * V / dsmcRhoN = 3.3100e+09 = nParticle     to 1.5e-9
+```
+
+So `dsmcRhoN` is dimensionless and is read directly as the occupancy. The
+previous reading — a density in m⁻³, to be multiplied by the cell volume — is
+out by `1/V`, a factor of 10⁶ here, and on a logarithmic colour scale it drew a
+perfectly plausible picture.
 
 ---
 
