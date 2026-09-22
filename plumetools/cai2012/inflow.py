@@ -230,19 +230,41 @@ class RunSettings:
         delta_t_source: ``"derived"`` or ``"case.yaml"``.
         courant: fraction of the smallest cell a molecule at
             ``U0 + 3 sigma`` crosses in one step.
-        n_equivalent_particles: molecules per simulated parcel.
+        n_equivalent_particles: molecules per simulated parcel, **after** the
+            numerical-particle multiplier has been applied.
+        baseline_n_equivalent_particles: the weight before that division -- the
+            value a 1x case runs at, and the value every other level is defined
+            against.
+        numerical_particle_multiplier: the factor the parcel population was
+            raised by. ``nEquivalentParticles = baseline / multiplier``.
         weight_source: ``"derived"`` or ``"case.yaml"``.
         exit_particles_per_cell: occupancy in the exit cell, by construction the
             resolution target when the weight is derived.
-        average_start_s: when ``fieldAverage`` starts accumulating.
+        average_start_s: when ``fieldAverage`` starts accumulating. **Not**
+            moved by ``run_time_multiplier``: the transient is a physical
+            statement about when the plume is established, and a longer run is
+            for collecting more samples after it, not a longer startup.
         end_time_s: end of the run. Always a whole number of time steps, and a
             whole number of write intervals, so there is a write exactly at the
             end -- see :func:`derive_run_settings`.
+        baseline_end_time_s: the unscaled end time, before
+            ``run_time_multiplier``. Not snapped to the write schedule; it is
+            the number the multiplier is defined against.
+        run_time_multiplier: the requested scale on the end time.
+        sampling_time_s: ``end_time_s - average_start_s`` -- the window
+            ``fieldAverage`` actually accumulates over.
         write_interval_steps: ``controlDict``'s ``writeInterval``, in **steps**.
             ``writeControl timeStep`` rather than ``runTime`` because the step
             index is global and survives a restart, where the ``runTime``
             schedule restarts from the resume point.
         write_interval_s: the same interval in seconds, for reporting.
+        baseline_write_interval_steps: the interval before
+            ``output_frequency_multiplier``, in steps.
+        output_frequency_multiplier: the requested increase in write frequency.
+        achieved_output_frequency_multiplier: what the integer step interval
+            actually delivers -- ``baseline / write_interval_steps``. Reported
+            rather than assumed, because ``writeControl timeStep`` cannot
+            express a fractional interval.
         n_steps_total: steps from 0 to ``end_time_s``.
         transient_basis: which basis set ``average_start_s``.
         transient_cai_s: ``transient_collision_times * t0_ref`` -- Cai's own
@@ -267,6 +289,12 @@ class RunSettings:
     write_interval_s: float
     write_interval_steps: int
     n_steps_total: int
+    baseline_n_equivalent_particles: float
+    numerical_particle_multiplier: float
+    baseline_end_time_s: float
+    run_time_multiplier: float
+    baseline_write_interval_steps: int
+    output_frequency_multiplier: float
     transient_basis: str
     transient_cai_s: float
     transient_transits_s: float
@@ -288,6 +316,31 @@ class RunSettings:
         """Number of time directories the run will produce, the last at endTime."""
         return int(self.n_steps_total // self.write_interval_steps)
 
+    @property
+    def sampling_time_s(self) -> float:
+        """The window ``fieldAverage`` accumulates over [s]."""
+        return self.end_time_s - self.average_start_s
+
+    @property
+    def n_sampled_writes(self) -> int:
+        """Time directories written at or after ``average_start_s``.
+
+        The ones that carry a mean field. A write before the averaging start is
+        a transient snapshot and has no ``rhoNMean`` in it.
+        """
+        first = int(math.ceil(self.average_start_s / self.write_interval_s))
+        return max(0, self.n_writes - first + 1)
+
+    @property
+    def achieved_output_frequency_multiplier(self) -> float:
+        """How much more often this writes than the baseline schedule.
+
+        ``writeControl timeStep`` takes an integer number of steps, so the
+        requested multiplier is met to within that rounding. This is what was
+        actually achieved, and it is what the manifest records.
+        """
+        return self.baseline_write_interval_steps / self.write_interval_steps
+
     def as_dict(self) -> dict:
         return {
             "delta_t_s": self.delta_t_s,
@@ -302,6 +355,17 @@ class RunSettings:
             "write_interval_steps": self.write_interval_steps,
             "n_steps": self.n_steps,
             "n_writes": self.n_writes,
+            "n_sampled_writes": self.n_sampled_writes,
+            "sampling_time_s": self.sampling_time_s,
+            "baseline_n_equivalent_particles":
+                self.baseline_n_equivalent_particles,
+            "numerical_particle_multiplier": self.numerical_particle_multiplier,
+            "baseline_end_time_s": self.baseline_end_time_s,
+            "run_time_multiplier": self.run_time_multiplier,
+            "baseline_write_interval_steps": self.baseline_write_interval_steps,
+            "output_frequency_multiplier": self.output_frequency_multiplier,
+            "achieved_output_frequency_multiplier":
+                self.achieved_output_frequency_multiplier,
             "transient_basis": self.transient_basis,
             "transient_cai_s": self.transient_cai_s,
             "transient_transits_s": self.transient_transits_s,
@@ -337,10 +401,30 @@ class RunSettings:
             f"   (basis: {self.transient_basis})",
             f"  end time                 {self.end_time_s:.6e} s"
             f"   = {self.n_steps} steps",
+            f"  sampling window          {self.sampling_time_s:.6e} s"
+            f"   ({self.n_sampled_writes} of {self.n_writes} writes)",
             f"  writes                   every {self.write_interval_steps} steps"
             f" ({self.write_interval_s:.6e} s), {self.n_writes} in total,"
             f" the last AT endTime",
         ]
+        if self.numerical_particle_multiplier != 1.0:
+            lines.append(
+                f"  numerical particles      {self.numerical_particle_multiplier:g}x"
+                f" the baseline: weight"
+                f" {self.baseline_n_equivalent_particles:.6e} /"
+                f" {self.numerical_particle_multiplier:g}")
+        if self.run_time_multiplier != 1.0:
+            lines.append(
+                f"  run time                 {self.run_time_multiplier:g}x the"
+                f" baseline {self.baseline_end_time_s:.6e} s; the transient is"
+                f" unchanged, so all of it is sampling")
+        if self.output_frequency_multiplier != 1.0:
+            lines.append(
+                f"  output frequency         {self.output_frequency_multiplier:g}x"
+                f" requested, {self.achieved_output_frequency_multiplier:.3f}x"
+                f" achieved ({self.baseline_write_interval_steps} ->"
+                f" {self.write_interval_steps} steps; writeControl timeStep takes"
+                f" an integer)")
         if self.transient_basis != "cai":
             lines.append(
                 f"  NOTE: sampling starts at {self.average_start_s / self.reference_collision_time_s:.0f}"
@@ -391,13 +475,31 @@ def derive_run_settings(cfg, exit_state: ExitState, geom, *,
     cai_courant = speed * reference_collision_time / min_cell_size_m
 
     # --- particle weight -----------------------------------------------------
+    #
+    # The BASELINE weight first, exactly as it has always been derived, and then
+    # the numerical-particle multiplier applied to it. One parcel stands for
+    # nEquivalentParticles molecules, so the parcel count goes as the RECIPROCAL
+    # of the weight and raising the population by F means dividing by F.
+    #
+    # The multiplier is applied whichever way the baseline arose. A case that
+    # pins dsmc.n_equivalent_particles is still entitled to a 2x variant, and
+    # defining the levels against whatever the 1x case runs at is the only way
+    # the sweep stays synchronised with the study it extends.
     if cfg.dsmc.n_equivalent_particles is not None:
-        weight = float(cfg.dsmc.n_equivalent_particles)
+        baseline_weight = float(cfg.dsmc.n_equivalent_particles)
         weight_source = "case.yaml"
     else:
-        weight = (exit_state.number_density_per_m3 * exit_cell_volume_m3
-                  / float(cfg.resolution.target_particles_per_cell))
+        baseline_weight = (exit_state.number_density_per_m3 * exit_cell_volume_m3
+                           / float(cfg.resolution.target_particles_per_cell))
         weight_source = "derived"
+
+    particle_multiplier = float(cfg.dsmc.numerical_particle_multiplier)
+    if not particle_multiplier > 0.0:
+        raise ValueError(
+            f"dsmc.numerical_particle_multiplier is {particle_multiplier}; it "
+            f"divides the particle weight, so it must be positive. 1.0 is the "
+            f"baseline.")
+    weight = baseline_weight / particle_multiplier
     occupancy = (exit_state.number_density_per_m3 * exit_cell_volume_m3 / weight)
 
     # --- durations -----------------------------------------------------------
@@ -413,16 +515,30 @@ def derive_run_settings(cfg, exit_state: ExitState, geom, *,
         average_start = transient
 
     if cfg.dsmc.end_time_s is not None:
-        end_time = float(cfg.dsmc.end_time_s)
+        baseline_end_time = float(cfg.dsmc.end_time_s)
     else:
-        end_time = average_start + float(cfg.dsmc.sampling_domain_transits) * transit
+        baseline_end_time = (average_start
+                             + float(cfg.dsmc.sampling_domain_transits) * transit)
+
+    # The run-time multiplier scales the END, not the transient. average_start
+    # is a physical statement -- when the plume is established -- and moving it
+    # with the run length would buy a longer startup instead of more samples.
+    # Every second the multiplier adds therefore lands inside the averaging
+    # window: at 3x here the run is three times as long and the sampled window
+    # is (3 E - A) / (E - A) times as long, which is more than three.
+    run_time_multiplier = float(cfg.dsmc.run_time_multiplier)
+    if not run_time_multiplier > 0.0:
+        raise ValueError(
+            f"dsmc.run_time_multiplier is {run_time_multiplier}; it scales the "
+            f"end time, so it must be positive. 1.0 is the baseline.")
+    end_time = run_time_multiplier * baseline_end_time
 
     if not end_time > average_start:
         raise ValueError(
             f"the run ends at {end_time:g} s but sampling would start at "
             f"{average_start:g} s, so nothing would be averaged. Raise "
-            f"dsmc.end_time_s / dsmc.sampling_domain_transits, or shorten the "
-            f"transient.")
+            f"dsmc.end_time_s / dsmc.sampling_domain_transits / "
+            f"dsmc.run_time_multiplier, or shorten the transient.")
 
     # --- the write schedule, counted in STEPS -------------------------------
     #
@@ -440,14 +556,34 @@ def derive_run_settings(cfg, exit_state: ExitState, geom, *,
     # exactly at endTime, wherever the run happened to be resumed from.
     n_steps_raw = max(1, int(math.ceil(end_time / delta_t - 1.0e-9)))
 
+    # The BASELINE write interval is derived from the BASELINE run, not from the
+    # lengthened one. Deriving it from the scaled end time would make the write
+    # interval a function of dsmc.run_time_multiplier, and then "four times more
+    # often than before" would not be four times anything anybody can point at.
+    baseline_n_steps_raw = max(1, int(math.ceil(
+        baseline_end_time / delta_t - 1.0e-9)))
     if cfg.dsmc.write_interval_s is not None:
-        write_steps = max(1, int(round(float(cfg.dsmc.write_interval_s) / delta_t)))
+        baseline_write_steps = max(
+            1, int(round(float(cfg.dsmc.write_interval_s) / delta_t)))
     else:
         # At least two writes inside the sampling window: one is enough to
         # post-process, two show whether the average has settled.
         target_writes = max(2, int(math.ceil(
-            2.0 * end_time / (end_time - average_start))))
-        write_steps = max(1, int(math.ceil(n_steps_raw / target_writes)))
+            2.0 * baseline_end_time / (baseline_end_time - average_start))))
+        baseline_write_steps = max(
+            1, int(math.ceil(baseline_n_steps_raw / target_writes)))
+
+    # writeControl is timeStep -- see the comment above -- so the interval is a
+    # whole number of steps and the requested frequency is met to within that
+    # rounding. NEAREST integer, and never below 1: a fractional interval cannot
+    # be written, and 0 would mean writing nothing.
+    output_multiplier = float(cfg.dsmc.output_frequency_multiplier)
+    if not output_multiplier > 0.0:
+        raise ValueError(
+            f"dsmc.output_frequency_multiplier is {output_multiplier}; it "
+            f"divides the write interval, so it must be positive. 1.0 is the "
+            f"baseline.")
+    write_steps = max(1, int(round(baseline_write_steps / output_multiplier)))
 
     n_writes = max(1, int(math.ceil(n_steps_raw / write_steps)))
     n_steps = write_steps * n_writes
@@ -457,6 +593,12 @@ def derive_run_settings(cfg, exit_state: ExitState, geom, *,
     return RunSettings(
         write_interval_steps=write_steps,
         n_steps_total=n_steps,
+        baseline_n_equivalent_particles=baseline_weight,
+        numerical_particle_multiplier=particle_multiplier,
+        baseline_end_time_s=baseline_end_time,
+        run_time_multiplier=run_time_multiplier,
+        baseline_write_interval_steps=baseline_write_steps,
+        output_frequency_multiplier=output_multiplier,
         delta_t_s=delta_t,
         delta_t_source=delta_t_source,
         courant=courant,

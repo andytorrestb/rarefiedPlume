@@ -169,7 +169,43 @@ dsmc:
                                # that DSMC approaches it.
   n_equivalent_particles: null # null -> derived so the EXIT cell reaches
                                # resolution.target_particles_per_cell
-  delta_t_s: null              # null -> derived from courant_target
+
+  # --- the numerical-particle axis ------------------------------------------
+  # How many times the BASELINE parcel population this case carries. One parcel
+  # stands for nEquivalentParticles real molecules, so the parcel count goes as
+  # the RECIPROCAL of the weight:
+  #
+  #     nEquivalentParticles = baseline / numerical_particle_multiplier
+  #
+  # 1.0 is the baseline and leaves the weight exactly as derived above. This
+  # changes NO physics -- same density, same mesh, same deltaT, same transient --
+  # only how finely the same gas is sampled. study.yaml sweeps it 1, 2, 5, 10
+  # and generate_cases.py writes the value into each generated case.yaml; it may
+  # not be set through a per-case `overrides` block, because it is what the
+  # generated directory's _npNx suffix MEANS.
+  numerical_particle_multiplier: 1.0
+
+  # --- run length and write frequency ---------------------------------------
+  # Both are study-wide scales on the schedule derived below, and both are set
+  # in study.yaml rather than here, so that every member of the sweep is
+  # averaged over the same window and written at the same rate.
+  #
+  # run_time_multiplier scales endTime AFTER average_start_s is fixed, so the
+  # transient does not move and every extra second is sampling time. At 3.0 the
+  # run is three times as long and the SAMPLED window is more than three times
+  # as long, which is the point: more post-steady-state samples, not a longer
+  # startup.
+  #
+  # output_frequency_multiplier divides the write interval. writeControl is
+  # timeStep, so the interval is a whole number of steps and the request is met
+  # to within that rounding; the manifest records what was achieved.
+  run_time_multiplier: 1.0
+  output_frequency_multiplier: 1.0
+
+  delta_t_s: null              # null -> derived from courant_target. NOT touched
+                               # by any multiplier above: a particle-count sweep
+                               # that also moved the time step would confound
+                               # statistical resolution with discretisation.
   courant_target: 0.2          # [ASSUMPTION] fraction of the smallest cell a
                                # molecule at U0 + 3 sigma may cross per step.
                                # Cai's dt/t0 = 1 is Courant ~3.6 here, which is
