@@ -4,16 +4,24 @@
     ./generate_cases.py                    generate every enabled case
     ./generate_cases.py --dry-run          show what would be generated
     ./generate_cases.py --knudsen 100 0.1  only these Knudsen numbers
+    ./generate_cases.py --particles 1 2    only these particle levels
     ./generate_cases.py --overwrite        replace cases that already have results
 
 No arguments are needed for normal use.
 
+The study is TWO axes: the physical Knudsen matrix crossed with the
+numerical-particle matrix, so three Knudsen cases at four particle levels is
+twelve generated cases named Cases/<KnCase>_<level>. A level changes exactly one
+thing -- nEquivalentParticles = baseline / multiplier -- and the baseline is
+derived from the case itself, so np1x is the case as this study has always run
+it.
+
 What it does:
 
   1. copy baseCase into Cases/<name>
-  2. rewrite each case-local case.yaml with that case's Knudsen number --
-     STRUCTURALLY, by loading and re-emitting YAML, never by string
-     substitution
+  2. rewrite each case-local case.yaml with that case's Knudsen number and
+     particle multiplier -- STRUCTURALLY, by loading and re-emitting YAML, never
+     by string substitution
   3. derive every quantity the case will run at, and record all of them in
      manifest.yaml
 
@@ -47,6 +55,7 @@ try:
         case_is_complete,
         clone_cases,
         filter_by_knudsen,
+        filter_by_particles,
         load_study,
         manifest_entry,
         write_manifest,
@@ -66,6 +75,10 @@ def parse_args(argv):
     parser.add_argument("--knudsen", nargs="+", type=float, metavar="KN",
                         help="only these Knudsen numbers (default: every "
                              "enabled case)")
+    parser.add_argument("--particles", nargs="+", metavar="LEVEL",
+                        help="only these numerical-particle levels, by "
+                             "multiplier or by name: '2' or 'np2x' (default: "
+                             "every enabled level)")
     parser.add_argument("--overwrite", action="store_true",
                         help="replace cases that already contain results")
     parser.add_argument("--study", default=str(HERE / "study.yaml"),
@@ -109,28 +122,42 @@ def main(argv) -> int:
     base = root / study.base_case
 
     try:
-        selected = filter_by_knudsen(study.enabled_cases(), args.knudsen)
+        physical = filter_by_knudsen(study.enabled_cases(), args.knudsen)
+        levels = filter_by_particles(study.enabled_particle_levels(),
+                                     args.particles)
     except StudyError as exc:
         print(f"generate_cases: {exc}", file=sys.stderr)
         return 1
 
+    selected = study.expand(physical, levels)
     disabled = [c for c in study.all_cases() if not c.enabled]
+    disabled_levels = [p for p in study.all_particle_levels() if not p.enabled]
 
     print(f"study      {args.study}")
     print(f"base case  {base}")
     print(f"reference  {study.meta.get('reference', 'Cai and Wang 2012')}")
+    print(f"matrix     {len(physical)} physical case(s) x {len(levels)} "
+          f"particle level(s) = {len(selected)} case(s)")
+    print(f"schedule   run time x{study.run_time_multiplier:g}, output "
+          f"frequency x{study.output_frequency_multiplier:g} "
+          f"(deltaT unchanged)")
     print()
 
     if not selected:
-        print("Nothing to generate: every case is disabled, or the --knudsen "
-              "filter matched none.")
+        print("Nothing to generate: every case is disabled, or the --knudsen / "
+              "--particles filters matched none.")
         return 1
 
-    print(f"{'case':<10} {'Kn':>8}  destination")
+    print(f"{'case':<18} {'Kn':>8} {'parcels':>8}  destination")
     for case in selected:
-        print(f"{case.name:<10} {case.knudsen:>8g}  {study.case_path(case)}")
+        print(f"{case.name:<18} {case.knudsen:>8g} "
+              f"{case.multiplier:>7g}x  {study.case_path(case)}")
     for case in disabled:
-        print(f"{case.name:<10} {case.knudsen:>8g}  SKIPPED (enabled: false)")
+        print(f"{case.name:<18} {case.knudsen:>8g} {'':>8}  "
+              f"SKIPPED (enabled: false)")
+    for level in disabled_levels:
+        print(f"{'(all)_' + level.name:<18} {'':>8} {level.multiplier:>7g}x  "
+              f"SKIPPED (enabled: false)")
     print()
 
     if args.dry_run:
@@ -184,7 +211,8 @@ def main(argv) -> int:
         entries.append(manifest_entry(case, study, cfg, geom, exit_state, plan,
                                       run, nozzle=nozzle, particles=particles))
 
-        print(f"generated {case.name:<10} Kn {case.knudsen:>7g}")
+        print(f"generated {case.name:<18} Kn {case.knudsen:>7g}   "
+              f"{case.multiplier:g}x parcels")
         print(f"          lambda0 {exit_state.mean_free_path_m:.4e} m   "
               f"n0 {exit_state.number_density_per_m3:.4e} 1/m^3   "
               f"U0 {exit_state.velocity_m_per_s:.1f} m/s")
@@ -194,9 +222,17 @@ def main(argv) -> int:
               + ("  (COARSENED to fit mesh.max_cells)" if plan.coarsened else ""))
         print(f"          nozzle {nozzle.n_faces} faces, area "
               f"{100 * nozzle.area_error:+.2f}% from pi R0^2")
-        print(f"          weight {run.n_equivalent_particles:.4e}, deltaT "
+        print(f"          weight {run.n_equivalent_particles:.4e} "
+              f"(= {run.baseline_n_equivalent_particles:.4e} / "
+              f"{run.numerical_particle_multiplier:g}), deltaT "
               f"{run.delta_t_s:.4e} s, {run.n_steps:.0f} steps, "
               f"~{particles['total_particles']:.2e} parcels")
+        print(f"          endTime {run.end_time_s:.4e} s "
+              f"(x{run.run_time_multiplier:g}), averaging from "
+              f"{run.average_start_s:.4e} s, writes every "
+              f"{run.write_interval_steps} steps "
+              f"(x{run.achieved_output_frequency_multiplier:.3f}), "
+              f"{run.n_sampled_writes} sampled of {run.n_writes}")
         for result in report.results:
             if result.status != "pass":
                 print(f"          {result.status.upper()}: {result.name}: "
@@ -220,6 +256,7 @@ def main(argv) -> int:
     print()
     print("Next:")
     print("    ./AllmeshCases          mesh every generated case")
+    print("    ./validate_cases.py     check the generated dictionaries")
     print("    ./AllrunCases           run them")
     print("    ./AllpostCases          post-process and build the study table")
     return 0

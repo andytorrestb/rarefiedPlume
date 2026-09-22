@@ -1,8 +1,31 @@
 r"""``study.yaml`` parsing, the Knudsen matrix, and the generation manifest.
 
-A study is a base case plus a list of Knudsen cases. Each generated case is a
-complete, self-contained OpenFOAM case with its own ``case.yaml``, and that
-``case.yaml`` carries the exact Knudsen number the solver will run at.
+A study is a base case, a list of Knudsen cases, and a list of numerical-particle
+levels. Each generated case is a complete, self-contained OpenFOAM case with its
+own ``case.yaml``, and that ``case.yaml`` carries the exact Knudsen number the
+solver will run at and the exact parcel population it will run with.
+
+The two axes
+------------
+.. code-block:: text
+
+    kn_cases          the PHYSICAL matrix -- Kn = 100, 0.1, 0.01   [PAPER]
+    particle_levels   the NUMERICAL axis  -- 1x, 2x, 5x, 10x parcels
+
+The product is generated: ``Cases/Kn100_np1x``, ``Cases/Kn100_np2x``, and so on.
+The physical definition of a case is untouched by its level -- same mesh, same
+density, same time step, same transient -- because a numerical-particle
+convergence study is only meaningful if the thing being resolved holds still.
+The single knob the level turns is ``nEquivalentParticles``:
+
+.. code-block:: text
+
+    nEquivalentParticles = baseline / numerical_particle_multiplier
+
+so ``np1x`` runs at exactly the weight the study has always run at and is the
+control. That baseline is never typed in here: it is whatever
+:func:`plumetools.cai2012.inflow.derive_run_settings` derives for the case, so
+the sweep cannot drift away from the study it extends.
 
 How cases are generated
 -----------------------
@@ -50,6 +73,8 @@ from pathlib import Path
 
 import yaml
 
+from plumetools.cai2012.dictionaries import AVERAGED_FIELDS
+
 #: Dictionaries a case generates from its own ``case.yaml``.
 #:
 #: A copy is faithful, so one of these left in ``baseCase`` by someone running
@@ -81,7 +106,20 @@ GENERATED_DIRECTORIES = ("constant/polyMesh", "0", "results", "postProcessing")
 #:
 #: ``exit.knudsen`` is what the study *is*: allowing an override would let a case
 #: called ``Kn0p1`` run at another Knudsen number. ``model`` selects the loader.
-FORBIDDEN_OVERRIDES = ("exit.knudsen", "model")
+#:
+#: The three multipliers are the same argument on the other axis. A per-case
+#: override of ``numerical_particle_multiplier`` would let a directory named
+#: ``_np2x`` run at another level; the run-time and output-frequency multipliers
+#: are study-wide by construction, because a sweep whose members were averaged
+#: over different windows and written at different rates is not comparable
+#: member to member. All three have exactly one source: ``study.yaml``.
+FORBIDDEN_OVERRIDES = (
+    "exit.knudsen",
+    "model",
+    "dsmc.numerical_particle_multiplier",
+    "dsmc.run_time_multiplier",
+    "dsmc.output_frequency_multiplier",
+)
 
 
 class StudyError(ValueError):
@@ -115,18 +153,93 @@ class KnudsenCase:
 
 
 @dataclass(frozen=True)
+class ParticleLevel:
+    """One numerical-particle level: a parcel population, as a multiplier.
+
+    Attributes:
+        name: the suffix appended to a physical case name, e.g. ``np2x``.
+        multiplier: how many times the baseline parcel population. The particle
+            weight is *divided* by it -- one parcel stands for
+            ``nEquivalentParticles`` molecules, so the count goes as the
+            reciprocal of the weight.
+        enabled: whether :meth:`StudyConfig.enabled_particle_levels` includes it.
+            A disabled level stays in ``study.yaml`` as the record of the
+            intended matrix.
+        note: free text, carried into the manifest.
+    """
+
+    name: str
+    multiplier: float
+    enabled: bool = True
+    note: str = ""
+
+    @property
+    def is_baseline(self) -> bool:
+        """Whether this is the 1x level -- the control the others are read against."""
+        return self.multiplier == 1.0
+
+
+@dataclass(frozen=True)
+class StudyCase:
+    """One generated case: a physical Knudsen case at one particle level.
+
+    The pair is the identity of a directory, and both halves are recoverable
+    from it -- from the name, from ``case.yaml``'s ``meta``, and from the
+    manifest row. Everything a generator needs of a :class:`KnudsenCase` is
+    forwarded, so the two are interchangeable to :func:`clone_cases` and
+    :func:`StudyConfig.case_path`.
+    """
+
+    knudsen_case: KnudsenCase
+    particle_level: ParticleLevel
+
+    @property
+    def name(self) -> str:
+        """``Kn100_np2x`` -- the physical case, then the level."""
+        return f"{self.knudsen_case.name}_{self.particle_level.name}"
+
+    @property
+    def knudsen(self) -> float:
+        return self.knudsen_case.knudsen
+
+    @property
+    def enabled(self) -> bool:
+        return self.knudsen_case.enabled and self.particle_level.enabled
+
+    @property
+    def overrides(self) -> dict:
+        return self.knudsen_case.overrides
+
+    @property
+    def note(self) -> str:
+        return self.knudsen_case.note
+
+    @property
+    def multiplier(self) -> float:
+        return self.particle_level.multiplier
+
+
+@dataclass(frozen=True)
 class StudyConfig:
     """A parsed ``study.yaml``."""
 
     base_case: str = "baseCase"
     cases_dir: str = "Cases"
     kn_cases: tuple = ()
+    particle_levels: tuple = ()
+    run_time_multiplier: float = 1.0
+    output_frequency_multiplier: float = 1.0
     manifest_name: str = "manifest.yaml"
     meta: dict = None
 
     def __post_init__(self) -> None:
         if self.meta is None:
             object.__setattr__(self, "meta", {})
+        if not self.particle_levels:
+            # A study with no particle axis is the study as it was before the
+            # axis existed: one level, 1x, which divides the weight by one.
+            object.__setattr__(self, "particle_levels",
+                               (ParticleLevel(name="np1x", multiplier=1.0),))
 
     def enabled_cases(self) -> list:
         """The enabled cases, most rarefied first.
@@ -144,8 +257,44 @@ class StudyConfig:
         """Every case, enabled or not, in the same deterministic order."""
         return sorted(self.kn_cases, key=lambda c: (-c.knudsen, c.name))
 
-    def case_path(self, case: KnudsenCase) -> Path:
-        """Path of one case relative to ``study.yaml``: ``Cases/Kn100``."""
+    def enabled_particle_levels(self) -> list:
+        """The enabled levels, cheapest first.
+
+        Ascending multiplier, so the 1x control -- the level that reproduces the
+        study as it was -- is generated and run first. If the sweep has to be
+        cut short, what survives is the part that is comparable with the
+        published results.
+        """
+        return sorted((p for p in self.particle_levels if p.enabled),
+                      key=lambda p: (p.multiplier, p.name))
+
+    def all_particle_levels(self) -> list:
+        """Every level, enabled or not, in the same deterministic order."""
+        return sorted(self.particle_levels, key=lambda p: (p.multiplier, p.name))
+
+    def expand(self, cases=None, levels=None) -> list:
+        """The product of the physical cases and the particle levels.
+
+        Args:
+            cases: physical cases to expand; default the enabled ones.
+            levels: levels to expand over; default the enabled ones.
+
+        Returns:
+            :class:`StudyCase` objects, physical case major and level minor --
+            so a case's four variants are adjacent, which is the order they are
+            compared in.
+        """
+        cases = self.enabled_cases() if cases is None else list(cases)
+        levels = self.enabled_particle_levels() if levels is None else list(levels)
+        return [StudyCase(knudsen_case=c, particle_level=p)
+                for c in cases for p in levels]
+
+    def expanded_cases(self) -> list:
+        """Every enabled generated case: ``len(kn_cases) * len(particle_levels)``."""
+        return self.expand()
+
+    def case_path(self, case) -> Path:
+        """Path of one case relative to ``study.yaml``: ``Cases/Kn100_np1x``."""
         return Path(self.cases_dir) / case.name
 
 
@@ -173,7 +322,9 @@ def load_study(path: Path) -> StudyConfig:
     if not isinstance(raw, dict):
         raise StudyError(f"{path}: expected a mapping at the top level")
 
-    known = {"base_case", "cases_dir", "kn_cases", "manifest_name", "meta"}
+    known = {"base_case", "cases_dir", "kn_cases", "particle_levels",
+             "run_time_multiplier", "output_frequency_multiplier",
+             "manifest_name", "meta"}
     unknown = sorted(set(raw) - known)
     if unknown:
         raise StudyError(
@@ -236,13 +387,112 @@ def load_study(path: Path) -> StudyConfig:
             f"{path}: duplicate Knudsen number(s) {duplicate_kn}; two cases at "
             f"the same Kn would differ in name only")
 
+    levels = _load_particle_levels(raw.get("particle_levels"), path)
+
     return StudyConfig(
         base_case=str(raw.get("base_case", "baseCase")),
         cases_dir=str(raw.get("cases_dir", "Cases")),
         kn_cases=tuple(cases),
+        particle_levels=tuple(levels),
+        run_time_multiplier=_positive_multiplier(
+            raw, "run_time_multiplier", path),
+        output_frequency_multiplier=_positive_multiplier(
+            raw, "output_frequency_multiplier", path),
         manifest_name=str(raw.get("manifest_name", "manifest.yaml")),
         meta=raw.get("meta") or {},
     )
+
+
+def _positive_multiplier(raw: dict, key: str, path) -> float:
+    """Read a top-level multiplier, defaulting to 1.0 -- i.e. no change."""
+    if key not in raw or raw[key] is None:
+        return 1.0
+    try:
+        value = float(raw[key])
+    except (TypeError, ValueError):
+        raise StudyError(f"{path}: {key} is {raw[key]!r}, which is not a "
+                         f"number") from None
+    if not value > 0.0:
+        raise StudyError(
+            f"{path}: {key} is {value}; it scales a duration or a write "
+            f"frequency, so it must be positive. 1.0 leaves the baseline "
+            f"schedule alone.")
+    return value
+
+
+def _load_particle_levels(entries, path) -> list:
+    """Parse ``particle_levels``, the numerical-particle axis.
+
+    An absent or empty list is not an error: it means the study has no such
+    axis, and :class:`StudyConfig` supplies the single 1x level that reproduces
+    the study as it was before the axis existed.
+
+    Raises:
+        StudyError: for a malformed entry, an unknown key, a non-positive
+            multiplier, or a duplicate name or multiplier.
+    """
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise StudyError(
+            f"{path}: particle_levels must be a list of "
+            f"{{name, multiplier, enabled}} mappings, got "
+            f"{type(entries).__name__}")
+
+    known = {"name", "multiplier", "enabled", "note"}
+    levels = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise StudyError(
+                f"{path}: particle_levels[{i}] is a {type(entry).__name__}, "
+                f"expected a mapping")
+        extra = sorted(set(entry) - known)
+        if extra:
+            raise StudyError(
+                f"{path}: particle_levels[{i}] has unknown key(s) {extra}; "
+                f"valid: {sorted(known)}")
+        for required in ("name", "multiplier"):
+            if required not in entry:
+                raise StudyError(
+                    f"{path}: particle_levels[{i}] is missing {required!r}")
+        multiplier = float(entry["multiplier"])
+        if not multiplier > 0.0:
+            raise StudyError(
+                f"{path}: particle_levels[{i}] has multiplier {multiplier}; it "
+                f"DIVIDES nEquivalentParticles, so zero or negative would give "
+                f"an infinite or negative particle weight")
+        levels.append(ParticleLevel(
+            name=str(entry["name"]),
+            multiplier=multiplier,
+            enabled=bool(entry.get("enabled", True)),
+            note=str(entry.get("note", "")),
+        ))
+
+    names = [p.name for p in levels]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise StudyError(
+            f"{path}: duplicate particle level name(s) {duplicates}; each "
+            f"becomes a directory suffix, so the second would overwrite the "
+            f"first")
+
+    multipliers = [p.multiplier for p in levels]
+    duplicate_multipliers = sorted(
+        {m for m in multipliers if multipliers.count(m) > 1})
+    if duplicate_multipliers:
+        raise StudyError(
+            f"{path}: duplicate particle multiplier(s) {duplicate_multipliers}; "
+            f"two levels at the same parcel population would differ in name "
+            f"only")
+
+    if levels and not any(p.is_baseline for p in levels):
+        raise StudyError(
+            f"{path}: particle_levels has no 1x level. The 1x case IS the "
+            f"existing study -- it runs at exactly the nEquivalentParticles the "
+            f"physical case has always used -- and without it the sweep has no "
+            f"control to be read against. Multipliers: {multipliers}")
+
+    return levels
 
 
 def _reject_forbidden_overrides(overrides: dict, where: str) -> None:
@@ -279,6 +529,45 @@ def filter_by_knudsen(cases: list, wanted) -> list:
             f"no case at Kn {missing}; the study defines "
             f"{sorted(c.knudsen for c in cases)}")
     return kept
+
+
+def filter_by_particles(levels: list, wanted) -> list:
+    """Keep only the levels whose multiplier or name appears in ``wanted``.
+
+    Accepts either form -- ``2`` or ``np2x`` -- because both are what the
+    generated tree calls the level.
+
+    Raises:
+        StudyError: if a requested level matches none, so a typo on the command
+            line stops the run instead of quietly generating nothing.
+    """
+    if not wanted:
+        return list(levels)
+
+    requested = [str(w) for w in wanted]
+    kept, missing = [], []
+    for token in requested:
+        match = None
+        for level in levels:
+            if level.name == token:
+                match = level
+                break
+            try:
+                if level.multiplier == float(token):
+                    match = level
+                    break
+            except ValueError:
+                continue
+        if match is None:
+            missing.append(token)
+        elif match not in kept:
+            kept.append(match)
+
+    if missing:
+        raise StudyError(
+            f"no particle level {missing}; the study defines "
+            f"{[(p.name, p.multiplier) for p in levels]}")
+    return [p for p in levels if p in kept]
 
 
 # --------------------------------------------------------------------------- #
@@ -393,14 +682,20 @@ def _merge(target: dict, updates: dict, where: str) -> None:
             target[section][key] = value
 
 
-def apply_case_parameters(case_dir: Path, case: KnudsenCase,
-                          study: StudyConfig) -> dict:
-    """Rewrite a case-local ``case.yaml`` with this case's Knudsen number.
+def apply_case_parameters(case_dir: Path, case, study: StudyConfig) -> dict:
+    """Rewrite a case-local ``case.yaml`` with this case's parameters.
+
+    The Knudsen number, the numerical-particle multiplier, and the study-wide
+    run-time and output-frequency multipliers. Nothing else: the density, the
+    mesh, the time step and the transient are all derived downstream from what
+    is already in the template, which is what makes the four variants of a case
+    the same physical problem.
 
     Args:
         case_dir: the generated case directory.
-        case: the Knudsen case.
-        study: the study, for the metadata.
+        case: a :class:`StudyCase`, or a bare :class:`KnudsenCase` for a study
+            with no particle axis.
+        study: the study, for the multipliers and the metadata.
 
     Returns:
         The parameters written, for the manifest.
@@ -432,6 +727,27 @@ def apply_case_parameters(case_dir: Path, case: KnudsenCase,
     data["exit"]["knudsen"] = float(case.knudsen)
     applied = {"knudsen": float(case.knudsen)}
 
+    # The numerical axis. Written here rather than left to the template so that
+    # a generated case.yaml states its own level: the directory name and the
+    # file agree, and neither has to be trusted over the other.
+    level = getattr(case, "particle_level", None)
+    multiplier = float(level.multiplier) if level is not None else 1.0
+    if not isinstance(data.get("dsmc"), dict):
+        raise StudyError(
+            f"{path}: no 'dsmc' section. This does not look like the cai2012 "
+            f"template; the particle multiplier has nowhere to go.")
+    data["dsmc"]["numerical_particle_multiplier"] = multiplier
+    data["dsmc"]["run_time_multiplier"] = float(study.run_time_multiplier)
+    data["dsmc"]["output_frequency_multiplier"] = float(
+        study.output_frequency_multiplier)
+    applied.update({
+        "numerical_particle_multiplier": multiplier,
+        "run_time_multiplier": float(study.run_time_multiplier),
+        "output_frequency_multiplier": float(study.output_frequency_multiplier),
+    })
+    if level is not None:
+        applied["particle_level"] = level.name
+
     if case.overrides:
         _merge(data, copy.deepcopy(case.overrides), f"{path}")
         applied["overrides"] = copy.deepcopy(case.overrides)
@@ -442,13 +758,26 @@ def apply_case_parameters(case_dir: Path, case: KnudsenCase,
         "knudsen": float(case.knudsen),
         "generated_by": "cases/cai2012/generate_cases.py",
     })
+    if level is not None:
+        # Both halves of the identity, recoverable without parsing the name.
+        data["meta"].update({
+            "cai_case": case.knudsen_case.name,
+            "particle_level": level.name,
+            "numerical_particle_multiplier": multiplier,
+        })
+        if level.note:
+            data["meta"]["particle_level_note"] = level.note
     if case.note:
         data["meta"]["note"] = case.note
 
     header = (
         "# GENERATED by cases/cai2012/generate_cases.py -- do not edit.\n"
         "#\n"
-        f"# {case.name}: Kn = {case.knudsen:g}.\n"
+        f"# {case.name}: Kn = {case.knudsen:g}, {multiplier:g}x numerical particles.\n"
+        "#\n"
+        f"# nEquivalentParticles = baseline / {multiplier:g}. The BASELINE is derived\n"
+        "# from this case's own density and cell volume and is not stored, so the\n"
+        "# 1x case runs at exactly the weight this study has always used.\n"
         "#\n"
         "# Everything derived from it -- lambda0, n0, the cell size, the particle\n"
         "# weight, the time step -- is computed at mesh time, not stored here.\n"
@@ -490,11 +819,28 @@ def write_manifest(path: Path, study: StudyConfig, entries: list) -> Path:
         "base_case": study.base_case,
         "cases_dir": study.cases_dir,
         "n_generated": len(entries),
+        "n_physical_cases": len(study.enabled_cases()),
+        "n_particle_levels": len(study.enabled_particle_levels()),
+        "run_time_multiplier": float(study.run_time_multiplier),
+        "output_frequency_multiplier": float(study.output_frequency_multiplier),
+        "particle_levels": [
+            {"name": p.name, "multiplier": float(p.multiplier),
+             "enabled": bool(p.enabled), "note": p.note}
+            for p in study.all_particle_levels()
+        ],
+        "averaged_fields": {
+            name: {"mean": True, "prime2Mean": bool(prime2mean)}
+            for name, prime2mean in AVERAGED_FIELDS.items()
+        },
         "meta": dict(study.meta),
         "cases": entries,
         "disabled_cases": [
             {"name": c.name, "Kn": c.knudsen, "note": c.note}
             for c in study.all_cases() if not c.enabled
+        ],
+        "disabled_particle_levels": [
+            {"name": p.name, "multiplier": float(p.multiplier), "note": p.note}
+            for p in study.all_particle_levels() if not p.enabled
         ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -507,17 +853,38 @@ def write_manifest(path: Path, study: StudyConfig, entries: list) -> Path:
     return path
 
 
-def manifest_entry(case: KnudsenCase, study: StudyConfig, cfg, geom,
+def mesh_identifier(plan) -> str:
+    """A short, stable name for *this* mesh.
+
+    Two cases share a mesh when this string matches. It is what makes the "same
+    mesh across the four particle levels" claim checkable from the manifest
+    alone, without re-deriving anything or diffing ``blockMeshDict``.
+    """
+    return (f"{int(plan.n_cells)}cells"
+            f"-core{plan.core_cell_size_m:.6e}m"
+            f"-min{plan.min_cell_size_m:.6e}m")
+
+
+def manifest_entry(case, study: StudyConfig, cfg, geom,
                    exit_state, plan, run, nozzle=None, particles=None) -> dict:
     """Build one manifest row from a fully derived case.
 
     Every quantity §7 of the case specification asks for -- ``Kn``, ``D``,
     ``lambda0``, ``T0``, ``U0``, ``n0``, the particle weight, the minimum cell
-    size and ``deltaT`` -- plus what it took to get them.
+    size and ``deltaT`` -- plus what it took to get them, plus everything needed
+    to say which physical case and which particle level a directory holds.
     """
+    level = getattr(case, "particle_level", None)
+    physical = getattr(case, "knudsen_case", case)
     entry = {
         "name": case.name,
         "path": str(study.case_path(case)).replace("\\", "/"),
+        "cai_case": physical.name,
+        "particle_level": level.name if level is not None else "np1x",
+        "numerical_particle_multiplier": (
+            float(level.multiplier) if level is not None else 1.0),
+        "template": study.base_case,
+        "mesh_id": mesh_identifier(plan),
         "Kn": float(case.knudsen),
         "D_m": float(geom.diameter_m),
         "lambda0_m": float(exit_state.mean_free_path_m),
@@ -526,13 +893,42 @@ def manifest_entry(case: KnudsenCase, study: StudyConfig, cfg, geom,
         "U0_m_per_s": float(exit_state.velocity_m_per_s),
         "n0_per_m3": float(exit_state.number_density_per_m3),
         "n_equivalent_particles": float(run.n_equivalent_particles),
+        "baseline_n_equivalent_particles": float(
+            run.baseline_n_equivalent_particles),
+        "exit_particles_per_cell": float(run.exit_particles_per_cell),
         "min_cell_size_m": float(plan.min_cell_size_m),
         "max_cell_size_m": float(plan.max_cell_size_m),
         "core_cell_size_m": float(plan.core_cell_size_m),
         "cell_over_mean_free_path": float(plan.cell_over_mfp),
         "deltaT_s": float(run.delta_t_s),
+        "deltaT_source": run.delta_t_source,
+        "start_time_s": 0.0,
         "end_time_s": float(run.end_time_s),
+        "baseline_end_time_s": float(run.baseline_end_time_s),
+        "run_time_multiplier": float(run.run_time_multiplier),
+        "n_steps": int(run.n_steps),
+        "write_control": "timeStep",
+        "write_interval_steps": int(run.write_interval_steps),
+        "write_interval_s": float(run.write_interval_s),
+        "baseline_write_interval_steps": int(run.baseline_write_interval_steps),
+        "output_frequency_multiplier": float(run.output_frequency_multiplier),
+        "achieved_output_frequency_multiplier": float(
+            run.achieved_output_frequency_multiplier),
+        "n_writes": int(run.n_writes),
         "average_start_s": float(run.average_start_s),
+        "sampling_time_s": float(run.sampling_time_s),
+        "n_sampled_writes": int(run.n_sampled_writes),
+        "averaging": {
+            "function_object": "fieldAverage1",
+            "type": "fieldAverage",
+            "write_control": "writeTime",
+            "time_start_s": float(run.average_start_s),
+            "transient_basis": run.transient_basis,
+            "fields": {
+                name: {"mean": True, "prime2Mean": bool(prime2mean)}
+                for name, prime2mean in AVERAGED_FIELDS.items()
+            },
+        },
         "n_cells": int(plan.n_cells),
         "coarsened_for_budget": bool(plan.coarsened),
         "mean_free_path_convention": exit_state.convention,
@@ -547,4 +943,6 @@ def manifest_entry(case: KnudsenCase, study: StudyConfig, cfg, geom,
         entry["overrides"] = copy.deepcopy(case.overrides)
     if case.note:
         entry["note"] = case.note
+    if level is not None and level.note:
+        entry["particle_level_note"] = level.note
     return entry
