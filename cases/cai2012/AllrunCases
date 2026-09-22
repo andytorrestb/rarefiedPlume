@@ -9,6 +9,22 @@
 #   ./AllrunCases --keep-going   do not stop at the first failure
 #   ./AllrunCases --help
 #
+# SELECTING CASES -- for a job array
+#
+#   ./AllrunCases --list              the case list, numbered, one per line
+#   ./AllrunCases --index 0           only case 0 (0-based, as --list prints it)
+#   ./AllrunCases --case Kn100_np2x   only this case, by name or by path
+#
+# --index is what an array task uses. With 12 cases:
+#
+#   #SBATCH --array=0-11
+#   ./AllrunCases --index "$SLURM_ARRAY_TASK_ID"
+#
+# The order is manifest.yaml's, which generate_cases.py fixed: decreasing
+# Knudsen number, and within each case increasing particle multiplier. It does
+# not depend on directory iteration order, so index N means the same case on
+# every node and in every rerun.
+#
 # Sequentially, not in parallel: each case already uses every core it is given,
 # and two DSMC runs competing for memory is how a study of three cases turns
 # into three cases that all get killed.
@@ -31,6 +47,8 @@ SELF=${0##*/}
 cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
 
 ARGS=()
+SELECT=()
+LIST=0
 KEEP_GOING=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -38,6 +56,9 @@ while [ $# -gt 0 ]; do
         -s|--serial)   ARGS+=("--serial") ;;
         -np)           shift; ARGS+=("-np" "${1:?"-np needs a subdomain count"}") ;;
         --no-solve)    ARGS+=("--no-solve") ;;
+        --list)        LIST=1 ;;
+        --index)       shift; SELECT+=("${1:?"--index needs a case number"}") ;;
+        --case)        shift; SELECT+=("${1:?"--case needs a case name"}") ;;
         -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
         *)             echo "AllrunCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
@@ -61,6 +82,48 @@ PY
 ) || die "could not read manifest.yaml"
 
 [ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
+
+# --------------------------------------------------------------------------- #
+# case selection
+# --------------------------------------------------------------------------- #
+#
+# The manifest order is the contract -- see --help. Selecting by index rather
+# than by globbing is what lets a job array address one case per task without
+# every task having to agree about how a shell sorts names.
+
+if [ "$LIST" -eq 1 ]; then
+    for i in "${!CASES[@]}"; do
+        printf '%d\t%s\n' "$i" "${CASES[$i]}"
+    done
+    exit 0
+fi
+
+if [ ${#SELECT[@]} -gt 0 ]; then
+    PICKED=()
+    for want in "${SELECT[@]}"; do
+        FOUND=""
+        case "$want" in
+            ''|*[!0-9]*)
+                # A name or a path.
+                for case_path in "${CASES[@]}"; do
+                    if [ "$case_path" = "$want" ] || [ "${case_path##*/}" = "$want" ]; then
+                        FOUND=$case_path
+                        break
+                    fi
+                done
+                [ -n "$FOUND" ] || die "no case '$want' in manifest.yaml.
+       Use --list to see the ${#CASES[@]} case(s) it holds." ;;
+            *)
+                # An index, 0-based.
+                [ "$want" -lt ${#CASES[@]} ] || die "--index $want is past the
+       end: manifest.yaml holds ${#CASES[@]} case(s), so the valid range is
+       0-$(( ${#CASES[@]} - 1 )). Use --list to see them."
+                FOUND=${CASES[$want]} ;;
+        esac
+        PICKED+=("$FOUND")
+    done
+    CASES=("${PICKED[@]}")
+fi
 
 echo "### running ${#CASES[@]} case(s), sequentially"
 echo ""
