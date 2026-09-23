@@ -70,6 +70,41 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
+case_reached_end() {
+    "$PYTHON" - "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+case = Path(sys.argv[1])
+control = case / "system" / "controlDict"
+entries = {}
+for line in control.read_text(encoding="utf-8").splitlines():
+    match = re.match(r"\s*(endTime|deltaT)\s+([^;]+);", line)
+    if match:
+        entries[match.group(1)] = float(match.group(2))
+
+times = []
+for parent in (case, *case.glob("processor[0-9]*")):
+    if not parent.is_dir():
+        continue
+    for entry in parent.iterdir():
+        if entry.is_dir():
+            try:
+                value = float(entry.name)
+            except ValueError:
+                continue
+            if value > 0.0:
+                times.append(value)
+
+latest = max(times, default=None)
+end = entries.get("endTime")
+delta = entries.get("deltaT", 0.0)
+sys.exit(0 if latest is not None and end is not None
+         and latest >= end - 0.5 * delta else 1)
+PY
+}
+
 mapfile -t CASES < <($PYTHON - "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
 import sys
 import yaml
@@ -110,14 +145,12 @@ for case_path in "${CASES[@]}"; do
     [ -d "$case_path/constant/polyMesh" ] || die "$case_path has no mesh.
        Run ./AllmeshCases first."
 
-    # Whether the case had already finished decides whether this leg's wall
-    # clock is the cost of the case or the cost of noticing it was done.
-    RESUMED=0
-    if $PYTHON -c "
-import sys
-from plumetools.cai2012.study import case_is_complete
-sys.exit(0 if case_is_complete('$case_path') else 1)"; then
-        RESUMED=1
+    # Do not invoke a completed case. An unfinished case is handed to its
+    # restart-aware Allrun, which starts from controlDict's latestTime.
+    if case_reached_end "$case_path"; then
+        echo "### $case_path has already reached endTime; skipping"
+        echo ""
+        continue
     fi
 
     CASE_START=$(date +%s)
@@ -133,7 +166,7 @@ sys.exit(0 if case_is_complete('$case_path') else 1)"; then
     echo "    elapsed ${ELAPSED} s"
 
     if [ ${#FAILED[@]} -eq 0 ] || [ "$KEEP_GOING" -eq 1 ]; then
-        $PYTHON - "$case_path" "$ELAPSED" "$RESUMED" "$KEEP_CLOUDS" <<'PY'
+        $PYTHON - "$case_path" "$ELAPSED" "$KEEP_CLOUDS" <<'PY'
 import shutil
 import sys
 from pathlib import Path
@@ -142,9 +175,8 @@ import yaml
 
 from plumetools.cai2012.health import load_cost_model, record_measurement
 
-case_path, elapsed, resumed, keep_clouds = (
-    Path(sys.argv[1]), float(sys.argv[2]), sys.argv[3] == "1",
-    sys.argv[4] == "1")
+case_path, elapsed, keep_clouds = (
+    Path(sys.argv[1]), float(sys.argv[2]), sys.argv[3] == "1")
 
 # --- prune reconstructed parcel clouds ---------------------------------- #
 #
@@ -178,11 +210,6 @@ if not keep_clouds:
               f"clouds ({len(times) - 1} time(s); the newest is kept)")
 
 # --- record the wall clock ----------------------------------------------- #
-if resumed:
-    print("    not timed: this case had already finished, so the elapsed time "
-          "above is\n    the cost of noticing that, not of the run.")
-    raise SystemExit(0)
-
 entry = yaml.safe_load(Path("manifest.yaml").read_text(encoding="utf-8"))
 row = next((c for c in entry.get("cases", [])
             if c["path"] == str(case_path).replace("\\", "/")), None)
