@@ -31,11 +31,14 @@ from plumetools.viz import (
     resolve_field_name,
 )
 from plumetools.viz.resolve import (
+    EXPORT_HEIGHT,
     NothingToRender,
     RenderError,
+    layout_shape,
     nudge_plane_origin,
     resolve_times,
     scalar_bar_label_budget,
+    slice_frame,
     view_extents,
     view_half_height,
     view_shape,
@@ -850,6 +853,120 @@ def test_the_fixed_aspect_helper_still_fits_a_tall_body():
     """Kept for a viewport whose width cannot follow the geometry."""
     half = view_half_height(WALLS, *ALONG_Y, aspect=4 / 3)
     assert half == pytest.approx(0.2286 * 1.06)
+
+
+# --------------------------------------------------------------------------- #
+# framing a slice
+#
+# The arithmetic that sizes every slice image. It is the one piece of the
+# drawing that needs no ParaView, and the piece a regenerated series depends on
+# to line up with the frames it replaces.
+# --------------------------------------------------------------------------- #
+
+#: A cut twice as wide as it is tall, in the y = 0 plane: x in [0, 2], z in
+#: [-0.5, 0.5]. Seen along +y with z up.
+CUT = (0.0, 2.0, 0.0, 0.0, -0.5, 0.5)
+
+
+def test_a_slice_view_is_as_wide_as_the_cut_makes_it():
+    frame = slice_frame(CUT, *ALONG_Y, height=700)
+    assert (frame.width, frame.height) == (1400, 700)
+
+
+def test_a_slice_camera_looks_along_the_normal_at_the_middle_of_the_cut():
+    frame = slice_frame(CUT, *ALONG_Y, height=700)
+    assert frame.focal_point == (1.0, 0.0, 0.0)
+    assert frame.camera_position == (1.0, -1.0, 0.0)
+
+
+def test_the_parallel_scale_is_half_the_height_of_the_cut():
+    """Which is what makes the cut fill the view exactly, top to bottom."""
+    assert slice_frame(CUT, *ALONG_Y, height=700).parallel_scale == 0.5
+
+
+def test_zoom_shrinks_the_scale_without_resizing_the_view():
+    frame = slice_frame(CUT, *ALONG_Y, height=700, zoom=2.0)
+    assert frame.parallel_scale == 0.25
+    assert (frame.width, frame.height) == (1400, 700)
+
+
+def test_margins_add_pixels_around_the_cut_rather_than_squashing_it():
+    """The scale grows by the same ratio as the height, so the cut itself is
+    drawn at the size it would have been without the margin."""
+    frame = slice_frame(CUT, *ALONG_Y, height=700, margin_x=40, margin_y=70)
+    assert (frame.width, frame.height) == (1440, 770)
+    assert frame.parallel_scale == pytest.approx(0.5 * 770 / 700)
+
+
+def test_a_negative_margin_crops():
+    frame = slice_frame(CUT, *ALONG_Y, height=700, margin_x=-20)
+    assert frame.width == 1380
+
+
+def test_an_offset_under_one_unit_does_nothing():
+    """Pinned, not endorsed. Offsets are documented as model units and are
+    truncated to whole ones, so on a domain a metre across they cannot frame
+    anything. Changing this moves the camera in every image that sets one."""
+    centred = slice_frame(CUT, *ALONG_Y, height=700)
+    nudged = slice_frame(CUT, *ALONG_Y, height=700, offset_x=0.9, offset_y=0.9)
+    assert nudged.focal_point == centred.focal_point
+
+
+def test_a_whole_unit_offset_moves_the_camera_and_not_the_view():
+    frame = slice_frame(CUT, *ALONG_Y, height=700, offset_y=1.0)
+    assert frame.focal_point == (1.0, 0.0, 1.0)
+    assert frame.camera_position == (1.0, -1.0, 1.0)
+    assert (frame.width, frame.height) == (1400, 700)
+
+
+def test_a_camera_up_that_is_not_unit_length_scales_the_picture():
+    """Pinned, not endorsed: the height is measured along camera_up as given."""
+    frame = slice_frame(CUT, (0.0, 1.0, 0.0), (0.0, 0.0, 2.0), height=700)
+    assert frame.width == 700
+    assert frame.parallel_scale == 1.0
+
+
+def test_an_empty_cut_still_has_a_size():
+    """A plane that misses the mesh is skipped before it is drawn, but the view
+    is framed first, and a zero extent must not divide by zero on the way."""
+    frame = slice_frame((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), *ALONG_Y, height=700)
+    assert (frame.width, frame.height) == (700, 700)
+    assert frame.parallel_scale == 5.0
+
+
+# --------------------------------------------------------------------------- #
+# sizing the exported image
+# --------------------------------------------------------------------------- #
+
+def test_every_image_is_exported_at_the_same_height():
+    """image.height sizes the VIEW. The export is 800 px whatever it says."""
+    assert EXPORT_HEIGHT == 800
+    for view_height in (300, 700, 1400):
+        _width, height, _fractions = layout_shape([(view_height, view_height)])
+        assert height == 800
+
+
+def test_a_single_view_keeps_its_aspect_ratio_and_has_nothing_to_split():
+    assert layout_shape([(467, 700)]) == (533, 800, [])
+
+
+def test_a_colour_bar_takes_its_share_of_the_height():
+    """The slice and its bar, as the default spec stacks them: 700 px over 110.
+    Measured on a real run -- 461 px wide is what ParaView was asked for."""
+    width, height, fractions = layout_shape([(467, 700), (467, 110)])
+    assert (width, height) == (461, 800)
+    assert fractions == [pytest.approx(700 / 810)]
+
+
+def test_each_split_is_a_share_of_what_is_left_not_of_the_whole():
+    """A layout is a binary tree, so the second split divides the remainder."""
+    _width, _height, fractions = layout_shape([(100, 100), (100, 100), (100, 200)])
+    assert fractions == [pytest.approx(0.25), pytest.approx(1 / 3)]
+
+
+def test_the_widest_row_sets_the_width():
+    width, _height, _fractions = layout_shape([(200, 400), (600, 400)])
+    assert width == 600
 
 
 # --------------------------------------------------------------------------- #

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Iterable, Sequence
+from typing import Iterable, NamedTuple, Sequence
 
 #: Relative width of a range below which the field is called constant. Not
 #: exactly zero: a field uniform to twelve significant figures is uniform, and
@@ -405,6 +405,144 @@ def view_shape(bounds: Sequence[float], normal: Sequence[float],
 
     width = int(round(height * half_width / half_height))
     return max(width, 1), half_height * padding
+
+
+class SliceFrame(NamedTuple):
+    """How a cut is framed: where the camera sits and how big the view is.
+
+    Attributes:
+        focal_point: what the camera looks at -- the centre of the cut, shifted
+            by any offset.
+        camera_position: one *normal* back from the focal point. The distance
+            is irrelevant under a parallel projection; the direction is not.
+        width, height: the view's size in pixels, margins included.
+        parallel_scale: ParaView's ``CameraParallelScale`` -- half the height
+            of the view in world units.
+    """
+
+    focal_point: tuple[float, float, float]
+    camera_position: tuple[float, float, float]
+    width: int
+    height: int
+    parallel_scale: float
+
+
+def slice_frame(bounds: Sequence[float], normal: Sequence[float],
+                camera_up: Sequence[float], height: int, *,
+                zoom: float = 1.0, margin_x: float = 0, margin_y: float = 0,
+                offset_x: float = 0, offset_y: float = 0) -> SliceFrame:
+    """Size a slice's view from the cut itself, so the image is undistorted.
+
+    The view is *height* pixels tall and as wide as the cut's own aspect ratio
+    makes it, so one world unit is the same number of pixels across as down
+    whatever shape the domain is. The margins then add pixels on top of that,
+    and the parallel scale is stretched by the same ratio so they add framing
+    rather than squashing the picture.
+
+    The extents are measured along ``camera_up`` and ``camera_up x normal``.
+    That second axis is **not** the screen-right axis -- it points the other
+    way, see :class:`~plumetools.viz.spec.PlaneSpec` -- but only its absolute
+    projection is used here, and that is the same for both.
+
+    Two things about the arithmetic look like mistakes and are kept on purpose:
+    every image already on disk was framed by them, and a regenerated series
+    has to line up with the frames it replaces. See
+    :mod:`plumetools.viz.scene` for where the arithmetic came from.
+
+    * ``camera_up`` is **not** normalised before the height is measured, so a
+      non-unit ``camera_up`` scales the picture.
+    * the margins and offsets are truncated to whole numbers. For the margins
+      that is harmless, they are pixels. For the offsets it is not: they are
+      documented as model units, and an offset under one metre does nothing.
+
+    Args:
+        bounds: ``(x_min, x_max, y_min, y_max, z_min, z_max)`` of the cut.
+        normal: the plane normal; the camera looks along it.
+        camera_up: the camera's up vector.
+        height: view height in pixels, before ``margin_y``.
+        zoom: 2.0 fills twice as much of the frame.
+        margin_x, margin_y: pixels added to the computed size.
+        offset_x, offset_y: camera shift within the plane.
+
+    Returns:
+        The :class:`SliceFrame`.
+    """
+    margin_x, margin_y = int(margin_x), int(margin_y)
+    offset_x, offset_y = int(offset_x), int(offset_y)
+    normal = tuple(float(component) for component in normal)
+    up = tuple(float(component) for component in camera_up)
+
+    low = (float(bounds[0]), float(bounds[2]), float(bounds[4]))
+    extents = (float(bounds[1]) - low[0], float(bounds[3]) - low[1],
+               float(bounds[5]) - low[2])
+    centre = tuple(extent / 2.0 + corner for extent, corner in zip(extents, low))
+
+    def dot(a: Sequence[float], b: Sequence[float]) -> float:
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    def unit(vector: Sequence[float]) -> tuple[float, float, float]:
+        length = math.sqrt(dot(vector, vector))
+        factor = 1.0 / length if length > 0.0 else 0.0
+        return (vector[0] * factor, vector[1] * factor, vector[2] * factor)
+
+    # A cut with no extent along an axis -- an empty one, or one seen edge on --
+    # would otherwise divide by zero. 10 is as good a number as any other for a
+    # picture of nothing.
+    y_size = abs(dot(up, extents)) or 10
+    y_dir = unit(up)
+    x_dir = unit((up[1] * normal[2] - up[2] * normal[1],
+                  -up[0] * normal[2] + up[2] * normal[0],
+                  up[0] * normal[1] - up[1] * normal[0]))
+    x_size = abs(dot(x_dir, extents)) or 10
+    x_resolution = round(x_size * height / y_size)
+
+    focal_point = tuple(
+        middle + (across * offset_x + along * offset_y)
+        for middle, across, along in zip(centre, x_dir, y_dir))
+    camera_position = tuple(
+        focus - component for focus, component in zip(focal_point, normal))
+
+    framed_height = height + margin_y
+    parallel_scale = y_size * 0.5 * (1.0 / zoom) * (framed_height / height)
+    return SliceFrame(focal_point, camera_position,          # type: ignore[arg-type]
+                      x_resolution + margin_x, framed_height, parallel_scale)
+
+
+#: Height in pixels of every exported image, whatever ``image.height`` says.
+#: ``image.height`` sizes the *view*, which fixes the aspect ratio and how the
+#: height is shared between the picture and its colour bar; the layout is then
+#: scaled to this many pixels as a whole.
+EXPORT_HEIGHT = 800
+
+
+def layout_shape(rows: Sequence[tuple[int, int]],
+                 image_height: int = EXPORT_HEIGHT
+                 ) -> tuple[int, int, list[float]]:
+    """The pixel size of a stack of views, and how its height is divided.
+
+    A layout is a binary tree: the first split separates the top row from
+    everything under it, the next separates the second row from the rest, and
+    so on. Each split therefore wants the row's share of *what is left*, not of
+    the whole image.
+
+    Args:
+        rows: ``(width, height)`` in pixels of each row's view, top first.
+        image_height: the exported height.
+
+    Returns:
+        ``(image_width, image_height, fractions)``. One fraction per split --
+        one fewer than there are rows, so a single view has none.
+    """
+    total_width = max(0, *(width for width, _height in rows))
+    total_height = sum(height for _width, height in rows)
+    image_width = int(float(image_height)
+                      * float(float(total_width) / float(total_height)))
+
+    absolute = [height / image_height * (image_height / total_height)
+                for _width, height in rows]
+    fractions = [share / sum(absolute[index:])
+                 for index, share in enumerate(absolute)]
+    return image_width, image_height, fractions[:-1]
 
 
 def view_half_height(bounds: Sequence[float], normal: Sequence[float],
