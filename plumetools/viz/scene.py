@@ -22,7 +22,9 @@ supports ParaView 5.11 to 5.13 only. The classes below are the handful of
 things it was used for, rewritten against ``paraview.simple`` itself.
 
 They make **the same ParaView calls in the same order**, deliberately, including
-the ones that look redundant. ParaView's session is global state and the order
+the ones that look redundant -- with two additions, both about what is left
+behind and neither able to reach an image; see 3 below. ParaView's session is
+global state and the order
 things are created, shown and activated in decides what a later call sees; a
 tidier sequence that drew a subtly different picture would be worse than an
 untidy one that does not. Measured rather than assumed: on ParaView 5.11.2 every
@@ -68,12 +70,29 @@ with a legend is two views stacked in one layout -- the legend sits under the
 picture instead of over part of it. :class:`SurfaceView` is the opposite and
 draws its legend inline.
 
-3. Some things are left behind until the session is reset
----------------------------------------------------------
+3. Some things are left behind until the session is reset, and two are not
+--------------------------------------------------------------------------
 A :class:`Case` shows its reader in a view of its own that nothing ever looks
 at, and a :class:`SliceView` drawn without a legend leaves its colour-bar view.
 Neither reaches an image, and :meth:`plumetools.viz.render.Renderer.close`
 clears both between cases.
+
+VifPara left two more things behind, and a long series cannot be drawn with
+either. Clearing them is the one place this module departs from its call
+sequence, and both calls come where they cannot reach a picture -- one before
+a view has drawn anything, one after its image is on disk:
+
+* **The X display** of every view, which nothing closed: an X connection and,
+  under Mesa's software renderer, a rasteriser thread pool per view, for the
+  life of the process. :func:`_own_display`.
+* **The cut.** A ``Slice`` left in the pipeline keeps its input alive, and for
+  a derived field that is the Calculator chain of one time step -- which holds
+  that step's whole field data. :meth:`SliceView.release`.
+
+Measured on ParaView 5.11.2, before: two X connections and 98 threads per
+image, and 0.4 GB per time step of a 1.3 M-cell case, twice. A study of 660
+images stopped at its eightieth with 15 GB resident. After: the same study
+drawn in one process, never above 150 threads or 2.2 GB.
 """
 
 from __future__ import annotations
@@ -147,6 +166,32 @@ def _draw_like_paraview_5() -> None:
     """
     if VERSION >= (6, 0):
         pv.LoadPalette("BlueGrayBackground")
+
+
+def _own_display(render_view: Any) -> None:
+    """Make a new view's window open its X display itself, so that it closes it.
+
+    On an X11 build -- the ParaView 5.11 that Ubuntu packages -- a window has
+    no display until its first render, and it is then the *interactor* that
+    opens one and hands it over. A window does not close a display it was
+    given, and that interactor never closes the one it opened. So every view
+    ever created keeps an X connection for the life of the process, deleted or
+    not, ``ResetSession`` or not; and Mesa's software renderer hangs a whole
+    screen off each connection -- two threads per core and its buffers.
+
+    A long series ends out of memory -- or would, a little later, at the X
+    server's limit on clients, which is 256 by default and two views an image.
+
+    ``GetScreenSize`` is called for its side effect. The window needs a
+    display to answer, opens one, and therefore owns it and closes it when the
+    view is deleted. It has to come before anything renders.
+
+    Nothing is done on any other kind of window: ParaView 6's binaries draw
+    through EGL or OSMesa and do not leak this way.
+    """
+    window = render_view.GetRenderWindow()
+    if window.IsA("vtkXOpenGLRenderWindow"):
+        window.GetScreenSize()
 
 
 # --------------------------------------------------------------------------- #
@@ -247,6 +292,7 @@ class Case:
         steps = len(self.reader.TimestepValues)
         # Not drawn into any image. See "left behind" in the module docstring.
         self._view = pv.CreateRenderView()
+        _own_display(self._view)
         self._display = pv.Show(self.reader, self._view)
         log.info(f"Case contains {steps} time steps.")
 
@@ -426,6 +472,7 @@ class _View:
         self._width = width
         self._height = height
         self.render_view = pv.CreateRenderView()
+        _own_display(self.render_view)
         self._display: Any = None
         self._show_orientation_axis = show_orientation_axis
 
@@ -577,6 +624,16 @@ class SliceView(_View):
         """Draw the legend into *row*, as wide as the slice and *height* tall."""
         self.colour_bar.resize(self._width, height)
         self.colour_bar.render(layout, row)
+
+    def release(self) -> None:
+        """Take the cut out of the pipeline, once the image is written.
+
+        Not part of :meth:`delete`, which is the views' and is called for the
+        colour bar as well. The cut outlives both views, and while it does, so
+        does whatever it was cut from; see "left behind" in the module
+        docstring.
+        """
+        pv.Delete(self._cut)
 
 
 class SurfaceView(_View):

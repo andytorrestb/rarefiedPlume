@@ -294,6 +294,12 @@ class Renderer:
     The reader is opened once and reused; only the derived-field Calculators are
     rebuilt per time, because which fields exist changes with the time (before
     ``fieldAverage``'s ``timeStart`` there are no averages to compute from).
+
+    They are deleted again as soon as that time is drawn. A Calculator's output
+    shares its arrays with the reader's, so one left in the pipeline keeps a
+    whole time step of field data alive after the reader has moved on -- and a
+    series left one behind per time, twice: once scanning the colour ranges and
+    once drawing. See :meth:`_release_time`.
     """
 
     def __init__(self, spec: VizSpec, facts: CaseFacts, *,
@@ -318,6 +324,8 @@ class Renderer:
         self._surface_regions: list[str] | None = None
         #: (field, plane) -> the colour range pinned across a whole series.
         self._series_ranges: dict[tuple[str, str], tuple[float, float]] = {}
+        #: The Calculators built for the time being drawn, in chain order.
+        self._derived_objects: list[Any] = []
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -451,9 +459,30 @@ class Renderer:
             # a NaN, which would poison the colour range for the whole image.
             calculator.ReplaceInvalidResults = 1
             calculator.ReplacementValue = 0.0
+            self._derived_objects.append(calculator)
             source = calculator
 
         return source
+
+    def _release_time(self) -> None:
+        """Delete what one time left in the pipeline, once it is finished with.
+
+        Consumers before what they consume: a probe is cut from the Calculator
+        chain, and so is the chain's tail from its head. ``Delete`` only
+        unregisters a filter that something still takes its input from, and an
+        unregistered filter keeps its output.
+
+        This is what bounds the memory of a series. Without it every time
+        drawn stays resident until the case is closed -- 0.4 GB a time on a
+        1.3 M-cell case, left twice over, so a 37-frame series was on course
+        for some 30 GB and never finished.
+        """
+        for probe in getattr(self, "_probe_objects", []):
+            pv.Delete(probe)
+        self._probe_objects = []
+        for calculator in reversed(self._derived_objects):
+            pv.Delete(calculator)
+        self._derived_objects = []
 
     def _skip(self, field: str, plane: str, time: float, reason: str) -> None:
         self.skipped.append(SkippedImage(field=field, plane=plane, time=time,
@@ -605,9 +634,7 @@ class Renderer:
                 else:
                     union[key] = (low, high)
 
-            for probe in getattr(self, "_probe_objects", []):
-                pv.Delete(probe)
-            self._probe_objects = []
+            self._release_time()
 
         self._series_ranges = union
         print()
@@ -728,9 +755,7 @@ class Renderer:
             print(f"    wrote {filename + '.png':<44} "
                   f"[{scale[0]:.3e}, {scale[1]:.3e}]{'  log' if log else ''}")
 
-        for probe in getattr(self, "_probe_objects", []):
-            pv.Delete(probe)
-        self._probe_objects = []
+        self._release_time()
 
     # -- geometry probes ----------------------------------------------------- #
 
@@ -885,7 +910,12 @@ class Renderer:
             self._tune_scalar_bar(
                 colour_bar.render_view, log, scale,
                 bar_width_px=colour_bar.width * image.bar_size)
-        self._save(view, layout, filename, extra_views=extra)
+        try:
+            self._save(view, layout, filename, extra_views=extra)
+        finally:
+            # The cut as well, or it holds on to what it was cut from -- for a
+            # derived field, this time's Calculators and all their data.
+            view.release()
 
     def _tune_scalar_bar(self, render_view: Any, log: bool,
                          scale: tuple[float, float],

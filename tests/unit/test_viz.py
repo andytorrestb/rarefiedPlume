@@ -1039,6 +1039,31 @@ def test_render_imports_scene_before_paraview_simple():
     assert imports.index("plumetools.viz.scene") < imports.index("paraview.simple")
 
 
+def test_every_render_view_is_made_to_own_its_display():
+    """On an X11 ParaView a view that is not told to never closes its X
+    connection: 98 threads an image under Mesa, and a study that stops part way
+    through its third case. It has to be said before anything renders, so it is
+    the line after the view is created -- every time one is."""
+    lines = [line.strip() for line in
+             (VIZ / "scene.py").read_text(encoding="utf-8").splitlines()]
+    created = [number for number, line in enumerate(lines)
+               if line.endswith("pv.CreateRenderView()")]
+    assert len(created) >= 2
+    for number in created:
+        assert lines[number + 1].startswith("_own_display(")
+
+
+def test_a_time_leaves_nothing_in_the_pipeline_behind_it():
+    """A Calculator shares its arrays with the reader's output, so one left
+    behind keeps a whole time step resident: 0.4 GB a time on 1.3 M cells,
+    left twice. Both passes over the times have to clear up after each one."""
+    source = (VIZ / "render.py").read_text(encoding="utf-8")
+    assert "self._derived_objects.append(calculator)" in source
+    for method in ("_fix_series_ranges", "_render_time"):
+        body = source.split(f"def {method}(")[1].split("\n    def ")[0]
+        assert "self._release_time()" in body
+
+
 @pytest.mark.parametrize("study", ["cai2012", "cai2012-health", "markelov1999"])
 def test_a_study_renders_through_pvpython_itself(study):
     script = (REPO / "cases" / study / "AllpostCases").read_text(encoding="utf-8")
