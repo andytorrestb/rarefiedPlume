@@ -53,8 +53,21 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-import paraview.simple as pv
 import yaml
+
+# scene before paraview.simple: it declares the ParaView version this package
+# draws like, and that has to be said before paraview.simple is first imported.
+from plumetools.viz.scene import (
+    Case,
+    ColourMap,
+    Layout,
+    SliceView,
+    SurfaceView,
+    legend_number_format,
+    log as session_log,
+)
+
+import paraview.simple as pv                               # noqa: E402
 
 from plumetools.viz.catalog import FieldKind
 from plumetools.viz.resolve import (
@@ -70,14 +83,6 @@ from plumetools.viz.resolve import (
     resolve_times,
     scalar_bar_label_budget,
     view_shape,
-)
-from plumetools.viz.scene import (
-    Case,
-    ColourMap,
-    Layout,
-    SliceView,
-    SurfaceView,
-    log as session_log,
 )
 from plumetools.viz.spec import PlaneSpec, RenderTask, VizSpec, VizSpecError
 
@@ -899,7 +904,8 @@ class Renderer:
         """
         image = self.spec.image
         low, high = scale
-        label_format = f"%-#6.{image.legend_digits_after}{image.legend_format_type}"
+        label_format = legend_number_format(
+            image.legend_digits_after, image.legend_format_type, flags="-#")
 
         for representation in render_view.Representations:
             if representation.GetXMLName() != "ScalarBarWidgetRepresentation":

@@ -38,6 +38,7 @@ from plumetools.viz.resolve import (
     RenderError,
     layout_shape,
     nudge_plane_origin,
+    number_format,
     resolve_times,
     scalar_bar_label_budget,
     slice_frame,
@@ -972,6 +973,22 @@ def test_the_widest_row_sets_the_width():
 
 
 # --------------------------------------------------------------------------- #
+# legend number formats
+# --------------------------------------------------------------------------- #
+
+def test_a_legend_format_is_printf_for_the_paraviews_that_read_printf():
+    assert number_format(6, 1, "e") == "%6.1e"
+    assert number_format(6, 3, "g", flags="-#") == "%-#6.3g"
+
+
+def test_a_legend_format_is_std_format_for_the_paraviews_that_read_that():
+    """6.1 on. They still take printf, and say on every image that they will
+    stop."""
+    assert number_format(6, 1, "e", std_format=True) == "{:6.1e}"
+    assert number_format(6, 3, "g", flags="-#", std_format=True) == "{:<#6.3g}"
+
+
+# --------------------------------------------------------------------------- #
 # the ParaView side needs ParaView and nothing else
 #
 # These modules cannot be imported here, so they are read instead. What is
@@ -1003,6 +1020,23 @@ def test_the_renderer_imports_nothing_a_bare_pvpython_lacks(module):
         pytest.skip("sys.stdlib_module_names needs Python 3.10")
     roots = {name.split(".")[0] for name in _imported_modules(VIZ / module)}
     assert roots - set(stdlib) - PVPYTHON_PROVIDES == set()
+
+
+def test_scene_declares_its_paraview_version_before_importing_paraview_simple():
+    """paraview.compatibility is read when paraview.simple first loads. Said
+    afterwards it is ignored, and ParaView 6 then refuses the preset name every
+    shipped spec uses."""
+    source = (VIZ / "scene.py").read_text(encoding="utf-8")
+    declared = source.index("paraview.compatibility.major = 5")
+    assert "paraview.compatibility.minor = 11" in source
+    assert declared < source.index("import paraview.simple")
+
+
+def test_render_imports_scene_before_paraview_simple():
+    """The other half of the same rule: scene is where the version is declared,
+    so nothing may import paraview.simple ahead of it."""
+    imports = _imported_modules(VIZ / "render.py")
+    assert imports.index("plumetools.viz.scene") < imports.index("paraview.simple")
 
 
 @pytest.mark.parametrize("study", ["cai2012", "cai2012-health", "markelov1999"])

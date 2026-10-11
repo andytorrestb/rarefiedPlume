@@ -49,6 +49,35 @@ def scalar_bar_label_budget(bar_width_px: float,
         return limit
     return max(0, min(limit, int(bar_width_px // SCALAR_BAR_LABEL_PITCH) - 1))
 
+
+def number_format(width: int, digits_after: int, conversion: str, *,
+                  flags: str = "", std_format: bool = False) -> str:
+    """A legend's number format, in whichever dialect this ParaView reads.
+
+    ParaView formatted the numbers on a colour bar with ``printf`` up to 6.0
+    and with ``std::format`` from 6.1. The newer versions still accept a
+    ``printf`` string, but warn on every use that they will stop; a study's
+    worth of images is thousands of those warnings, and then one day none of
+    the labels.
+
+    Args:
+        width: minimum field width.
+        digits_after: digits after the decimal point.
+        conversion: ``e``, ``f``, ``g`` or ``d``.
+        flags: ``printf`` flags -- ``-`` to left-justify, ``#`` to keep a
+            trailing decimal point.
+        std_format: write the ``std::format`` spelling.
+
+    Returns:
+        ``"%-#6.1e"`` or ``"{:<#6.1e}"``.
+    """
+    if not std_format:
+        return f"%{flags}{width}.{digits_after}{conversion}"
+    align = "<" if "-" in flags else ""
+    alternate = "#" if "#" in flags else ""
+    return f"{{:{align}{alternate}{width}.{digits_after}{conversion}}}"
+
+
 #: Names a ParaView Calculator expression may use that are not field arrays.
 CALCULATOR_FUNCTIONS = frozenset({
     "mag", "abs", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan",

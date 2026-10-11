@@ -30,6 +30,27 @@ slice this module writes is byte-identical to the one VifPara wrote from the
 same case and spec, and a surface image differs from VifPara's by no more than
 two VifPara runs differed from each other -- a few dozen pixels, by one level.
 
+One ParaView version to draw like
+---------------------------------
+The images are meant to look the same whichever ParaView draws them, so that a
+series started on one machine can be finished on another. ParaView 5.11 is the
+reference, because it drew every image this package made before it could run
+on anything else. Four things hold a newer ParaView to it:
+
+* ``paraview.compatibility`` is declared as 5.11, ParaView's own mechanism for
+  running an older script. It is what keeps a spec's ``Viridis (matplotlib)``
+  meaning something after 6.1 renamed the preset to ``Viridis``, and it prints
+  one line saying so at start-up.
+* the view background is put back to ParaView 5's blue-grey
+  (:func:`_draw_like_paraview_5`), which compatibility mode does not do.
+* the reader is asked for point data by name, which ParaView 6 no longer
+  derives by default (:class:`Case`).
+* legend number formats are written as ``printf`` or as ``std::format``,
+  whichever the running version reads natively (:func:`legend_number_format`).
+
+Each is either a no-op on 5.11 or restates its default, so the call sequence
+there is unchanged. Checked on 5.11.2 and 6.2.0.
+
 Three consequences of the call sequence are worth knowing before changing
 anything here.
 
@@ -65,9 +86,21 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Sequence
 
-import paraview.simple as pv
+import paraview
 
-from plumetools.viz.resolve import layout_shape, slice_frame
+# Before paraview.simple is imported, which is why this module has to be the
+# first of this package to import it. See "One ParaView version to draw like".
+paraview.compatibility.major = 5
+paraview.compatibility.minor = 11
+
+import paraview.simple as pv                               # noqa: E402
+from paraview import servermanager                         # noqa: E402
+
+from plumetools.viz.resolve import (                       # noqa: E402
+    layout_shape,
+    number_format,
+    slice_frame,
+)
 
 __all__ = [
     "Case",
@@ -77,8 +110,43 @@ __all__ = [
     "SessionLog",
     "SliceView",
     "SurfaceView",
+    "VERSION",
+    "legend_number_format",
     "log",
 ]
+
+#: The ParaView that is actually running, ``(major, minor)`` -- not the
+#: compatibility version declared above.
+VERSION = (servermanager.vtkSMProxyManager.GetVersionMajor(),
+           servermanager.vtkSMProxyManager.GetVersionMinor())
+
+
+def legend_number_format(digits_after: int, conversion: str,
+                         flags: str = "") -> str:
+    """A six-wide legend number format in the dialect this ParaView reads.
+
+    ``printf`` below 6.1 and ``std::format`` from it; see
+    :func:`plumetools.viz.resolve.number_format`.
+    """
+    return number_format(ColourMap.DIGITS_BEFORE, digits_after, conversion,
+                         flags=flags, std_format=VERSION >= (6, 1))
+
+
+def _draw_like_paraview_5() -> None:
+    """Put back the view background that ParaView 6 changed.
+
+    ParaView 6 replaced the blue-grey view background with a warm grey, and
+    declaring compatibility with 5.11 does not bring the old one back. A view
+    whose spec sets no ``image.background`` takes the palette's, so the strip
+    behind every colour bar -- and everything around a body in a surface view
+    -- would change colour with the ParaView version, part way through a study
+    if that is when the machine changed.
+
+    Does nothing on ParaView 5, where this palette is already the one loaded.
+    The settings are session state, so this is repeated for every case.
+    """
+    if VERSION >= (6, 0):
+        pv.LoadPalette("BlueGrayBackground")
 
 
 # --------------------------------------------------------------------------- #
@@ -169,7 +237,12 @@ class Case:
 
     def __init__(self, foam_file: str | Path) -> None:
         log.info("Creating new case.")
-        self.reader = pv.OpenFOAMReader(FileName=str(foam_file), CaseType=1)
+        _draw_like_paraview_5()
+        # Point data is asked for by name because ParaView 6 stopped deriving
+        # it by default, and `field_type: POINTS` has nothing to colour by
+        # without it. On ParaView 5 this is the default, restated.
+        self.reader = pv.OpenFOAMReader(FileName=str(foam_file), CaseType=1,
+                                        Createcelltopointfiltereddata=1)
         self.reader.UpdatePipelineInformation()
         steps = len(self.reader.TimestepValues)
         # Not drawn into any image. See "left behind" in the module docstring.
@@ -213,7 +286,8 @@ class ColourMap:
         log_scale: colour logarithmically.
         association: ``"CELLS"`` or ``"POINTS"``.
         orientation, location, size: where the legend sits in its view.
-        format_type, digits_after: how the range labels are written.
+        format_type, digits_after: how the range labels are written; see
+            :func:`legend_number_format`.
     """
 
     field: str
@@ -282,7 +356,7 @@ class ColourMap:
         bar.SetPropertyWithName("WindowLocation", self.location)
         bar.SetPropertyWithName(
             "RangeLabelFormat",
-            f"%{self.DIGITS_BEFORE}.{self.digits_after}{self.format_type}")
+            legend_number_format(self.digits_after, self.format_type))
         bar.SetPropertyWithName("ScalarBarLength", self.size)
 
         display.SetScalarBarVisibility(render_view, bool(show_bar))
