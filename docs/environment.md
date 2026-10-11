@@ -107,56 +107,71 @@ one-offs under `util/` import it directly and are not part of the library.
 > yet six plotting scripts require one as input (finding RP-06). The Fnum
 > resolution study cannot currently be reproduced end to end.
 
-#### Slice imagery — `plumetools.viz` and VifPara
+#### Slice imagery — `plumetools.viz` and `pvpython`
 
-`plumetools/viz` renders slice PNGs of any solver field through
-[VifPara](https://github.com/virtual-vehicle/VifPara), which automates ParaView.
-Three things have to line up, and `pip` does only the third:
+`plumetools/viz` renders slice PNGs of any solver field through ParaView's own
+`paraview.simple`. It needs ParaView and nothing that `pip` installs:
 
 | | | |
 |---|---|---|
-| 1 | **ParaView 5.11–5.13** installed and on `PATH` | `pvpython`, `paraview` |
-| 2 | ParaView's *internal* Python minor version **==** the venv's | see below |
-| 3 | the `viz` extra | `pip install -e ".[viz]"` |
-| 4 | **ffmpeg**, for the time-series videos only | `apt install ffmpeg` |
+| 1 | **ParaView** installed, `pvpython` on `PATH` | 5.11 or 6.2; see below |
+| 2 | **ffmpeg**, for the time-series videos only | `apt install ffmpeg` |
 
-Step 4 is optional and is *not* pip-installable. Without it the frames are still
-written and the step prints one line saying no videos were made; encode them
-later with `python plumetools/viz/video.py <viz-dir>`, which needs ffmpeg but not
-ParaView. Verified against ffmpeg 6.1.1 with `libx264`.
-
-**Step 2 is the one that bites.** VifPara layers this virtual environment onto
-ParaView's interpreter, so the two Pythons must match. Check both:
+There is no `viz` extra, no launcher, and no requirement that ParaView's Python
+match the virtual environment's. `pvpython` runs the script directly:
 
 ```bash
-pvpython -c "import sys; print(sys.version)"     # ParaView's
-python    -c "import sys; print(sys.version)"    # the venv's
+pvpython --force-offscreen-rendering \
+    plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
 ```
 
-Verified working here: ParaView **5.11.2**, both Pythons **3.12.3**. ParaView 6
-is not supported by VifPara.
+**Never `python`.** Running it with `python` fails at `import paraview.simple`,
+because that module exists only inside ParaView's own interpreter.
 
-If `pvpython` is not on `PATH`, point at it explicitly:
+Verified here against two ParaViews, on the same cases and specs:
+
+| ParaView | its Python | from |
+|---|---|---|
+| **5.11.2** | 3.12.3 | Ubuntu's package |
+| **6.2.0** | 3.12.14 | the `paraview.org` binary, `ParaView-6.2.0-MPI-Linux-Python3.12-x86_64` |
+
+The versions in between were not run. [`viz-slices.md`](viz-slices.md#paraview-versions)
+records what the two draw differently, which is very little.
+
+If `pvpython` is not on `PATH` — a module that is not loaded, or one of several
+installed versions — the `AllpostCases` scripts take it by name:
 
 ```bash
 export PVPYTHON_PATH=/path/to/pvpython
 ```
 
-Then render, **through the `vifpara` launcher, never `python`**:
+Step 2 is optional and is *not* pip-installable. Without it the frames are still
+written and the step prints one line saying no videos were made; encode them
+later with `python plumetools/viz/video.py <viz-dir>`, which needs ffmpeg but not
+ParaView. Verified against ffmpeg 6.1.1 with `libx264`.
 
-```bash
-vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
-```
+**What `pvpython` has to be able to import.** The renderer uses `plumetools`,
+PyYAML and numpy inside ParaView's interpreter, and `render_slices.py` arranges
+all three:
 
-The launcher re-runs the script inside `pvpython` with `PV_VENV` set to this
-environment. Running it with `python` fails at `import paraview.simple`, because
-that module exists only inside ParaView's own interpreter.
+- `plumetools` is found beside the script. It does not have to be installed
+  into ParaView's Python, and an activated environment is not needed.
+- PyYAML and numpy ship with the `paraview.org` binaries (6.2.0 carries PyYAML
+  6.0.3 and numpy 1.26.4), and a distribution's `pvpython` uses the system
+  Python, which has them wherever `python3-yaml` and `python3-numpy` are
+  installed.
+- A ParaView **built on site** may have neither. Then the script falls back to
+  the `site-packages` of `$PV_VENV`, or of the active virtual environment —
+  which works only if that environment is the same Python `major.minor` as
+  `pvpython`. Check with
 
-> **The `viz` extra downgrades numpy.** `vifpara` 1.3.4 pins `numpy==1.26.4`
-> exactly, which also pulls `scipy` back (1.18 → 1.17 here). The full suite —
-> 956 tests — passes on both, and this was checked rather than assumed, but it is
-> why `viz` is an optional extra and not a core dependency. Install it into the
-> environment you actually render from.
+  ```bash
+  pvpython -c "import sys, yaml, numpy; print(sys.version)"
+  ```
+
+  and if that fails, either `export PV_VENV=/path/to/venv` or install the two
+  packages somewhere on `pvpython`'s `PYTHONPATH`. The error message names the
+  interpreter and the module that was missing.
 
 On a headless or WSLg display, `pvpython` dies at exit with `GLXBadContext`
 tearing down its GL contexts, *after* every image is written. `render_slices.py`

@@ -194,7 +194,7 @@ and `--dry-run` says so once the first case has run.
 > weight row has run.
 
 **Rendering is a third cost again.** 165 sampled frames across the nine cases ×
-4 fields ≈ 660 images at ~20 s each ≈ **3.7 h**, in one `vifpara` invocation.
+4 fields ≈ 660 images at ~20 s each ≈ **3.7 h**, in one `pvpython` invocation.
 That is the price of the write interval this family chose, and it is why
 `docs/viz-slices.md`'s warning about the imagery step outlasting the solve is
 taken seriously here rather than quoted.

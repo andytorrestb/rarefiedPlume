@@ -1,8 +1,8 @@
 # Slice imagery
 
 Survey pictures of any field the solver wrote, on any cutting plane, driven by a
-YAML file. Implemented in [`plumetools/viz/`](../plumetools/viz/) on top of
-[VifPara](https://github.com/virtual-vehicle/VifPara), which automates ParaView.
+YAML file. Implemented in [`plumetools/viz/`](../plumetools/viz/) directly on
+ParaView's own `paraview.simple`: `pvpython` is the only thing it needs.
 
 This is **not** the validation path. `plumetools.cai2012.post` extracts the four
 outputs that get scored against Cai and nothing else, which §9 of the case
@@ -12,26 +12,36 @@ share no code and answer different questions.
 ## Running it
 
 ```bash
-vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
+pvpython --force-offscreen-rendering \
+    plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100_np1x
 ```
 
 **Not `python`.** `paraview.simple` exists only inside ParaView's own
-interpreter; the `vifpara` launcher re-runs the script under `pvpython` with this
-virtual environment injected via `PV_VENV`. `python render_slices.py` fails at
-the import, and says so.
+interpreter, which is what `pvpython` is. `python render_slices.py` fails at the
+import, and says so.
+
+Nothing else has to be installed, and nothing has to be activated: the script
+finds the `plumetools` it is part of by itself, and ParaView's Python already
+has the PyYAML and numpy it needs (see [Installation](#installation) for the
+ParaView that does not). `--force-offscreen-rendering` keeps ParaView from
+opening a window per image. Whether it can then render with no display at all —
+over ssh, in a batch job — depends on how that ParaView was built; see
+[ParaView versions](#paraview-versions).
 
 ```bash
+pv="pvpython --force-offscreen-rendering"
+
 # one field, one plane
-vifpara plumetools/viz/render_slices.py <case> --field rhoN --plane xz
+$pv plumetools/viz/render_slices.py <case> --field rhoN --plane xz
 
 # what does this case actually have?
-vifpara plumetools/viz/render_slices.py <case> --list
+$pv plumetools/viz/render_slices.py <case> --list
 
-# which images would be drawn? (no ParaView needed)
-vifpara plumetools/viz/render_slices.py <case> --dry-run
+# which images would be drawn? (no ParaView needed; plain python works too)
+$pv plumetools/viz/render_slices.py <case> --dry-run
 
 # a spec of your own, every written time
-vifpara plumetools/viz/render_slices.py <case> --spec mine.yaml --time all
+$pv plumetools/viz/render_slices.py <case> --spec mine.yaml --time all
 ```
 
 Output lands in `<case>/results/viz/`, alongside a `manifest.yaml` recording
@@ -54,11 +64,13 @@ cases/markelov1999/AllpostCases
 
 The imagery is a **survey, not a result**. It runs *after* the validation
 outputs and the study table are on disk, and a render that fails is reported
-without costing anyone the numbers. If `vifpara` is not on `PATH` the step prints
-one line saying so and the rest is unaffected — the studies still work on a
-machine with no ParaView.
+without costing anyone the numbers. If `pvpython` is not on `PATH` the step
+prints one line saying so and the rest is unaffected — the studies still work on
+a machine with no ParaView. `PVPYTHON_PATH=/path/to/pvpython` names one that is
+not on `PATH`: a module that is not loaded, or one of several installed
+versions.
 
-The whole study goes through **one** `vifpara` invocation rather than one per
+The whole study goes through **one** `pvpython` invocation rather than one per
 case. ParaView's startup and the reader's mesh scan cost more than the rendering
 does for a small case, and `render_slices.py` therefore takes several case
 directories and resets the session between them.
@@ -372,8 +384,8 @@ ways and none is obviously right, so it is reported instead of guessed at.
 
 ### A 3-D view is not sized for you
 
-A `Slice` derives its viewport from the cut's own bounding box, so slice images
-are already undistorted. A `Visualization3D` takes an **explicit width**, and
+A `SliceView` derives its viewport from the cut's own bounding box, so slice
+images are already undistorted. A `SurfaceView` takes an **explicit width**, and
 anything fixed there stretches the geometry by whatever the difference is —
 `height * 4 / 3` drew the markelov cylinder, which is half again as tall as it
 is wide, at 1.33 against a true 0.69. Nearly twice too wide.
@@ -411,8 +423,8 @@ camera_up: [0, 0, 1]
 `[0, -1, 0]` puts the nozzle on the right instead. The picture is otherwise
 perfectly correct, which is why nobody notices.
 
-(VifPara's own `camera_up × normal` sizes the viewport. It is not the screen axis
-and it points the other way.)
+(`resolve.slice_frame` sizes the viewport along `camera_up × normal`. That is
+not the screen axis and it points the other way.)
 
 ### `prefer_mean` depends on whether you are drawing one image or a series
 
@@ -471,6 +483,65 @@ logarithmic floor comes from `log_decades` below the maximum:
 Pin `range: [min, max]` when comparing cases — autoscaled images of two Knudsen
 numbers use two different scales and cannot be read side by side.
 
+## ParaView versions
+
+The renderer is plain `paraview.simple`, so it runs under whatever `pvpython` is
+on the machine. Two have been run, on the same cases and specs: **5.11.2** and
+**6.2.0**.
+
+The pictures are meant to look the same on both, so that a series started on
+one machine can be finished on another. ParaView 5.11 is the reference — it drew
+every image this package made before it could run on anything else — and
+[`scene.py`](../plumetools/viz/scene.py) holds a newer ParaView to it in four
+places:
+
+| | |
+|---|---|
+| `paraview.compatibility` declared as 5.11 | ParaView's own mechanism for running an older script. It is what keeps `Viridis (matplotlib)` meaning something after 6.1 renamed the preset to `Viridis`. |
+| the `BlueGrayBackground` palette, on 6.x | ParaView 6 changed the default view background to a warm grey. It is the strip behind every colour bar and everything around a body in a surface view. Compatibility mode does not put it back. |
+| `Createcelltopointfiltereddata=1` on the reader | ParaView 6 stopped deriving point data by default, and `field_type: POINTS` has nothing to colour by without it. |
+| legend formats as `{:6.1e}` from 6.1, `%6.1e` before | 6.1 moved to `std::format`. It still takes `printf`, and warns on every image that it will stop. |
+
+Each is a no-op on 5.11 or restates its default, so nothing changes there.
+
+Measured, not assumed:
+
+- **On 5.11.2 the images are the ones the earlier VifPara-based renderer
+  wrote.** Across 13 scenarios all 170 slice images are byte-identical, with the
+  same `manifest.yaml`, the same stdout and the same exit status. The 18 surface
+  images are byte-identical or a few pixels off, and which of the two varies
+  from run to run; see the last point.
+- **6.2.0 against 5.11.2, cell data** — the default, and what all three studies
+  draw: the same files, the same pixel sizes, the same manifests. At most 1.6 %
+  of an image's pixels differ, nearly all by one or two levels in one channel;
+  the worst PSNR over 182 images is 70 dB. Side by side they cannot be told
+  apart.
+- **6.2.0 against 5.11.2, `field_type: POINTS`** — not the same picture
+  everywhere. The reader's point values are bit-identical on the two versions
+  (all 49 923 of them, on the test mesh); the two *slice filters* are not. Of
+  about 3 000 triangles in the `y = 0` cut, five differ, and 22 of its 1 345
+  points carry a different value. Interpolated across a triangle that is enough
+  to redraw a small patch, and on a logarithmic scale at the edge of the plume —
+  where one corner is zero and the next is 10¹⁵ — the patch is plain to see:
+  0.5–0.8 % of the pixels, PSNR 31–37 dB. Cell data has no interpolation to
+  disturb, which is why it is unaffected. Nothing in this package can put that
+  back; it is a reason to prefer `CELLS`, which is the default.
+- ParaView 5.11 decomposed polyhedral cells as it read them; ParaView 6 has
+  removed the option. On the `snappyHexMesh` case a few dozen edge pixels differ
+  by more than a level or two — up to 55 — and whether that is this or the slice
+  filter again was not separated.
+- On 6.x one line is printed at start-up, on stderr:
+  `Compatibility version is set to (5, 11) while current version is (6, 2)`.
+  It is the first row of the table saying it is working.
+- **A surface image is not bit-reproducible, on any version.** Two runs of the
+  same ParaView on the same case differ in up to 0.012 % of a `q` or `fD`
+  image's pixels, by one level. A slice image is reproducible to the byte.
+
+Whether a display is needed depends on how ParaView was built, not on this
+package. The `paraview.org` 6.2.0 binary renders with no `DISPLAY` at all, and
+gives the same bytes as it does with one. Ubuntu's 5.11.2 is GLX-only and
+segfaults without a display, `--force-offscreen-rendering` or not.
+
 ## Implementation notes
 
 ### The reader's array list is stale
@@ -481,8 +552,8 @@ appears in that property — not after `UpdatePipelineInformation()`, not after
 updating at a later time, not for a freshly constructed reader.
 
 The data is fine. Left at its default (everything selected) the reader loads
-whatever is actually present at the requested time. Calling
-`Case.set_cell_arrays()` with a list built from that stale property would
+whatever is actually present at the requested time. Setting
+`reader.CellArrays` to a list built from that stale property would
 silently *deselect* every averaged field, so `render.py` never restricts the
 selection and probes `GetDataInformation().GetCellDataInformation()` at the
 resolved time instead — what arrived, not what was advertised.
@@ -506,11 +577,10 @@ contexts in a defined order; measured here, that gives exit 0 with the full log
 intact. `PLUMETOOLS_VIZ_RAW_EXIT=1` skips it and lets the crash happen, for when
 you are debugging ParaView rather than using it.
 
-> The obvious shortcut — `os._exit` to skip teardown entirely — is **wrong**.
-> VifPara imports colorama, which replaces `sys.stdout` with a `StreamWrapper`;
-> flushing that does not push the underlying buffer out, so `os._exit` silently
-> discards every line the run printed. Both behaviours were measured, not
-> assumed.
+> The obvious shortcut — `os._exit` to skip teardown entirely — also avoids the
+> crash, and takes everything still sitting in a buffer with it: it once cost a
+> run every line it had printed. Disconnecting is the narrower fix. It removes
+> the one thing that goes wrong and leaves the rest of the shutdown alone.
 
 ### The layering
 
@@ -520,6 +590,7 @@ you are debugging ParaView rather than using it.
 | `catalog.py` | no | what the `dsmcFoam` fields are |
 | `resolve.py` | no | which time, which field, what colour scale |
 | `video.py` | no | encodes frames to video; needs ffmpeg, runs standalone |
+| `scene.py` | **yes** | the `paraview.simple` calls: reader, layout, views, PNG |
 | `render.py` | **yes** | turns a spec into PNGs |
 | `render_slices.py` | **yes** | the command-line entry point |
 
@@ -529,6 +600,8 @@ ParaView installed.
 
 ## Installation
 
-See [`environment.md`](environment.md). In short: ParaView 5.11–5.13 installed
-separately, its internal Python matching the virtual environment's minor version,
-then `pip install -e ".[viz]"`.
+See [`environment.md`](environment.md). In short: ParaView, with `pvpython` on
+`PATH` or named by `PVPYTHON_PATH`. There is nothing to `pip install` — the
+`paraview.org` binaries already carry the PyYAML and numpy the renderer imports,
+and for a ParaView that does not, `PV_VENV` points it at an environment that
+does.
