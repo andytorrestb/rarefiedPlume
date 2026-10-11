@@ -10,7 +10,8 @@
 #
 # Or directly, for one case:
 #
-#   vifpara ../../plumetools/viz/render_slices.py Cases/ppc020/s1p5 --spec viz.yaml
+#   pvpython --force-offscreen-rendering \
+#       ../../plumetools/viz/render_slices.py Cases/ppc020/s1p5 --spec viz.yaml
 #
 # THE IMAGERY IS THE MEASUREMENT HERE, not a survey. cases/cai2012 calls its
 # images "a survey, not a result"; this family judges the health of the solution

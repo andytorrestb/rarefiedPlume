@@ -56,10 +56,11 @@ instantaneous field instead of the averaged one) are all on the testable side.
 
 Running it
 ----------
-Not with ``python``. VifPara re-launches the script inside ``pvpython`` with the
-virtual environment injected, so the launcher has to be used::
+Not with ``python``: ``paraview.simple`` exists only inside ParaView's own
+interpreter, so the entry script is run by ``pvpython``::
 
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
+    pvpython --force-offscreen-rendering \
+        plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
 
 See ``docs/viz-slices.md`` for the configuration file and
 ``docs/environment.md`` for the install.

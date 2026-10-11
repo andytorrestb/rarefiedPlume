@@ -1005,6 +1005,21 @@ def test_the_renderer_imports_nothing_a_bare_pvpython_lacks(module):
     assert roots - set(stdlib) - PVPYTHON_PROVIDES == set()
 
 
+@pytest.mark.parametrize("study", ["cai2012", "cai2012-health", "markelov1999"])
+def test_a_study_renders_through_pvpython_itself(study):
+    script = (REPO / "cases" / study / "AllpostCases").read_text(encoding="utf-8")
+    assert ('"$pvpython" --force-offscreen-rendering "$renderer"' in script)
+    assert "${PVPYTHON_PATH:-pvpython}" in script
+    assert "vifpara" not in script.lower()
+
+
+def test_the_imagery_adds_no_pip_dependency():
+    """ParaView is not pip-installable, and the renderer needs nothing that is."""
+    project = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    assert "vifpara" not in project.lower()
+    assert "\nviz = " not in project
+
+
 # --------------------------------------------------------------------------- #
 # time series
 # --------------------------------------------------------------------------- #

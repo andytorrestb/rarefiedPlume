@@ -1,33 +1,38 @@
 #!/usr/bin/env python3
 r"""Export slice imagery from a dsmcFoam case.
 
-    vifpara plumetools/viz/render_slices.py <case-dir> [options]
+    pvpython --force-offscreen-rendering \
+        plumetools/viz/render_slices.py <case-dir> [options]
 
 NOT ``python``. ``paraview.simple`` exists only inside ParaView's own
-interpreter; the ``vifpara`` launcher re-runs this file under ``pvpython`` with
-this virtual environment injected. Running it with ``python`` fails at the
-import, and the error says so.
+interpreter, so this file has to be run by ``pvpython``. Running it with
+``python`` fails at the import, and the error says so.
 
-Examples::
+``pvpython`` is all it needs: the renderer uses ``paraview.simple``, PyYAML and
+numpy, and this file finds the ``plumetools`` it sits in by itself. See
+:func:`_bootstrap` for what happens when ParaView's Python lacks the other two.
+
+Examples (``pvpython`` here is short for ``pvpython
+--force-offscreen-rendering``, which is what keeps windows off the screen)::
 
     # everything in the default spec, latest time
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
+    pvpython plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100
 
     # a whole study, in ONE ParaView process -- what AllpostCases does, with
     # that study's own sampling settings
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/* \
+    pvpython plumetools/viz/render_slices.py cases/cai2012/Cases/* \
         --spec cases/cai2012/viz.yaml
 
     # one field, one plane
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 \
+    pvpython plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 \
         --field rhoN --plane xz
 
     # a spec of your own, and every written time
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 \
+    pvpython plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 \
         --spec my-slices.yaml --time all
 
     # what does this case actually have?
-    vifpara plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 --list
+    pvpython plumetools/viz/render_slices.py cases/cai2012/Cases/Kn100 --list
 
 Options that duplicate a spec key (``--time``, ``--output``, ``--preset``,
 ``--field-type``) override it for this run only. Everything else lives in the
@@ -37,17 +42,78 @@ YAML -- see ``plumetools/viz/slices.yaml`` and ``docs/viz-slices.md``.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
+import site
 import sys
 from dataclasses import replace
 from pathlib import Path
 
+
+def _bootstrap() -> None:
+    """Make ``plumetools`` and what it imports reachable from a bare pvpython.
+
+    ``pvpython`` is ParaView's own interpreter with ParaView's own
+    site-packages. It knows nothing of the environment ``pip install -e .``
+    went into, so run as a plain script this file could not import the package
+    it is part of.
+
+    Two fallbacks, each used only when the import would otherwise fail:
+
+    * ``plumetools`` -- this file sits two levels below the checkout it belongs
+      to, so that directory goes on ``sys.path``.
+    * PyYAML and numpy -- ParaView's binaries ship both (checked on 6.2.0) and
+      so does a distribution's ``pvpython`` wherever the system Python has
+      them. A ParaView built on site may have neither. Then the
+      ``site-packages`` of ``$PV_VENV``, or of the active virtual environment,
+      is added -- which works only if that environment is the same Python
+      ``major.minor`` as ``pvpython``.
+
+    The environment is *appended*, so ParaView's own numpy always wins: VTK's
+    numpy support is compiled against it.
+    """
+    if importlib.util.find_spec("plumetools") is None:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+    if all(importlib.util.find_spec(name) for name in ("yaml", "numpy")):
+        return
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for variable in ("PV_VENV", "VIRTUAL_ENV"):
+        prefix = os.environ.get(variable)
+        if not prefix:
+            continue
+        packages = (Path(prefix) / "Lib" / "site-packages"
+                    if sys.platform == "win32"
+                    else Path(prefix) / "lib" / version / "site-packages")
+        if packages.is_dir():
+            site.addsitedir(str(packages))
+            return
+
+
+def _import_failure(exc: ImportError) -> str:
+    """Say which import failed, and what to do about that one in particular."""
+    missing = exc.name or str(exc)
+    if missing.split(".")[0] == "plumetools":
+        return ('plumetools is not importable. From the repository root:\n'
+                '    pip install -e ".[test]"')
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return (f"render_slices: {missing} is not importable by {sys.executable}\n"
+            f"       (Python {version}). The renderer needs PyYAML and numpy "
+            f"besides ParaView.\n"
+            f"       Install them into that interpreter, or point PV_VENV at "
+            f"a virtual\n"
+            f"       environment of the same Python {version} that has them; "
+            f"see\n"
+            f"       docs/environment.md.")
+
+
+_bootstrap()
+
 try:
     from plumetools.viz.spec import (FIELD_TYPES, TIME_SELECTORS, VizSpecError,
                                      load_spec)
-except ImportError:                                        # pragma: no cover
-    sys.exit('plumetools is not importable. From the repository root:\n'
-             '    pip install -e ".[test]"')
+except ImportError as _exc:                                # pragma: no cover
+    sys.exit(_import_failure(_exc))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="render_slices.py",
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run through the 'vifpara' launcher, not through 'python'.")
+        epilog="Run with 'pvpython', not with 'python'.")
     parser.add_argument("case", nargs="+",
                         help="one or more OpenFOAM case directories. Several "
                              "are rendered in a single ParaView process, which "
@@ -151,13 +217,15 @@ def main(argv: list[str]) -> int:
         from plumetools.viz.render import (NothingToRender, RenderError,
                                            Renderer, discover_case)
     except ImportError as exc:
+        if (exc.name or "").split(".")[0] != "paraview":
+            print(_import_failure(exc), file=sys.stderr)
+            return 2
         print(f"render_slices: {exc}\n"
               f"\n"
-              f"       This script must be run through the VifPara launcher, "
-              f"which puts\n"
-              f"       this virtual environment inside pvpython:\n"
+              f"       This script must be run by ParaView's own interpreter:\n"
               f"\n"
-              f"           vifpara {Path(__file__).name} <case-dir>\n"
+              f"           pvpython --force-offscreen-rendering "
+              f"{Path(__file__).name} <case-dir>\n"
               f"\n"
               f"       'python {Path(__file__).name}' cannot work: "
               f"paraview.simple only\n"

@@ -9,7 +9,8 @@
 #
 # Or directly, for one case:
 #
-#   vifpara ../../plumetools/viz/render_slices.py Cases/Kn100_np1x --spec viz.yaml
+#   pvpython --force-offscreen-rendering \
+#       ../../plumetools/viz/render_slices.py Cases/Kn100_np1x --spec viz.yaml
 #
 # `extends: default` inherits plumetools/viz/slices.yaml -- the image size,
 # colour preset, output paths and the U/Ttra derivations. Mappings merge key by

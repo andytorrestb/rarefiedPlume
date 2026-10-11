@@ -23,8 +23,8 @@
 # The imagery is a SURVEY, not a result. What gets drawn is ./viz.yaml, THIS
 # study's own sampling settings -- cases/cai2012 has its own, and the two no
 # longer share one. The cut is the y = 0 symmetry plane, which is where the
-# cylinder, the plate and the plume axis all are. It needs ParaView and VifPara;
-# if those are not installed the step says so and everything else is unaffected.
+# cylinder, the plate and the plume axis all are. It needs ParaView; if that is
+# not installed the step says so and everything else is unaffected.
 # See docs/viz-slices.md.
 
 set -uo pipefail
@@ -53,10 +53,13 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # --------------------------------------------------------------------------- #
 # mid-plane imagery
 #
-# One vifpara invocation for the whole study, not one per case: ParaView's
+# One pvpython invocation for the whole study, not one per case: ParaView's
 # startup and the reader's mesh scan cost more than the rendering does, and
 # paying them once is the difference between a step you leave switched on and
 # one you turn off.
+#
+# pvpython is the only thing this needs. PVPYTHON_PATH names one that is not on
+# PATH -- a module that is not loaded, or one of several installed versions.
 #
 # What gets drawn is ./viz.yaml, this study's own settings. cases/cai2012 has a
 # separate file: this family has WALLS -- the cylinder and the plate -- so q and
@@ -64,17 +67,22 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # on the mesh boundary. Neither is true there.
 # --------------------------------------------------------------------------- #
 render_midplane() {
-    local root=../.. renderer spec
+    local root=../.. renderer spec pvpython
     renderer=$root/plumetools/viz/render_slices.py
     spec=${VIZ_SPEC:-viz.yaml}    # THIS study's settings, beside this script
+    pvpython=${PVPYTHON_PATH:-pvpython}
 
     echo "=============================================================="
     echo "### mid-plane imagery"
 
-    if ! have vifpara; then
-        echo "    skipped: 'vifpara' is not on PATH."
-        echo "             pip install -e \".[viz]\", and install ParaView 5.11-5.13"
-        echo "             separately; see docs/environment.md."
+    if [ -n "${PVPYTHON_PATH:-}" ]; then
+        # Asked for by name, so its absence is a mistake and not a machine
+        # without ParaView.
+        have "$pvpython" || { echo "AllpostCases: PVPYTHON_PATH is not an executable: $pvpython" >&2; return 1; }
+    elif ! have pvpython; then
+        echo "    skipped: 'pvpython' is not on PATH."
+        echo "             Install ParaView or load its module, or point"
+        echo "             PVPYTHON_PATH at its pvpython; see docs/environment.md."
         echo "             The study outputs above are unaffected."
         return 0
     fi
@@ -83,9 +91,9 @@ render_midplane() {
 
     echo "    spec      $spec"
     echo ""
-    # NOT 'python': paraview.simple exists only inside ParaView's interpreter,
-    # and the vifpara launcher is what puts this venv in there.
-    vifpara "$renderer" "${CASES[@]}" --spec "$spec"
+    # NOT 'python': paraview.simple exists only inside ParaView's interpreter.
+    # Offscreen, or every image opens a window on whatever display there is.
+    "$pvpython" --force-offscreen-rendering "$renderer" "${CASES[@]}" --spec "$spec"
 }
 
 [ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:

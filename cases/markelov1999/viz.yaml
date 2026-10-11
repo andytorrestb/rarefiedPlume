@@ -10,7 +10,8 @@
 #
 # Or directly, for one case:
 #
-#   vifpara ../../plumetools/viz/render_slices.py Cases/gap06in/p005psi \
+#   pvpython --force-offscreen-rendering \
+#       ../../plumetools/viz/render_slices.py Cases/gap06in/p005psi \
 #       --spec viz.yaml
 #
 # `extends: default` inherits plumetools/viz/slices.yaml -- the image size,

@@ -5,11 +5,12 @@
 #
 # Run it with:
 #
-#     vifpara plumetools/viz/render_slices.py <case-dir>
+#     pvpython --force-offscreen-rendering \
+#         plumetools/viz/render_slices.py <case-dir>
 #
 # NOT with python -- see docs/viz-slices.md. `python render_slices.py` cannot
-# work: paraview.simple only exists inside ParaView's own interpreter, and the
-# vifpara launcher is what puts this virtual environment inside it.
+# work: paraview.simple only exists inside ParaView's own interpreter, which is
+# what pvpython is.
 #
 # To draw something else, add to `fields:`. To draw it somewhere else, add to
 # `planes:`. To do either for one case only, write a small file next to the
