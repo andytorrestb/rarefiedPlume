@@ -9,7 +9,9 @@ an image that looks entirely plausible.
 
 from __future__ import annotations
 
+import ast
 import math
+import sys
 from pathlib import Path
 
 import pytest
@@ -967,6 +969,40 @@ def test_each_split_is_a_share_of_what_is_left_not_of_the_whole():
 def test_the_widest_row_sets_the_width():
     width, _height, _fractions = layout_shape([(200, 400), (600, 400)])
     assert width == 600
+
+
+# --------------------------------------------------------------------------- #
+# the ParaView side needs ParaView and nothing else
+#
+# These modules cannot be imported here, so they are read instead. What is
+# pinned is the property that makes the renderer run under a bare pvpython on a
+# machine where nothing else can be installed.
+# --------------------------------------------------------------------------- #
+
+VIZ = REPO / "plumetools" / "viz"
+
+#: What a bare pvpython is expected to supply besides the standard library.
+PVPYTHON_PROVIDES = {"paraview", "yaml", "numpy", "plumetools"}
+
+
+def _imported_modules(path: Path) -> list[str]:
+    """Every module *path* imports, in source order, as dotted names."""
+    names = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.extend((node.lineno, alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            names.append((node.lineno, node.module))
+    return [name for _line, name in sorted(names)]
+
+
+@pytest.mark.parametrize("module", ["scene.py", "render.py", "render_slices.py"])
+def test_the_renderer_imports_nothing_a_bare_pvpython_lacks(module):
+    stdlib = getattr(sys, "stdlib_module_names", None)
+    if stdlib is None:                                    # Python 3.9
+        pytest.skip("sys.stdlib_module_names needs Python 3.10")
+    roots = {name.split(".")[0] for name in _imported_modules(VIZ / module)}
+    assert roots - set(stdlib) - PVPYTHON_PROVIDES == set()
 
 
 # --------------------------------------------------------------------------- #

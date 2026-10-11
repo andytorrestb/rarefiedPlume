@@ -1,4 +1,4 @@
-r"""Configurable slice imagery from a dsmcFoam case, via VifPara and ParaView.
+r"""Configurable slice imagery from a dsmcFoam case, via ParaView.
 
 What this is for
 ----------------
@@ -26,9 +26,15 @@ So the split is strict:
 :mod:`~.video`          no ParaView           frames -> video, through ffmpeg
 :mod:`~.dissect`        no ParaView           contact sheets and convergence
                                               curves, through ffmpeg
+:mod:`~.scene`          **imports ParaView**  the ``paraview.simple`` calls:
+                                              reader, layout, views, PNG
 :mod:`~.render`         **imports ParaView**  turns a spec into PNGs
 ``render_slices.py``    **imports ParaView**  the command-line entry point
 ======================  ====================  ==============================
+
+The ParaView side needs ParaView and nothing else. :mod:`~.scene` is written
+against ``paraview.simple`` directly, so there is no wrapper library to install
+and no ParaView version pinned by one.
 
 :mod:`~.video` and :mod:`~.dissect` are on the ParaView-free side deliberately,
 not incidentally: re-encoding a study at another frame rate, or re-cutting a
@@ -43,7 +49,7 @@ time, and keeping them out of the package namespace means importing
 
 Importing :mod:`plumetools.viz` gives you the first three and never touches
 ParaView. :mod:`plumetools.viz.render` is imported lazily, by name, only by the
-entry script. That is what lets ``tests/unit/test_viz.py`` run in the ordinary
+entry script, and :mod:`plumetools.viz.scene` only by it. That is what lets ``tests/unit/test_viz.py`` run in the ordinary
 suite -- and the split is drawn where it is on purpose: the decisions most
 likely to be quietly wrong (a stale colour range, the wrong time, the
 instantaneous field instead of the averaged one) are all on the testable side.

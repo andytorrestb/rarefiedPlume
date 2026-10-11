@@ -377,9 +377,9 @@ def view_shape(bounds: Sequence[float], normal: Sequence[float],
                padding: float = VIEW_PADDING) -> tuple[int, float]:
     """Viewport width and parallel scale that show *bounds* undistorted.
 
-    A 3-D view is not sized for you the way a ``Slice`` is: VifPara takes an
-    explicit width, and anything fixed there -- ``height * 4 / 3`` was the
-    obvious guess -- stretches the geometry by whatever the difference is. The
+    A 3-D view is not sized for you the way a slice is: it takes an explicit
+    width, and anything fixed there -- ``height * 4 / 3`` was the obvious
+    guess -- stretches the geometry by whatever the difference is. The
     cylinder of ``cases/markelov1999`` is half again as tall as it is wide, and
     a 4:3 frame drew it nearly twice too wide.
 

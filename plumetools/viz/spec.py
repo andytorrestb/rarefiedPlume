@@ -249,9 +249,9 @@ class ImageSpec:
         preset: a ParaView colour preset name. ``"Viridis (matplotlib)"`` is
             the default because it is perceptually uniform and survives being
             printed in greyscale, which ``"Rainbow Desaturated"`` does not.
-        color_bar: draw the legend. A VifPara ``Slice`` applies its colour map
-            with the legend explicitly hidden and exposes a separate colour-bar
-            view instead, so this adds a second row to the layout rather than
+        color_bar: draw the legend. A slice applies its colour map with the
+            legend explicitly hidden and a separate colour-bar view shows it
+            instead, so this adds a second row to the layout rather than
             drawing over the image.
         bar_height: height in pixels of that second row.
         orientation, location, bar_size: legend placement within it.
@@ -341,7 +341,8 @@ class OutputSpec:
             different widths and sort into the wrong order in every file
             browser and every shell glob -- which is the order a video encoder
             would then use.
-        log_directory: VifPara's log file. Relative to *directory* unless
+        log_directory: where the session log goes -- a timestamped record of
+            what ParaView was asked to do. Relative to *directory* unless
             absolute.
         manifest: write ``manifest.yaml`` at the top of *directory*, recording
             what was drawn from what. Absent it, a directory of PNGs says
@@ -463,8 +464,9 @@ class PlaneSpec:
     [0, 1, 0]`` with ``camera_up: [0, 0, 1]``: ``[0,1,0] x [0,0,1] = [1,0,0]``.
     Flipping the normal to ``[0, -1, 0]`` puts the nozzle on the right.
 
-    (VifPara's own ``camera_up x normal`` sizes the viewport. It is not the
-    screen axis, and it points the other way.)
+    (:func:`~plumetools.viz.resolve.slice_frame` sizes the viewport along
+    ``camera_up x normal``. That is not the screen axis, and it points the
+    other way.)
 
     Attributes:
         name: goes into the filename.

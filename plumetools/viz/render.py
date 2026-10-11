@@ -1,12 +1,14 @@
-r"""Turn a :class:`~plumetools.viz.spec.VizSpec` into PNGs, through VifPara.
+r"""Turn a :class:`~plumetools.viz.spec.VizSpec` into PNGs, through ParaView.
 
-**This module imports ParaView.** It can only be imported by ``pvpython``, which
-in practice means it can only be imported by a script launched with the
-``vifpara`` command. Everything importable without ParaView lives in
-:mod:`plumetools.viz.spec` and :mod:`plumetools.viz.catalog`; see
+**This module imports ParaView.** It can only be imported by ``pvpython``.
+Everything importable without ParaView lives in :mod:`plumetools.viz.spec`,
+:mod:`plumetools.viz.catalog` and :mod:`plumetools.viz.resolve`; see
 :mod:`plumetools.viz` for why the split is drawn there.
 
-Three things here are not obvious from VifPara's API, and all three are the
+This module decides what to draw. The ParaView calls that then draw it are in
+:mod:`plumetools.viz.scene`, which needs nothing but ``paraview.simple``.
+
+Three things here are not obvious from ParaView's API, and all three are the
 difference between a correct image and a plausible one.
 
 1. The reader's array list is stale, so never restrict it
@@ -20,9 +22,9 @@ freshly constructed reader.
 
 The data is fine. Left at its default (everything selected) the reader loads
 whatever is actually present at the requested time, ``rhoNMean`` included.
-Calling ``Case.set_cell_arrays`` with a list built from that stale property
-would silently *deselect* every averaged field. So this module never restricts
-the selection, and probes availability from
+Setting ``reader.CellArrays`` to a list built from that stale property would
+silently *deselect* every averaged field. So this module never restricts the
+selection, and probes availability from
 ``GetDataInformation().GetCellDataInformation()`` at the resolved time instead
 -- what arrived, not what was advertised.
 
@@ -32,36 +34,27 @@ the selection, and probes availability from
 output rather than to the cut, and a logarithmic scale would then be handed a
 minimum of exactly zero -- a DSMC plume has cells no parcel ever reached. So the
 range is read off the slice itself, the logarithmic floor is set from
-``log_decades``, and :class:`~vifpara.ColorMap` is given both ends.
+``log_decades``, and :class:`~plumetools.viz.scene.ColourMap` is given both
+ends.
 
-3. VifPara slices a ``Case``; derived fields are not a ``Case``
----------------------------------------------------------------
-``Slice(case=...)`` feeds ``case.get_case()`` into ``pv.Slice`` and touches
-nothing else on it, so :class:`_SourceAsCase` presents a Calculator's output
-under the same one-method interface. That is what lets ``U`` and ``Ttra`` --
-which ``dsmcFoam`` never writes -- be sliced like any other field.
+3. A derived field is cut from its Calculator, not from the reader
+------------------------------------------------------------------
+``U`` and ``Ttra`` are never written by ``dsmcFoam``; they exist only on the
+output of the Calculator that computes them. So a
+:class:`~plumetools.viz.scene.SliceView` is handed the tail of the Calculator
+chain rather than the reader, and that is what lets a derived field be sliced
+like any other.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import paraview.simple as pv
 import yaml
-from vifpara import (
-    Case,
-    CaseType,
-    ColorMap,
-    Config,
-    Exporter,
-    Layout,
-    Slice,
-    Vector3,
-    Visualization3D,
-    logger,
-)
 
 from plumetools.viz.catalog import FieldKind
 from plumetools.viz.resolve import (
@@ -77,6 +70,14 @@ from plumetools.viz.resolve import (
     resolve_times,
     scalar_bar_label_budget,
     view_shape,
+)
+from plumetools.viz.scene import (
+    Case,
+    ColourMap,
+    Layout,
+    SliceView,
+    SurfaceView,
+    log as session_log,
 )
 from plumetools.viz.spec import PlaneSpec, RenderTask, VizSpec, VizSpecError
 
@@ -212,22 +213,6 @@ def discover_case(case_dir: str | Path) -> CaseFacts:
     return facts
 
 
-class _SourceAsCase:
-    """Presents a ParaView source where VifPara expects a :class:`vifpara.Case`.
-
-    ``Slice`` and ``Visualization3D`` call exactly one method on the object
-    handed to them -- ``get_case()`` -- and use its return value as a pipeline
-    input. Wrapping a Calculator's output in this adapter is what lets a derived
-    field be sliced; see the module docstring.
-    """
-
-    def __init__(self, source: Any) -> None:
-        self._source = source
-
-    def get_case(self) -> Any:
-        return self._source
-
-
 # --------------------------------------------------------------------------- #
 # time
 # --------------------------------------------------------------------------- #
@@ -332,15 +317,21 @@ class Renderer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.config = Config(custom_config={
-            "case_path": str(facts.foam_file),
-            "plot_path": str(self.output_dir),
-            "log_path": str(self.log_dir),
-        })
-        logger.set_log_path(self.config.get_log_path())
+        #: Where the images go, as a prefix: an image's name is appended to it
+        #: as text. See :meth:`_image_name`.
+        self.plot_path = str(self.output_dir)
+        if not self.plot_path.endswith("/"):
+            self.plot_path += "/"
 
-        self.case = Case(config=self.config, case_type=CaseType.RECONSTRUCTED)
-        self.reader = self.case.get_case()
+        # In this order. The two lines go to whichever log is open -- stdout
+        # alone for the first case of a process -- and this case's own file
+        # then starts with its reader being opened.
+        session_log.info(f"Using case path: {facts.foam_file}")
+        session_log.info(f"Using plots directory: {self.plot_path}")
+        session_log.set_path(self.log_dir)
+
+        self.case = Case(facts.foam_file)
+        self.reader = self.case.reader
 
         # internalMesh only, for two reasons: the lagrangian block carries its
         # own 'U' and 'origId' arrays that would collide by name with a derived
@@ -370,10 +361,10 @@ class Renderer:
                     index: int, many_times: bool) -> str:
         """The image's path relative to :attr:`output_dir`, without ``.png``.
 
-        Returned as a relative path rather than a bare name because VifPara's
-        exporter builds its target by string concatenation -- ``plot_path +
-        filename + ".png"`` -- so a subdirectory belongs in the filename. The
-        directory is created here, since nothing downstream will.
+        Returned as a relative path rather than a bare name because the target
+        is built by string concatenation -- ``plot_path + filename + ".png"``
+        -- so a subdirectory belongs in the filename. The directory is created
+        here, since nothing downstream will.
 
         A per-field subdirectory is what makes a time series usable: one folder
         of frames per field, in index order, ready to hand to a video encoder.
@@ -643,7 +634,6 @@ class Renderer:
             print()
 
         derived = self.spec.derived_by_name
-        volume_source = _SourceAsCase(source)
 
         # One probe slice per plane, reused for every field on it: the ranges of
         # all arrays come out of the same GetDataInformation call.
@@ -718,7 +708,7 @@ class Renderer:
             show_bar = (field.color_bar if field.color_bar is not None
                         else self.spec.image.color_bar)
             if kind is FieldKind.VOLUME:
-                self._render_slice(volume_source, plane, colour_map, filename,
+                self._render_slice(source, plane, colour_map, filename,
                                    show_bar, log, scale)
             else:
                 self._render_surface(plane, colour_map, filename, show_bar,
@@ -813,8 +803,8 @@ class Renderer:
         if self._surface_regions is not None:
             return self._surface_regions
 
-        blocks = [entry["name"] for entry in self.case.get_patch_array_info()
-                  if entry["name"].startswith("patch/")]
+        blocks = [name for name in self.case.region_names()
+                  if name.startswith("patch/")]
         walls: list[str] = []
         try:
             from plumetools.mesh.boundary import read_boundary
@@ -836,43 +826,43 @@ class Renderer:
     # -- drawing ------------------------------------------------------------- #
 
     def _colour_map(self, field: Any, resolved: str, component: str, log: bool,
-                    scale: tuple[float, float], derived: dict) -> ColorMap:
+                    scale: tuple[float, float], derived: dict) -> ColourMap:
         image = self.spec.image
-        return ColorMap(
+        return ColourMap(
             field=resolved,
-            legend_title=field.resolve_legend_title(resolved, derived),
-            component_title=component,
+            title=field.resolve_legend_title(resolved, derived),
+            component=component,
             preset=field.preset or image.preset,
-            min_value=scale[0],
-            max_value=scale[1],
-            use_log_scale=log,
-            field_type=field.field_type or self.spec.sampling.field_type,
+            low=scale[0],
+            high=scale[1],
+            log_scale=log,
+            association=field.field_type or self.spec.sampling.field_type,
             orientation=image.orientation,
             location=image.location,
             size=image.bar_size,
-            legend_format_type=image.legend_format_type,
-            legend_format_digits_after=image.legend_digits_after,
+            format_type=image.legend_format_type,
+            digits_after=image.legend_digits_after,
         )
 
-    def _render_slice(self, source: _SourceAsCase, plane: PlaneSpec,
-                      colour_map: ColorMap, filename: str, show_bar: bool,
+    def _render_slice(self, source: Any, plane: PlaneSpec,
+                      colour_map: ColourMap, filename: str, show_bar: bool,
                       log: bool, scale: tuple[float, float]) -> None:
         """Cut the plane, colour it, and save it.
 
-        A ``Slice`` never draws its own colour bar -- it applies the colour map
-        with the legend explicitly hidden and offers a *separate*
-        ``ColorBarView`` instead. So a slice with a legend is a two-cell layout:
-        the image on top, the bar underneath.
+        A :class:`~plumetools.viz.scene.SliceView` never draws its own colour
+        bar -- it applies the colour map with the legend hidden and offers a
+        *separate* colour-bar view instead. So a slice with a legend is a
+        two-row layout: the image on top, the bar underneath.
         """
         image = self.spec.image
-        layout = Layout([1, 1] if show_bar else [1])
-        view = Slice(
-            case=source,
-            origin=Vector3.from_list(list(self.plane_origin(plane))),
-            normal=Vector3.from_list(list(plane.normal)),
-            camera_up=Vector3.from_list(list(plane.camera_up)),
+        layout = Layout(2 if show_bar else 1)
+        view = SliceView(
+            source,
+            origin=self.plane_origin(plane),
+            normal=plane.normal,
+            camera_up=plane.camera_up,
             height=plane.height if plane.height is not None else image.height,
-            color_map=colour_map,
+            colour_map=colour_map,
             zoom=plane.zoom if plane.zoom is not None else image.zoom,
             margin_x=plane.margin_x if plane.margin_x is not None else image.margin_x,
             margin_y=plane.margin_y if plane.margin_y is not None else image.margin_y,
@@ -880,16 +870,16 @@ class Renderer:
             offset_y=plane.offset_y if plane.offset_y is not None else image.offset_y,
             show_orientation_axis=image.show_orientation_axis,
         )
-        view.render(layout, row=0, col=0)
+        view.render(layout, row=0)
         extra: list[Any] = []
         if show_bar:
-            view.set_color_bar_size(height=self.spec.image.bar_height)
-            view.render_color_bar(layout, row=1, col=0)
-            colour_bar = view.get_color_bar()
+            view.render_colour_bar(layout, row=1,
+                                   height=self.spec.image.bar_height)
+            colour_bar = view.colour_bar
             extra.append(colour_bar)
             self._tune_scalar_bar(
-                colour_bar.get_render_view(), log, scale,
-                bar_width_px=colour_bar.get_width() * image.bar_size)
+                colour_bar.render_view, log, scale,
+                bar_width_px=colour_bar.width * image.bar_size)
         self._save(view, layout, filename, extra_views=extra)
 
     def _tune_scalar_bar(self, render_view: Any, log: bool,
@@ -934,7 +924,7 @@ class Renderer:
                 put("UseCustomLabels", 1)
                 put("CustomLabels", labels)
 
-    def _render_surface(self, plane: PlaneSpec, colour_map: ColorMap,
+    def _render_surface(self, plane: PlaneSpec, colour_map: ColourMap,
                         filename: str, show_bar: bool, log: bool,
                         scale: tuple[float, float]) -> None:
         """Draw a boundary-only field on the patches, viewed along *plane*."""
@@ -942,15 +932,17 @@ class Renderer:
         self.case.set_mesh_regions(self._patch_regions())
         try:
             bounds = self.reader.GetDataInformation().GetBounds()
-            centre = Vector3(
+            centre = (
                 0.5 * (bounds[0] + bounds[1]),
                 0.5 * (bounds[2] + bounds[3]),
                 0.5 * (bounds[4] + bounds[5]),
             )
             span = max(bounds[1] - bounds[0], bounds[3] - bounds[2],
                        bounds[5] - bounds[4]) or 1.0
-            normal = Vector3.from_list(list(plane.normal)).normalized()
-            camera_up = Vector3.from_list(list(plane.camera_up))
+            length = math.sqrt(sum(float(component) * float(component)
+                                   for component in plane.normal))
+            unit = 1.0 / length if length > 0.0 else 0.0
+            normal = [float(component) * unit for component in plane.normal]
             height = plane.height if plane.height is not None else image.height
             zoom = plane.zoom if plane.zoom is not None else image.zoom
             # The viewport is sized from the geometry, not fixed at 4:3, so one
@@ -958,33 +950,31 @@ class Renderer:
             width, half_height = view_shape(bounds, plane.normal,
                                             plane.camera_up, height)
 
-            layout = Layout([1])
-            view = Visualization3D(
-                case=self.case,
-                cam_position=centre - normal * span,
-                cam_up=camera_up,
+            layout = Layout(1)
+            view = SurfaceView(
+                camera_position=[middle - component * span
+                                 for middle, component in zip(centre, normal)],
+                camera_up=plane.camera_up,
                 focal_point=centre,
                 width=width,
                 height=height,
                 zoom=zoom,
                 show_orientation_axis=image.show_orientation_axis,
-                # Unlike Slice, a 3D view draws its own legend inline, so this
-                # one needs no second layout cell.
-                show_color_bar=show_bar,
+                # Unlike a slice, a 3-D view draws its own legend inline, so
+                # this one needs no second layout row.
+                show_colour_bar=show_bar,
             )
-            view.add_case_or_clip_to_view(
-                self.case, color_map=colour_map,
-                field_type=("Cells" if self.spec.sampling.field_type == "CELLS"
-                            else "Points"))
-            # Visualization3D sets CameraParallelScale to 1/zoom, which frames a
-            # 2 m box regardless of how big the geometry is. The scale that
+            view.add_case(self.case, colour_map,
+                          cell_data=self.spec.sampling.field_type == "CELLS")
+            # A SurfaceView starts at CameraParallelScale = 1/zoom, which frames
+            # a 2 m box regardless of how big the geometry is. The scale that
             # actually fits it has to be measured against the camera's own axes;
             # half the largest Cartesian extent clips a body that is not square
             # to the camera.
-            view.get_render_view().CameraParallelScale = half_height / zoom
-            view.render(layout, row=0, col=0)
+            view.render_view.CameraParallelScale = half_height / zoom
+            view.render(layout, row=0)
             if show_bar:
-                self._tune_scalar_bar(view.get_render_view(), log, scale,
+                self._tune_scalar_bar(view.render_view, log, scale,
                                       bar_width_px=width * image.bar_size)
             self._save(view, layout, filename)
         finally:
@@ -1004,18 +994,17 @@ class Renderer:
         image = self.spec.image
         if image.background is not None:
             for target in (view, *extra_views):
-                render_view = target.get_render_view()
+                render_view = target.render_view
                 render_view.UseColorPaletteForBackground = 0
                 render_view.Background = list(image.background)
         try:
-            Exporter(config=self.config, layout=layout).save_snapshot(
-                filename=filename)
+            layout.save(f"{self.plot_path}{filename}.png")
         finally:
             # Views and layouts are global ParaView state. Left behind, the
             # next image renders into a grid of every previous one.
             for target in (view, *extra_views):
-                target.delete_view()
-            layout.delete_layout()
+                target.delete()
+            layout.delete()
 
     def close(self) -> None:
         """Drop this case's ParaView state, so the next one starts clean.

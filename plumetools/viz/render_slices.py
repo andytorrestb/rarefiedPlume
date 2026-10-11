@@ -304,10 +304,11 @@ def _exit(status: int) -> None:
     does not happen: measured here, ``pv.Disconnect()`` gives exit 0 with the
     full log intact.
 
-    (The obvious shortcut, ``os._exit``, is wrong. VifPara imports colorama,
-    which replaces ``sys.stdout`` with a ``StreamWrapper``; flushing that does
-    not push the underlying buffer out, so ``os._exit`` silently discards every
-    line the run printed. That was measured too.)
+    (The obvious shortcut, ``os._exit``, also avoids the crash -- by skipping
+    teardown altogether, and with it anything still sitting in a buffer. It
+    once cost a run every line it had printed. Disconnecting is the narrower
+    fix: it removes the one thing that goes wrong and leaves the rest of the
+    interpreter's shutdown alone.)
 
     ``PLUMETOOLS_VIZ_RAW_EXIT=1`` skips the disconnect and lets the crash
     happen, which is what you want when debugging ParaView rather than using it.
