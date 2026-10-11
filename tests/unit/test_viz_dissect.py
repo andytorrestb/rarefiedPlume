@@ -248,6 +248,13 @@ def test_an_unknown_metric_is_refused():
         metric_command("a", "b", metric="rmse")
 
 
+def test_neither_command_touches_the_terminal():
+    """As for the videos: without -nostdin, ffmpeg run from a background job
+    stops the whole process group on SIGTTOU, and says nothing."""
+    assert "-nostdin" in contact_sheet_command(matrix(1, 1), "sheet.png")
+    assert "-nostdin" in metric_command("a.ffconcat", "b.ffconcat")
+
+
 # --------------------------------------------------------------------------- #
 # the report
 # --------------------------------------------------------------------------- #

@@ -40,6 +40,21 @@ Three things ffmpeg will not do for you
 
 3. **``-pix_fmt yuv420p`` is not the default** for a PNG input, and without it
    the result plays in ffplay and VLC but not in a browser or QuickTime.
+
+One thing it does that nobody asked for
+---------------------------------------
+**It takes over the terminal.** With a terminal on stdin, ffmpeg switches it to
+raw mode so that ``q`` can stop an encode, and does so before it has opened a
+single frame. From a job that is not the terminal's foreground one -- started
+with ``&``, or suspended and resumed with ``bg`` -- the kernel answers that
+with ``SIGTTOU``, which *stops* the whole process group: ffmpeg, the pvpython
+that launched it, and the ``AllpostCases`` around both. Nothing is printed and
+nothing fails. The render sits in state ``T`` at its first video until someone
+looks at ``ps``. In the foreground it is quieter and no better: ffmpeg swallows
+whatever is typed while it runs, and a stray ``q`` ends the encode early.
+
+Every command therefore carries ``-nostdin``, and every call hands ffmpeg
+``/dev/null`` rather than the stdin it would otherwise inherit.
 """
 
 from __future__ import annotations
@@ -136,7 +151,7 @@ def ffmpeg_command(list_file: str, output: str, framerate: float,
     """The argv for encoding one series.
 
     Pure, so the flags that matter can be checked without ffmpeg installed --
-    and three of them do matter; see the module docstring.
+    and four of them do matter; see the module docstring.
 
     Args:
         list_file: the concat list, relative to the working directory.
@@ -152,7 +167,7 @@ def ffmpeg_command(list_file: str, output: str, framerate: float,
         The argument vector.
     """
     command = [
-        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-r", f"{framerate:g}",
         "-f", "concat", "-safe", "0",
         "-i", list_file,
@@ -276,10 +291,13 @@ def encode_series(series: Series, framerate: float = 4.0,
     listing.write_text(concat_list(series.frames), encoding="utf-8",
                        newline="\n")
     try:
+        # /dev/null on stdin, never the inherited terminal: -nostdin asks,
+        # this guarantees, whichever binary ``ffmpeg`` names.
         result = subprocess.run(
             ffmpeg_command(CONCAT_NAME, output.name, framerate, codec,
                            quality, ffmpeg),
-            cwd=series.directory, capture_output=True, text=True)
+            cwd=series.directory, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True)
     finally:
         listing.unlink(missing_ok=True)
 

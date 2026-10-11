@@ -1170,6 +1170,13 @@ def test_the_command_overwrites_rather_than_prompting():
     assert "-y" in ffmpeg_command("list.ffconcat", "rhoN.mp4", 4.0)
 
 
+def test_the_command_leaves_the_terminal_alone():
+    """Given a terminal on stdin, ffmpeg puts it in raw mode before reading a
+    frame. From a background job that is SIGTTOU, which stops ffmpeg, pvpython
+    and AllpostCases together: no message, no exit code, state T in ps."""
+    assert "-nostdin" in ffmpeg_command("list.ffconcat", "rhoN.mp4", 4.0)
+
+
 @pytest.mark.parametrize("codec", ["libx264", "libx265", "libvpx-vp9"])
 def test_crf_is_passed_to_codecs_that_have_one(codec):
     command = ffmpeg_command("l", "o.mp4", 4.0, codec=codec, quality=21)

@@ -215,7 +215,8 @@ def contact_sheet_command(cells: Sequence[Cell], output: str, *,
     if not cells:
         raise DissectError("a contact sheet of no cases is not an image")
 
-    command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+    # -nostdin: see plumetools.viz.video on what ffmpeg does to a terminal.
+    command = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
     for cell in cells:
         command += ["-i", str(cell.path)]
 
@@ -267,7 +268,7 @@ def build_contact_sheet(cells: Sequence[Cell], output: Path, **options) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         contact_sheet_command(cells, str(output), **options),
-        capture_output=True, text=True)
+        stdin=subprocess.DEVNULL, capture_output=True, text=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         raise DissectError(f"ffmpeg failed assembling the contact sheet "
@@ -434,11 +435,14 @@ def metric_command(left_list: str, right_list: str, *, metric: str = "psnr",
     ``stats_file=-`` sends the per-frame numbers to **stdout**, which is why
     the output goes to ``-f null -`` rather than a file: the measurement is the
     text, not a video.
+
+    ``-nostdin`` for the reason given in :mod:`plumetools.viz.video`: ffmpeg
+    otherwise reconfigures the terminal, which stops a background job dead.
     """
     if metric not in ("psnr", "ssim"):
         raise DissectError(f"unknown metric {metric!r}; expected psnr or ssim")
     return [
-        ffmpeg, "-hide_banner", "-loglevel", "error",
+        ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
         "-r", "1", "-f", "concat", "-safe", "0", "-i", left_list,
         "-r", "1", "-f", "concat", "-safe", "0", "-i", right_list,
         "-lavfi", f"{metric}=stats_file=-",
@@ -477,7 +481,8 @@ def measure_series(directory: Path, frames: Sequence[str], *,
         result = subprocess.run(
             metric_command(left_path.name, right_path.name, metric=metric,
                            ffmpeg=ffmpeg),
-            cwd=directory, capture_output=True, text=True)
+            cwd=directory, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True)
     finally:
         left_path.unlink(missing_ok=True)
         right_path.unlink(missing_ok=True)
