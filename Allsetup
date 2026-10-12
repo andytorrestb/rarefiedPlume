@@ -38,7 +38,7 @@ ROOT=$PWD
 
 # Every extra pyproject.toml declares, so that one run leaves nothing to come
 # back for. Slice imagery has no extra: it needs ParaView, which pip cannot
-# install.
+# install, and is only reported on below.
 EXTRAS="test,plots,cases"
 PYTHON_ONLY=0
 CHECK_ONLY=0
@@ -131,6 +131,17 @@ for extra in ${EXTRAS//,/ }; do
         fi
     done
 done
+
+# --------------------------------------------------------------------------- #
+# slice imagery -- nothing pip installs, so nothing here is installed either
+# --------------------------------------------------------------------------- #
+
+step "Slice imagery (plumetools/viz)"
+
+PVPYTHON=${PVPYTHON_PATH:-pvpython}
+if have "$PVPYTHON"; then ok "$PVPYTHON"
+else skip "$PVPYTHON absent (no slice PNGs; install ParaView -- docs/environment.md)"; fi
+have ffmpeg && ok "ffmpeg" || skip "ffmpeg absent (frames are still written, no videos)"
 
 # --------------------------------------------------------------------------- #
 # 2. OpenFOAM

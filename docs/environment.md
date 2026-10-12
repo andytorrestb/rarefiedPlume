@@ -65,7 +65,8 @@ nothing to come back for, and then checks that each one imports:
 
 `./Allsetup --extras test,plots` narrows that — the way out if CaseFoam will not
 install. Slice imagery has no extra, because it needs ParaView and nothing pip
-can install ([below](#slice-imagery--plumetoolsviz-and-pvpython)).
+can install; `./Allsetup` only reports whether `pvpython` and `ffmpeg` are there
+([below](#slice-imagery--plumetoolsviz-and-pvpython)).
 
 **Step 3 is the one that gets missed.** Nothing pip does touches it, and a case
 that needs it fails only at `./Allrun` — several steps into a study, with a
