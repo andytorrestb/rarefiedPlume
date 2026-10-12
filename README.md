@@ -41,7 +41,8 @@ plumetools/          the analytical model and OpenFOAM I/O, as a package
   geometry.py          centroids, normals, spherical coordinates
   mesh/                polyMesh parsing
   foamio/              0/ field writers, mesh dictionary generators
-    primitives.py        searchable sphere/cylinder/box, shared by both families
+    primitives.py        searchable sphere/cylinder/cone/box, shared by the
+                         families that mesh with snappyHexMesh
   config.py            case.yaml loading and validation
   inflow.py            orchestration
   markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
