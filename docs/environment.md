@@ -55,7 +55,7 @@ Three things have to be in place, and `pip` does only the first:
 | 3 | `libplumeDsmcBoundaryModels.so` | `applications/dsmcBoundaryModels/Allwmake` |
 
 Step 1 installs **every** extra `pyproject.toml` declares, so one run leaves
-nothing to come back for:
+nothing to come back for, and then checks that each one imports:
 
 | extra | brings in | needed by |
 |---|---|---|

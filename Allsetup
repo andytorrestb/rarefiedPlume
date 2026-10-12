@@ -72,6 +72,16 @@ lib_path() {
     return 1
 }
 
+# The modules an extra has to make importable. Checked by name so that --check
+# says which extra is missing, rather than leaving it to the script that needs it.
+extra_modules() {
+    case "$1" in
+        test)  echo "pytest" ;;
+        plots) echo "matplotlib pandas" ;;
+        cases) echo "casefoam" ;;
+    esac
+}
+
 echo "### rarefiedPlume setup"
 echo "    root=$ROOT  check-only=$CHECK_ONLY  python-only=$PYTHON_ONLY"
 
@@ -111,6 +121,16 @@ if $PYTHON -c "import plumetools" 2>/dev/null; then
 else
     bad "plumetools is not importable -- run without --check to install it"
 fi
+
+for extra in ${EXTRAS//,/ }; do
+    for module in $(extra_modules "$extra"); do
+        if $PYTHON -c "import $module" 2>/dev/null; then
+            ok "$module ('$extra' extra)"
+        else
+            bad "$module is not importable -- the '$extra' extra is not installed"
+        fi
+    done
+done
 
 # --------------------------------------------------------------------------- #
 # 2. OpenFOAM
