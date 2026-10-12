@@ -20,10 +20,12 @@ cd cases/3d-inflow
 ```
 
 `./Allsetup --python-only` skips everything needing OpenFOAM; `./Allsetup --check`
-verifies an existing setup without installing or building anything. By hand it is:
+verifies an existing setup without installing or building anything. It installs
+every pip extra — `test`, `plots`, `cases` — unless `--extras a,b` names fewer.
+By hand it is:
 
 ```bash
-pip install -e ".[test]"                           # numpy, scipy, pyyaml (+ pytest)
+pip install -e ".[test,plots,cases]"               # + pytest, matplotlib/pandas, CaseFoam
 cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
 ```
 
@@ -94,7 +96,7 @@ rarefied N₂ plume past a finite cylinder onto a flat plate 6 inches behind it,
 four reservoir pressures.
 
 ```bash
-./Allsetup --extras test,cases                     # + CaseFoam, for case generation
+./Allsetup                                         # includes CaseFoam, for case generation
 cd cases/markelov1999
 ./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
 ```

@@ -2,16 +2,18 @@
 #
 # Set this repository up on a new machine, and verify the setup it produced.
 #
-#   ./Allsetup                  install the Python package, build the OpenFOAM library
+#   ./Allsetup                  install the Python package with every pip extra,
+#                               build the OpenFOAM library
 #   ./Allsetup --python-only    skip everything that needs OpenFOAM
 #   ./Allsetup --check          verify only; install nothing, build nothing
-#   ./Allsetup --extras a,b     pip extras to install (default: test)
+#   ./Allsetup --extras a,b     install only these pip extras
+#                               (default: all of them -- test,plots,cases)
 #   ./Allsetup --help
 #
 # THREE things have to be in place before a markelov1999 or cai2012 case will
 # run, and pip installs only the first:
 #
-#   1. the plumetools package         pip install -e ".[test]"
+#   1. the plumetools package         pip install -e ".[test,plots,cases]"
 #   2. standard OpenFOAM on PATH      dsmcFoam, dsmcInitialise, blockMesh, ...
 #   3. libplumeDsmcBoundaryModels.so  applications/dsmcBoundaryModels/Allwmake
 #
@@ -34,7 +36,10 @@ SELF=${0##*/}
 cd "${0%/*}" || exit 1
 ROOT=$PWD
 
-EXTRAS="test"
+# Every extra pyproject.toml declares, so that one run leaves nothing to come
+# back for. Slice imagery has no extra: it needs ParaView, which pip cannot
+# install.
+EXTRAS="test,plots,cases"
 PYTHON_ONLY=0
 CHECK_ONLY=0
 
@@ -95,8 +100,8 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
     if ! $PYTHON -m pip install -e ".[$EXTRAS]"; then
         echo "" >&2
         echo "$SELF: pip install failed. If it was the 'cases' extra, CaseFoam pulls" >&2
-        echo "       in PyFoam and is the usual culprit; --extras test gets you a" >&2
-        echo "       working library and test suite without it." >&2
+        echo "       in PyFoam and is the usual culprit; --extras test,plots gets you" >&2
+        echo "       a working library, test suite and plots without it." >&2
         exit 1
     fi
 fi
