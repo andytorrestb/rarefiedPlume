@@ -261,6 +261,92 @@ class SearchableCylinder(SearchableSurface):
 
 
 @dataclass(frozen=True)
+class SearchableCone(SearchableSurface):
+    """An analytic truncated cone, capped at both ends and optionally hollow.
+
+    Attributes:
+        point1: centre of one end cap [m].
+        point2: centre of the other end cap [m].
+        radius1: outer radius at ``point1`` [m].
+        radius2: outer radius at ``point2`` [m].
+        inner_radius1: inner radius at ``point1`` [m]. Zero is solid there.
+        inner_radius2: inner radius at ``point2`` [m].
+
+    Both radii vary linearly along the axis between the caps. A point is inside
+    when it lies between the two cap planes and its distance from the axis is
+    between the inner and the outer radius at that station, bounds included --
+    ``searchableCone::getVolumeType``, which is the test a ``mode inside``
+    refinement region is applied with.
+
+    Equal radii make it a cylinder; a zero radius at one end puts the apex
+    there.
+
+    All six keys are written, the inner radii too when they are zero. v2512
+    would default them, but then the dictionary only says which cone it is to a
+    reader who knows the default.
+
+    Used here for refinement volumes, which is all it has been tried for.
+    OpenFOAM's header calls the class an initial implementation whose surface
+    queries "might suffer from robustness (e.g. radius1==radius2)". The inside
+    test has no such case in it; snapping a body to one is another matter.
+    """
+
+    point1: tuple = (0.0, 0.0, 0.0)
+    point2: tuple = (0.0, 0.0, 1.0)
+    radius1: float = 1.0
+    radius2: float = 1.0
+    inner_radius1: float = 0.0
+    inner_radius2: float = 0.0
+
+    def geometry_lines(self) -> list[str]:
+        return [
+            "        type          searchableCone;",
+            f"        point1        {fmt_point(self.point1)};",
+            f"        radius1       {fmt(self.radius1)};",
+            f"        innerRadius1  {fmt(self.inner_radius1)};",
+            f"        point2        {fmt_point(self.point2)};",
+            f"        radius2       {fmt(self.radius2)};",
+            f"        innerRadius2  {fmt(self.inner_radius2)};",
+        ]
+
+    def validate(self) -> None:
+        super().validate()
+        for end, outer, inner in ((1, self.radius1, self.inner_radius1),
+                                  (2, self.radius2, self.inner_radius2)):
+            if not (outer >= 0.0 and inner >= 0.0):
+                raise ValueError(
+                    f"{self.name}: cone radii must be >= 0, got radius{end} = "
+                    f"{outer} and innerRadius{end} = {inner}")
+            if inner > outer:
+                raise ValueError(
+                    f"{self.name}: innerRadius{end} ({inner}) is greater than "
+                    f"radius{end} ({outer})")
+        if not self.wall_thickness_m() > 0.0:
+            raise ValueError(
+                f"{self.name}: the cone encloses no volume -- its outer radius "
+                f"is no greater than its inner one at either end")
+        if self.length_m() <= 0.0:
+            raise ValueError(f"{self.name}: cone end caps coincide")
+
+    def length_m(self) -> float:
+        """Distance between the two end-cap centres [m]."""
+        return sum((b - a) ** 2 for a, b in zip(self.point1, self.point2)) ** 0.5
+
+    def wall_thickness_m(self) -> float:
+        """Outer minus inner radius at the thicker end [m]: the radius itself,
+        for a solid cone."""
+        return max(float(self.radius1) - float(self.inner_radius1),
+                   float(self.radius2) - float(self.inner_radius2))
+
+    def min_feature_size_m(self) -> float:
+        return min(self.wall_thickness_m(), self.length_m())
+
+    def max_feature_size_m(self) -> float:
+        return max(2.0 * max(float(self.radius1), float(self.radius2)),
+                   self.length_m())
+
+
+@dataclass(frozen=True)
 class SearchableBox(SearchableSurface):
     """An analytic axis-aligned box.
 
