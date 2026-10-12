@@ -62,6 +62,26 @@ def test_the_shipped_r4d_case_labels_what_was_not_given():
         assert tagged and "[ASSUMPTION]" in tagged[0], line
 
 
+def test_the_shipped_refinement_regions_are_cones_on_one_surface():
+    """What case.yaml says of them: one cone, r = 0.4 + 0.2 x, cut off at four
+    stations, its slope the 1/S of this exit. Move a radius, or the exit state,
+    and this says the comment beside them is no longer true."""
+    from plumetools.nozzleplume import exitstate
+
+    cfg = load_case_config(R4D_CASE)
+    regions = cfg.mesh.refinement_regions
+    assert [r.name for r in regions] == ["exitCore", "nearField", "plumeCore",
+                                         "plume"]
+    assert [r.level for r in regions] == [4, 3, 2, 1]
+    for region in regions:
+        assert region.shape == "cone"
+        assert region.x_min_m == 0.0
+        assert region.radius1_m == pytest.approx(0.4)
+        assert region.radius2_m == pytest.approx(0.4 + 0.2 * region.x_max_m)
+        assert region.inner_radius1_m is None and region.inner_radius2_m is None
+    assert 1.0 / exitstate.from_config(cfg).speed_ratio == pytest.approx(0.2, abs=0.002)
+
+
 def test_the_shipped_viz_spec_loads_and_draws_the_plume_and_its_statistics():
     """./Allpost --viz hands this to plumetools/viz; it has to be a valid spec.
     The parcel count is in it because, for this case, it is half the story."""
@@ -393,36 +413,104 @@ def test_an_off_axis_plate_is_fine_about_the_other_plane(tmp_path):
 
 def _region(**changes) -> dict:
     return {"mesh": {"refinement_regions": [
-        {"name": "r", "level": 2, "x_max_m": 1.0, "radius_m": 0.5, **changes}]}}
+        {"name": "r", "level": 2, "x_max_m": 1.0, "radius1_m": 0.4,
+         "radius2_m": 0.6, **changes}]}}
 
 
-def test_a_region_defaults_to_a_cylinder_from_the_exit_plane(tmp_path):
+#: A box in place of the cone above: its four bounds, and the cone's radii gone.
+_BOX = dict(shape="box", radius1_m=None, radius2_m=None, y_min_m=-1.0,
+            y_max_m=1.0, z_min_m=-1.0, z_max_m=1.0)
+
+
+def test_a_region_defaults_to_a_solid_cone_from_the_exit_plane(tmp_path):
     region = load_case(tmp_path, **_region()).mesh.refinement_regions[0]
-    assert (region.shape, region.x_min_m) == ("cylinder", 0.0)
+    assert (region.shape, region.x_min_m) == ("cone", 0.0)
+    assert (region.radius1_m, region.radius2_m) == (0.4, 0.6)
+    assert region.inner_radius1_m is None and region.inner_radius2_m is None
 
 
-def test_a_cylinder_without_a_radius_is_rejected(tmp_path):
-    with pytest.raises(ConfigError, match="radius_m"):
-        load_case(tmp_path, **_region(radius_m=None))
+@pytest.mark.parametrize("missing", ["radius1_m", "radius2_m"])
+def test_a_cone_needs_a_radius_at_each_end(tmp_path, missing):
+    with pytest.raises(ConfigError, match=missing):
+        load_case(tmp_path, **_region(**{missing: None}))
+
+
+def test_equal_radii_are_how_a_cylinder_is_written(tmp_path):
+    region = load_case(tmp_path, **_region(radius2_m=0.4)).mesh.refinement_regions[0]
+    assert region.shape == "cone"
+    assert region.radius1_m == region.radius2_m == 0.4
+
+
+@pytest.mark.parametrize("end", ["radius1_m", "radius2_m"])
+def test_a_cone_may_come_to_a_point_at_either_end(tmp_path, end):
+    load_case(tmp_path, **_region(**{end: 0.0}))
+
+
+def test_a_cone_with_no_radius_at_either_end_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="encloses no volume"):
+        load_case(tmp_path, **_region(radius1_m=0.0, radius2_m=0.0))
+
+
+def test_a_negative_radius_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="radius2_m is -0.6"):
+        load_case(tmp_path, **_region(radius2_m=-0.6))
+
+
+def test_a_hollow_cone_loads(tmp_path):
+    region = load_case(tmp_path, **_region(
+        inner_radius1_m=0.1, inner_radius2_m=0.3)).mesh.refinement_regions[0]
+    assert (region.inner_radius1_m, region.inner_radius2_m) == (0.1, 0.3)
+
+
+def test_an_inner_radius_beyond_the_outer_one_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="inner_radius1_m is 0.5"):
+        load_case(tmp_path, **_region(inner_radius1_m=0.5))
+    with pytest.raises(ConfigError, match="inner_radius2_m is -0.1"):
+        load_case(tmp_path, **_region(inner_radius2_m=-0.1))
+
+
+def test_a_cone_that_is_all_hole_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="encloses no volume"):
+        load_case(tmp_path, **_region(inner_radius1_m=0.4, inner_radius2_m=0.6))
+
+
+@pytest.mark.parametrize("old", [{"radius_m": 0.5}, {"shape": "cylinder"},
+                                 {"shape": "cylinder", "radius_m": 0.5}])
+def test_a_region_still_written_as_a_cylinder_is_told_what_replaced_it(tmp_path, old):
+    """A case.yaml from before the cones. 'unknown key radius_m' would be true
+    and no help; this names the two keys to write instead."""
+    region = {"name": "r", "level": 2, "x_max_m": 1.0, **old}
+    with pytest.raises(ConfigError) as excinfo:
+        load_case(tmp_path, mesh={"refinement_regions": [region]})
+    message = str(excinfo.value)
+    assert "refinement_regions[0]" in message
+    assert "radius1_m" in message and "radius2_m" in message
 
 
 def test_a_box_needs_all_four_lateral_bounds(tmp_path):
     with pytest.raises(ConfigError, match="z_max_m"):
-        load_case(tmp_path, **_region(shape="box", radius_m=None, y_min_m=-1.0,
-                                      y_max_m=1.0, z_min_m=-1.0))
+        load_case(tmp_path, **_region(**{**_BOX, "z_max_m": None}))
 
 
 def test_a_box_region_loads(tmp_path):
-    region = load_case(tmp_path, **_region(
-        shape="box", radius_m=None, y_min_m=-1.0, y_max_m=1.0, z_min_m=-1.0,
-        z_max_m=1.0)).mesh.refinement_regions[0]
+    region = load_case(tmp_path, **_region(**_BOX)).mesh.refinement_regions[0]
     assert region.shape == "box"
 
 
-def test_a_box_given_a_radius_is_rejected(tmp_path):
-    with pytest.raises(ConfigError, match="cylinder"):
-        load_case(tmp_path, **_region(shape="box", y_min_m=-1.0, y_max_m=1.0,
-                                      z_min_m=-1.0, z_max_m=1.0))
+@pytest.mark.parametrize("key", ["radius1_m", "radius2_m", "inner_radius1_m"])
+def test_a_box_given_a_radius_is_rejected(tmp_path, key):
+    with pytest.raises(ConfigError, match="belong to shape 'cone'"):
+        load_case(tmp_path, **_region(**{**_BOX, key: 0.5}))
+
+
+def test_a_cone_given_a_box_s_bounds_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="belong to shape 'box'"):
+        load_case(tmp_path, **_region(y_min_m=-1.0))
+
+
+def test_an_unknown_shape_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="unknown shape 'sphere'"):
+        load_case(tmp_path, **_region(shape="sphere"))
 
 
 def test_level_zero_is_the_background_and_needs_no_region(tmp_path):
@@ -436,7 +524,8 @@ def test_an_inverted_region_is_rejected(tmp_path):
 
 
 def test_two_regions_with_one_name_are_rejected(tmp_path):
-    region = {"name": "r", "level": 2, "x_max_m": 1.0, "radius_m": 0.5}
+    region = {"name": "r", "level": 2, "x_max_m": 1.0, "radius1_m": 0.4,
+              "radius2_m": 0.6}
     with pytest.raises(ConfigError, match="repeats the name"):
         load_case(tmp_path, mesh={"refinement_regions": [region, dict(region)]})
 

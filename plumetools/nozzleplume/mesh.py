@@ -29,12 +29,28 @@ One length sizes everything::
 
     cell size at level N  =  mesh.background_cell_size_m / 2**N
 
-``mesh.refinement_regions`` are volumes held at a level -- cylinders coaxial with
+``mesh.refinement_regions`` are volumes held at a level -- cones coaxial with
 the plume, or boxes. The plate surface is held at ``mesh.plate_refinement_level``.
 Between two levels snappyHexMesh leaves a buffer of each intermediate level, so
 the mesh never jumps by more than a factor of two.
 ``mesh.n_cells_between_levels`` sets how thick -- though not to that many cells:
 :func:`buffer_shell_cells` has what it actually builds.
+
+The regions are cones because a plume is one
+--------------------------------------------
+A jet into vacuum widens as it goes, so the volume worth refining does too. A
+cone -- a ``searchableCone``, a radius at each of two stations and a straight
+line between -- follows that. A cylinder cannot: wide enough for the far end of
+a stage, it is far wider than the plume at the near end, and refines gas that
+is not there.
+
+Measured on the R-4D case, four cones on one surface, ``r = 0.4 + 0.2 x``, in
+place of four cylinders reaching the same radii where each stage ends: 459 007
+cells against 529 126, with the cells on the exit and on the plate unchanged.
+In the run made on the cylinders the gas on that surface is at 0.3% of the
+on-axis density at 1 m, 4% at 3 m and 16% at 8 m, and its local mean free path
+longer in proportion -- the cells given up are the ones that needed refining
+least.
 
 The nozzle patch is a staircase
 -------------------------------
@@ -85,7 +101,7 @@ from plumetools.foamio.primitives import (
     BoxPatch,
     RefinementRegion,
     SearchableBox,
-    SearchableCylinder,
+    SearchableCone,
     check_surfaces_are_resolvable,
     fmt,
     header,
@@ -127,10 +143,12 @@ class Region:
 
     Attributes:
         name: the ``geometry`` entry name.
-        shape: ``cylinder`` (coaxial with the plume) or ``box``.
+        shape: ``cone`` (coaxial with the plume) or ``box``.
         level: the octree level held inside it.
         x_min_m, x_max_m: axial extent [m].
-        radius_m: cylinder radius [m].
+        radius1_m, radius2_m: cone radius at ``x_min_m`` and at ``x_max_m`` [m].
+        inner_radius1_m, inner_radius2_m: the same for the inside of a hollow
+            cone [m]. Zero is solid.
         y_min_m, y_max_m, z_min_m, z_max_m: box bounds [m].
     """
 
@@ -139,47 +157,96 @@ class Region:
     level: int
     x_min_m: float
     x_max_m: float
-    radius_m: float | None = None
+    radius1_m: float | None = None
+    radius2_m: float | None = None
+    inner_radius1_m: float = 0.0
+    inner_radius2_m: float = 0.0
     y_min_m: float | None = None
     y_max_m: float | None = None
     z_min_m: float | None = None
     z_max_m: float | None = None
 
+    @property
+    def length_m(self) -> float:
+        """Axial length [m]."""
+        return float(self.x_max_m) - float(self.x_min_m)
+
+    @property
+    def half_angle_deg(self) -> float:
+        """A cone's half-angle [degrees]: positive widening downstream, zero for
+        a cylinder."""
+        return math.degrees(math.atan2(
+            float(self.radius2_m) - float(self.radius1_m), self.length_m))
+
+    def radii_at(self, x) -> tuple:
+        """A cone's ``(outer, inner)`` radius at axial stations ``x`` [m].
+
+        Linear between the end caps, in the arithmetic of
+        ``searchableCone::getVolumeType``; held at the end values beyond them,
+        which only a grown volume reaches.
+        """
+        along = np.clip(np.asarray(x, dtype=np.float64) - self.x_min_m,
+                        0.0, self.length_m)
+        outer = (self.radius1_m
+                 + along * (self.radius2_m - self.radius1_m) / self.length_m)
+        inner = (self.inner_radius1_m
+                 + along * (self.inner_radius2_m - self.inner_radius1_m)
+                 / self.length_m)
+        return outer, inner
+
     def bounds(self, grow_m: float = 0.0) -> tuple:
         """Bounding box, grown by ``grow_m`` all round [m]."""
         g = float(grow_m)
-        if self.shape == "cylinder":
-            r = float(self.radius_m) + g
+        if self.shape == "cone":
+            r = max(float(self.radius1_m), float(self.radius2_m)) + g
             return (self.x_min_m - g, self.x_max_m + g, -r, r, -r, r)
         return (self.x_min_m - g, self.x_max_m + g, self.y_min_m - g,
                 self.y_max_m + g, self.z_min_m - g, self.z_max_m + g)
 
     def contains(self, x, y, z, grow_m: float = 0.0):
-        """Whether points are inside the volume, grown by ``grow_m`` all round."""
+        """Whether points are inside the volume, grown by ``grow_m`` all round.
+
+        Ungrown, a cone is tested exactly as snappyHexMesh tests it: between
+        the cap planes, and no nearer the axis than the inner radius at that
+        station nor farther than the outer one, every bound included.
+        """
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
         z = np.asarray(z, dtype=np.float64)
         x0, x1, y0, y1, z0, z1 = self.bounds(grow_m)
         axial = (x >= x0) & (x <= x1)
-        if self.shape == "cylinder":
-            return axial & (y * y + z * z <= (float(self.radius_m) + grow_m) ** 2)
+        if self.shape == "cone":
+            outer, inner = self.radii_at(x)
+            r = np.sqrt(y * y + z * z)
+            return axial & (r <= outer + grow_m) & (r >= inner - grow_m)
         return axial & (y >= y0) & (y <= y1) & (z >= z0) & (z <= z1)
 
     def searchable(self):
         """The analytic primitive snappyHexMesh tests cell centres against."""
-        if self.shape == "cylinder":
-            return SearchableCylinder(
-                name=self.name, point1=(self.x_min_m, 0.0, 0.0),
-                point2=(self.x_max_m, 0.0, 0.0), radius=float(self.radius_m))
+        if self.shape == "cone":
+            return SearchableCone(
+                name=self.name,
+                point1=(self.x_min_m, 0.0, 0.0), radius1=float(self.radius1_m),
+                inner_radius1=float(self.inner_radius1_m),
+                point2=(self.x_max_m, 0.0, 0.0), radius2=float(self.radius2_m),
+                inner_radius2=float(self.inner_radius2_m))
         return SearchableBox(
             name=self.name,
             min=(self.x_min_m, self.y_min_m, self.z_min_m),
             max=(self.x_max_m, self.y_max_m, self.z_max_m))
 
     def describe(self) -> str:
-        if self.shape == "cylinder":
-            return (f"x {fmt(self.x_min_m)} .. {fmt(self.x_max_m)} m, "
-                    f"r <= {fmt(self.radius_m)} m")
+        if self.shape == "cone":
+            if self.inner_radius1_m or self.inner_radius2_m:
+                radii = (f"r {fmt(self.inner_radius1_m)} .. {fmt(self.radius1_m)}"
+                         f" -> {fmt(self.inner_radius2_m)} .. "
+                         f"{fmt(self.radius2_m)} m")
+            else:
+                radii = f"r <= {fmt(self.radius1_m)} -> {fmt(self.radius2_m)} m"
+            angle = ("a cylinder" if self.radius1_m == self.radius2_m
+                     else f"half-angle {self.half_angle_deg:.1f} deg")
+            return (f"x {fmt(self.x_min_m)} .. {fmt(self.x_max_m)} m, {radii}"
+                    f" ({angle})")
         return (f"x {fmt(self.x_min_m)} .. {fmt(self.x_max_m)}, "
                 f"y {fmt(self.y_min_m)} .. {fmt(self.y_max_m)}, "
                 f"z {fmt(self.z_min_m)} .. {fmt(self.z_max_m)} m")
@@ -191,7 +258,10 @@ def regions_from_config(cfg) -> tuple:
         Region(
             name=str(r.name), shape=str(r.shape), level=int(r.level),
             x_min_m=float(r.x_min_m), x_max_m=float(r.x_max_m),
-            radius_m=None if r.radius_m is None else float(r.radius_m),
+            radius1_m=None if r.radius1_m is None else float(r.radius1_m),
+            radius2_m=None if r.radius2_m is None else float(r.radius2_m),
+            inner_radius1_m=float(r.inner_radius1_m or 0.0),
+            inner_radius2_m=float(r.inner_radius2_m or 0.0),
             y_min_m=None if r.y_min_m is None else float(r.y_min_m),
             y_max_m=None if r.y_max_m is None else float(r.y_max_m),
             z_min_m=None if r.z_min_m is None else float(r.z_min_m),
@@ -368,7 +438,8 @@ def buffer_shell_cells(n_cells_between_levels: int) -> float:
 
     Each pair is as likely one as the other, hence the half. Read off the R-4D
     mesh at ``n = 3``: two cells of level 1 ahead of the plate's skin and three
-    behind it.
+    behind it; two of level 3, three of level 2 and two of level 1 round the
+    exit cone.
     """
     n = int(n_cells_between_levels)
     return n - 0.5 if n >= 3 else n + 0.5
@@ -413,7 +484,8 @@ def refinement_layers(geom: PlumeGeometry, background_cell_size_m: float,
     level around it, :func:`buffer_shell_cells` cells of that level thick -- the
     buffer snappyHexMesh adds so that levels change one at a time. A shell is as
     thick along a diagonal as along an axis, which is what a rule about distance
-    gives.
+    gives: on the R-4D mesh a cone's shells reach about as far either way,
+    within a cell.
 
     A region and a surface differ in what "the feature at its own level" is. A
     region is exactly the cells whose centres are inside it. A **surface** is
@@ -487,9 +559,11 @@ def exit_plane_cells(regions, geom: PlumeGeometry,
 
     It is the rule itself rather than a margin standing in for it, because the
     rule has a consequence no margin captures: a region **smaller than the cells
-    around it is never seen**. A 0.3 m cylinder in a 0.5 m background contains
-    no cell centre, so nothing is ever refined, however fine the level it asks
-    for.
+    around it is never seen**. The four 0.5 m background cells round the axis
+    have their centres at ``x = 0.25 m``, 0.354 m off it. A cone narrower than
+    that *there* contains none of them, so nothing is ever refined, however fine
+    the level it asks for -- and it is the radius at that station that decides,
+    not the one written for the exit plane.
     """
     bg = float(background_cell_size_m)
     radius_sq = geom.radius_m ** 2
@@ -558,8 +632,9 @@ def exit_level(regions, geom: PlumeGeometry, background_cell_size_m: float,
             f"cell when its CENTRE is inside a region, so the region that "
             f"resolves the exit ({finest}, level {levels[-1]}) has to contain "
             f"the centre of every cell over the disk (radius {geom.radius_m:g} m)"
-            f" at each level on the way down. Give it a radius a cell or two "
-            f"beyond the disk and x_min_m <= 0, or move it clear of the exit.")
+            f" at each level on the way down. Give it x_min_m <= 0 and a radius "
+            f"that is a cell or two beyond the disk by the first cell centres, "
+            f"or move it clear of the exit.")
     level = levels[0] if levels else 0
     if not cells or not layers:
         return level
@@ -574,9 +649,9 @@ def exit_level(regions, geom: PlumeGeometry, background_cell_size_m: float,
                 f"A region smaller than the cells around it is never seen -- "
                 f"snappyHexMesh tests cell CENTRES -- and only its buffer "
                 f"arrives. Cover the whole exit disk (radius {geom.radius_m:g} "
-                f"m) with a region at level {layer_level} or finer whose radius "
-                f"reaches the surrounding cell centres, or move {source} away "
-                f"from the exit.")
+                f"m) with a region at level {layer_level} or finer that is wide "
+                f"enough, where the surrounding cells have their centres, to "
+                f"contain them; or move {source} away from the exit.")
     return level
 
 
@@ -600,14 +675,35 @@ def estimate_cells(geom: PlumeGeometry, background_cell_size_m: float, regions,
 
     The plate's skin and the buffer shells are where an estimate goes wrong,
     because they are most of the mesh -- the R-4D plate is 811 m^2 of surface at
-    0.125 m, and some 230 000 of that mesh's cells are within half a metre of
-    it -- and neither is as thick as ``nCellsBetweenLevels`` reads. See
+    0.125 m, and the cells within half a metre of it are about half the cells
+    there are -- and neither is as thick as ``nCellsBetweenLevels`` reads. See
     :func:`surface_skin_cells` and :func:`buffer_shell_cells`.
 
-    On the R-4D mesh this gives 528 283 cells against the 529 126 snappyHexMesh
-    built, 0.2% under, and is within 3.2% at every level. Read as a number of
-    cells -- three to a shell, and a skin of ``n + 1`` -- the same setting gave
-    542 398: 2.5% over, and 7.9% over at level 1.
+    Held against meshes OpenFOAM v2512 built from the R-4D case, the cones at
+    each ``nCellsBetweenLevels`` and the cylinders they replaced:
+
+    ===========================  =========  =========  =======  ===========
+    case                          estimate      built    error  worst level
+    ===========================  =========  =========  =======  ===========
+    cones, 1 cell between          323 432    318 104    +1.7%        +3.1%
+    cones, 2                       341 587    341 512    +0.0%        +2.3%
+    cones, 3 (as shipped)          462 878    459 007    +0.8%        -2.1%
+    cones, 4                       485 882    489 905    -0.8%        -1.3%
+    cones, 5                       641 621    640 916    +0.1%        -4.8%
+    cylinders, 3                   528 283    529 126    -0.2%        -3.2%
+    ===========================  =========  =========  =======  ===========
+
+    A small mesh is looser, because whole cells matter more: the 26 483-cell
+    quarter-symmetric case the OpenFOAM-tier tests build is 3.0% over, and 9.5%
+    under at one level of 2 500 cells.
+
+    The finest level need not be estimated at all. Nothing but the finest region
+    puts a cell there -- buffers only ever add coarser ones -- so it has eight
+    cells for every cell of the level below whose centre that region contains:
+    25 824 for the R-4D exit cone, which is the count in all five cone meshes,
+    and 78 016 for a hollow cone added to them at a level of its own. The 26 082
+    this estimate gives the exit cone is its volume over the cell's, 1% more,
+    because a volume does not know which centres it holds.
 
     Each volume is integrated on a lattice of :data:`ESTIMATE_SAMPLES` points
     per axis over its own bounding box, so a small fine region costs the same to

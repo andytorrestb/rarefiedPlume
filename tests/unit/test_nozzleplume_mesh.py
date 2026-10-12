@@ -1,10 +1,15 @@
 """The mesh plan, the nozzle prediction, the cell estimate and the dictionaries.
 
-Several numbers here are **measurements of a real mesh**, not expectations
+Several numbers here are **measurements of real meshes**, not expectations
 worked out by hand: the shipped R-4D case was built with OpenFOAM v2512's
-blockMesh, snappyHexMesh, topoSet and createPatch, and came out at 529 126
+blockMesh, snappyHexMesh, topoSet and createPatch, and came out at 459 007
 cells with a 112-face nozzle patch. The plan has to predict the second exactly
 and the first closely, and these tests hold it to both without needing OpenFOAM.
+
+So were five more meshes of it -- at every other nCellsBetweenLevels from 1 to
+5, and with the cylinders its cones replaced -- because the buffer layers that
+setting controls are most of the mesh, and what snappyHexMesh builds for it is
+not what the name says.
 """
 
 from __future__ import annotations
@@ -18,11 +23,35 @@ from _nozzleplume import R4D_CASE, derive, derived, load_case
 from plumetools.nozzleplume import geometry, mesh
 from plumetools.nozzleplume.config import load_case_config
 
-#: What OpenFOAM v2512 built from cases/r-4d/baseCase/case.yaml.
-R4D_MEASURED_CELLS = 529_126
-R4D_MEASURED_CELLS_BY_LEVEL = {0: 89_250, 1: 100_324, 2: 276_320, 3: 36_608,
-                               4: 26_624}
+#: What OpenFOAM v2512 built from cases/r-4d/baseCase/case.yaml: cells at each
+#: refinement level, from "Cells per refinement level" in log.snappyHexMesh.
+R4D_MEASURED_CELLS_BY_LEVEL = {0: 93_503, 1: 69_840, 2: 250_124, 3: 19_716,
+                               4: 25_824}
+R4D_MEASURED_CELLS = 459_007
 R4D_MEASURED_NOZZLE_FACES = 112
+
+#: The same case meshed at each mesh.n_cells_between_levels, the shipped 3
+#: among them. Level 4 is the exit cone and nothing else, so it does not move.
+R4D_MEASURED_BY_BUFFER = {
+    1: {0: 98_168, 1: 47_756, 2: 128_464, 3: 17_892, 4: 25_824},
+    2: {0: 95_816, 1: 65_724, 2: 135_104, 3: 19_044, 4: 25_824},
+    3: R4D_MEASURED_CELLS_BY_LEVEL,
+    4: {0: 90_600, 1: 91_717, 2: 260_736, 3: 21_028, 4: 25_824},
+    5: {0: 84_870, 1: 121_970, 2: 385_176, 3: 23_076, 4: 25_824},
+}
+
+#: And with one HOLLOW cone added to the shipped four, at a level of its own:
+#: the cells snappyHexMesh built at that level.
+R4D_HOLLOW_REGION = {"name": "shell", "level": 5, "x_min_m": 5.0, "x_max_m": 5.3,
+                     "radius1_m": 0.7, "radius2_m": 0.85,
+                     "inner_radius1_m": 0.5, "inner_radius2_m": 0.6}
+R4D_MEASURED_HOLLOW_CELLS = 78_016
+
+#: And with the four cylinders the cones replaced -- radii 0.5, 1, 2 and 4 m to
+#: the same four stations -- at 3 cells between levels: 529 126 cells.
+R4D_CYLINDER_RADII = (0.5, 1.0, 2.0, 4.0)
+R4D_MEASURED_WITH_CYLINDERS = {0: 89_250, 1: 100_324, 2: 276_320, 3: 36_608,
+                               4: 26_624}
 
 
 @pytest.fixture(scope="module")
@@ -47,6 +76,11 @@ def test_r4d_nozzle_area_is_within_the_configured_tolerance(r4d):
     assert nozzle.area_error == pytest.approx(-0.0198, abs=2e-4)
 
 
+def test_the_measured_levels_add_up_to_the_measured_mesh():
+    assert sum(R4D_MEASURED_CELLS_BY_LEVEL.values()) == R4D_MEASURED_CELLS
+    assert sum(R4D_MEASURED_WITH_CYLINDERS.values()) == 529_126
+
+
 def test_r4d_cell_estimate_is_close_to_the_mesh_openfoam_built(r4d):
     """Within 4% overall. An octree's size is not known until it is built, so
     this is a guard, not a count -- but a guard a third out is not one."""
@@ -61,6 +95,117 @@ def test_r4d_cell_estimate_is_close_at_every_level(r4d):
     _, _, _, plan, _, _ = r4d
     for level, measured in R4D_MEASURED_CELLS_BY_LEVEL.items():
         assert plan.cells_by_level[level] == pytest.approx(measured, rel=0.06), level
+
+
+def _r4d_plan(directory, change):
+    """The plan for the shipped case with its mesh section edited by `change`."""
+    import yaml
+
+    data = yaml.safe_load((R4D_CASE / "case.yaml").read_text(encoding="utf-8"))
+    change(data["mesh"])
+    (directory / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    _, _, plan, _, _ = derive(load_case_config(directory))
+    return plan
+
+
+@pytest.mark.parametrize("n_between", sorted(R4D_MEASURED_BY_BUFFER))
+def test_r4d_cell_estimate_holds_at_every_number_of_buffer_cells(tmp_path, n_between):
+    """nCellsBetweenLevels decides how thick the plate's skin and every buffer
+    shell are, which is most of the mesh, and not in the obvious way: the skin
+    is the same at 1 and 2, doubles from 2 to 3, and is the same again at 4.
+    An estimate that read the setting as a number of cells is 45% over at the
+    plate's level for 2 and 26% over for 4. This one is within 6% at every
+    level of all five meshes."""
+    plan = _r4d_plan(tmp_path,
+                     lambda m: m.update(n_cells_between_levels=n_between))
+    built = R4D_MEASURED_BY_BUFFER[n_between]
+    assert plan.estimated_cells == pytest.approx(sum(built.values()), rel=0.04)
+    for level, measured in built.items():
+        assert plan.cells_by_level[level] == pytest.approx(measured, rel=0.06), level
+
+
+def test_r4d_cell_estimate_holds_for_the_cylinders_the_cones_replaced(tmp_path):
+    """A cylinder is a cone with one radius, and the estimate of the 529 126-cell
+    mesh that was built on four of them is as close as the cones' is."""
+    def as_cylinders(mesh_section):
+        for region, radius in zip(mesh_section["refinement_regions"],
+                                  R4D_CYLINDER_RADII):
+            region["radius1_m"] = region["radius2_m"] = radius
+
+    plan = _r4d_plan(tmp_path, as_cylinders)
+    assert plan.exit_level == 4
+    assert plan.estimated_cells == pytest.approx(529_126, rel=0.04)
+    for level, measured in R4D_MEASURED_WITH_CYLINDERS.items():
+        assert plan.cells_by_level[level] == pytest.approx(measured, rel=0.06), level
+
+
+def test_r4d_cones_take_fewer_cells_than_the_cylinders_did():
+    """13% fewer, and none of them on the exit: both have 112 nozzle faces, and
+    the exit cone holds 25 824 cells where the exit cylinder held 26 624."""
+    cones, cylinders = R4D_MEASURED_CELLS, sum(R4D_MEASURED_WITH_CYLINDERS.values())
+    assert cones / cylinders == pytest.approx(0.867, abs=0.001)
+    assert R4D_MEASURED_CELLS_BY_LEVEL[4] == pytest.approx(
+        R4D_MEASURED_WITH_CYLINDERS[4], rel=0.04)
+
+
+def _cells_at_the_finest_level(plan, geom) -> int:
+    """Eight for every cell of the level below whose CENTRE the finest region
+    contains -- counted on the domain's own lattice, over the region's bounding
+    box only. The whole lattice is tens of millions of cells; a cone a metre
+    long contains a few thousand of them."""
+    finest = max(plan.regions, key=lambda region: region.level)
+    assert finest.level == plan.max_level
+    parent = plan.cell_size_m(finest.level - 1)
+
+    def centres(lo: float, hi: float, reach_lo: float, reach_hi: float) -> np.ndarray:
+        every = lo + (np.arange(round((hi - lo) / parent)) + 0.5) * parent
+        return every[(every > reach_lo - parent) & (every < reach_hi + parent)]
+
+    x0, x1, y0, y1, z0, z1 = geom.bounds
+    rx0, rx1, ry0, ry1, rz0, rz1 = finest.bounds()
+    x, y, z = np.meshgrid(centres(x0, x1, rx0, rx1), centres(y0, y1, ry0, ry1),
+                          centres(z0, z1, rz0, rz1), indexing="ij")
+    assert x.size < 200_000
+    return 8 * int(np.count_nonzero(finest.contains(x, y, z)))
+
+
+def test_the_finest_level_is_predicted_to_the_cell(r4d):
+    """Not estimated: counted. Nothing but the finest region puts a cell at the
+    finest level -- buffer layers only ever add coarser ones -- so there are
+    eight for every cell of the level below whose CENTRE the exit cone
+    contains. 25 824, which is what snappyHexMesh built at every
+    nCellsBetweenLevels, and is the evidence that Region.contains is
+    searchableCone's own inside test."""
+    _, geom, _, plan, _, _ = r4d
+    finest = max(plan.regions, key=lambda region: region.level)
+    assert (finest.name, finest.shape, finest.level) == ("exitCore", "cone", 4)
+    predicted = _cells_at_the_finest_level(plan, geom)
+    assert predicted == R4D_MEASURED_CELLS_BY_LEVEL[4] == 25_824
+    assert all(built[4] == predicted for built in R4D_MEASURED_BY_BUFFER.values())
+
+
+def test_a_hollow_cone_is_predicted_to_the_cell_too(tmp_path):
+    """The inner radii, against a mesh: the shipped case with one more region, a
+    hollow cone at a level of its own. snappyHexMesh built 78 016 cells there,
+    and that is the count of the centres between its two surfaces."""
+    import yaml
+
+    data = yaml.safe_load((R4D_CASE / "case.yaml").read_text(encoding="utf-8"))
+    data["mesh"]["refinement_regions"].append(R4D_HOLLOW_REGION)
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    cfg = load_case_config(tmp_path)
+    geom, _, plan, _, _ = derive(cfg)
+
+    assert plan.exit_level == 4                       # nothing changes at the exit
+    assert _cells_at_the_finest_level(plan, geom) == R4D_MEASURED_HOLLOW_CELLS
+
+    # The same cone solid would hold more than twice as many.
+    solid = {**R4D_HOLLOW_REGION, "inner_radius1_m": 0.0, "inner_radius2_m": 0.0}
+    data["mesh"]["refinement_regions"][-1] = solid
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    cfg = load_case_config(tmp_path)
+    geom, _, plan, _, _ = derive(cfg)
+    assert _cells_at_the_finest_level(plan, geom) > 2 * R4D_MEASURED_HOLLOW_CELLS
 
 
 def test_r4d_background_is_cubic_and_whole(r4d):
@@ -122,9 +267,15 @@ def test_the_exit_takes_the_level_of_the_region_covering_it(tmp_path):
     assert plan.exit_level == 3
 
 
+def _cone(name: str = "exitCore", level: int = 3, **changes) -> dict:
+    """The minimal case's own cone, 0.4 m widening to 0.6 m in a metre."""
+    return {"name": name, "level": level, "x_max_m": 1.0, "radius1_m": 0.4,
+            "radius2_m": 0.6, **changes}
+
+
 def test_a_region_clear_of_the_exit_does_not_set_its_level(tmp_path):
     regions = [
-        {"name": "exitCore", "level": 3, "x_max_m": 1.0, "radius_m": 0.5},
+        _cone(),
         {"name": "front", "level": 4, "shape": "box", "x_min_m": 3.0,
          "x_max_m": 3.9, "y_min_m": -1.0, "y_max_m": 1.0, "z_min_m": -0.5,
          "z_max_m": 0.5},
@@ -138,37 +289,58 @@ def test_a_region_covering_only_part_of_the_exit_is_rejected(tmp_path):
     """The nozzle would be meshed at two cell sizes: the staircase would not be
     the one predicted, and 'the exit cell' would be right for only part of the
     inlet."""
-    regions = [
-        {"name": "exitCore", "level": 3, "x_max_m": 1.0, "radius_m": 0.5},
-        {"name": "tight", "level": 4, "x_max_m": 1.0, "radius_m": 0.1},
-    ]
+    regions = [_cone(), _cone("tight", 4, radius1_m=0.1, radius2_m=0.1)]
     with pytest.raises(ValueError, match=r"levels \[3, 4\], not at one"):
         derived(tmp_path, mesh={"refinement_regions": regions})
 
 
 def test_a_region_smaller_than_the_cells_around_it_is_never_seen(tmp_path):
     """snappyHexMesh refines by CELL CENTRE. The four 0.5 m cells round the axis
-    have their centres 0.354 m from it, so a 0.3 m cylinder contains none of
-    them and refines nothing -- whatever level it asks for. Only its buffer
-    layers arrive, and they split the exit."""
-    regions = [{"name": "small", "level": 3, "x_max_m": 1.0, "radius_m": 0.3}]
+    have their centres at x = 0.25 m, 0.354 m from it. A cone that has only
+    widened to 0.325 m by then contains none of them and refines nothing --
+    whatever level it asks for. Only its buffer layers arrive, and they split
+    the exit."""
+    regions = [_cone("small", radius1_m=0.3, radius2_m=0.4)]
     with pytest.raises(ValueError, match="never seen"):
         derived(tmp_path, mesh={"refinement_regions": regions})
 
 
-def test_a_region_just_reaching_the_surrounding_cell_centres_is_seen(tmp_path):
-    """0.36 m is past the 0.354 m of the cells round the axis; from there every
-    child over the disk has its centre inside too."""
-    regions = [{"name": "enough", "level": 3, "x_max_m": 1.0, "radius_m": 0.36}]
+def test_a_cone_is_judged_where_the_cell_centres_are_not_on_the_exit_plane(tmp_path):
+    """0.3 m on the exit plane is inside those centres' 0.354 m, and does not
+    matter: nothing has its centre there. By x = 0.25 m this one is 0.375 m."""
+    regions = [_cone("widening", radius1_m=0.3, radius2_m=0.6)]
     _, _, _, plan, _, _ = derived(tmp_path, mesh={"refinement_regions": regions})
     assert plan.exit_level == 3
+
+
+def test_a_cone_that_narrows_too_soon_is_never_seen_however_wide_it_starts(tmp_path):
+    """The converse: 0.45 m on the exit plane, 0.35 m by x = 0.25 m."""
+    regions = [_cone("narrowing", radius1_m=0.45, radius2_m=0.05)]
+    with pytest.raises(ValueError, match="never seen"):
+        derived(tmp_path, mesh={"refinement_regions": regions})
+
+
+def test_a_cylinder_just_reaching_the_surrounding_cell_centres_is_seen(tmp_path):
+    """Equal radii. 0.36 m is past the 0.354 m of the cells round the axis; from
+    there every child over the disk has its centre inside too."""
+    regions = [_cone("enough", radius1_m=0.36, radius2_m=0.36)]
+    _, _, _, plan, _, _ = derived(tmp_path, mesh={"refinement_regions": regions})
+    assert plan.exit_level == 3
+
+
+def test_a_hollow_cone_over_the_exit_leaves_it_unrefined(tmp_path):
+    """Its hole takes in the whole disk, so nothing over the disk is inside it.
+    That leaves the exit at the background level with a level-3 region wrapped
+    round it, which the plan refuses."""
+    regions = [_cone("shell", inner_radius1_m=0.38, inner_radius2_m=0.38)]
+    with pytest.raises(ValueError, match="buffer layers of region 'shell'"):
+        derived(tmp_path, mesh={"refinement_regions": regions})
 
 
 def test_a_region_starting_past_the_first_cell_centres_does_not_refine_the_exit(
         tmp_path):
     """The first layer of 0.5 m cells has its centres at x = 0.25 m."""
-    regions = [{"name": "late", "level": 3, "x_min_m": 0.3, "x_max_m": 1.0,
-                "radius_m": 0.5}]
+    regions = [_cone("late", x_min_m=0.3)]
     with pytest.raises(ValueError, match="buffer layers of region 'late'"):
         derived(tmp_path, mesh={"refinement_regions": regions})
 
@@ -194,9 +366,7 @@ def test_the_exit_plane_cells_are_those_snappy_would_leave(tmp_path):
 
 
 def test_a_region_outside_the_domain_is_rejected(tmp_path):
-    regions = [{"name": "exitCore", "level": 3, "x_max_m": 1.0, "radius_m": 0.5},
-               {"name": "lost", "level": 2, "x_min_m": 7.0, "x_max_m": 8.0,
-                "radius_m": 0.5}]
+    regions = [_cone(), _cone("lost", 2, x_min_m=7.0, x_max_m=8.0)]
     with pytest.raises(ValueError, match="outside the domain"):
         derived(tmp_path, mesh={"refinement_regions": regions})
 
@@ -244,10 +414,8 @@ def test_the_staircase_error_stays_inside_an_envelope_that_shrinks(tmp_path):
     this 0.4 m exit it is -0.5% at 62.5 mm, -3.6% at half that and +1.8% at a
     quarter. What falls is the bound, in proportion to cell over radius."""
     def error(level: int) -> float:
-        regions = [{"name": "exitCore", "level": level, "x_max_m": 1.0,
-                    "radius_m": 0.6}]
         *_, nozzle, _ = derived(tmp_path / str(level),
-                                mesh={"refinement_regions": regions})
+                                mesh={"refinement_regions": [_cone(level=level)]})
         return nozzle.area_error
 
     errors = {level: error(level) for level in (3, 4, 5)}
@@ -290,10 +458,24 @@ def test_with_nothing_to_refine_the_estimate_is_the_background(tmp_path):
 
 
 def test_a_region_adds_its_volume_at_its_level(tmp_path):
-    """A lone cylinder of r = 0.5 m, 1 m long, at level 3 (62.5 mm)."""
+    """A lone cone, 0.4 m widening to 0.6 m in 1 m, at level 3 (62.5 mm): the
+    volume of a frustum, pi L (r1^2 + r1 r2 + r2^2) / 3."""
     _, _, _, plan, _, _ = derived(tmp_path, plate=None)
-    expected = math.pi * 0.5 ** 2 * 1.0 / 0.0625 ** 3
-    assert plan.cells_by_level[3] == pytest.approx(expected, rel=0.03)
+    volume = math.pi * 1.0 * (0.4 ** 2 + 0.4 * 0.6 + 0.6 ** 2) / 3.0
+    assert plan.cells_by_level[3] == pytest.approx(volume / 0.0625 ** 3, rel=0.03)
+
+
+def test_a_cone_costs_less_than_the_cylinder_that_reaches_as_far(tmp_path):
+    """Why the regions are cones. Both are 0.6 m in radius where they end; the
+    cylinder is that wide all the way back to the exit, where the plume is not."""
+    def level_3_cells(directory, **radii) -> float:
+        _, _, _, plan, _, _ = derived(
+            directory, plate=None, mesh={"refinement_regions": [_cone(**radii)]})
+        return plan.cells_by_level[3]
+
+    cone = level_3_cells(tmp_path / "cone")
+    cylinder = level_3_cells(tmp_path / "cylinder", radius1_m=0.6)
+    assert cone / cylinder == pytest.approx(0.76 / 1.08, rel=0.03)
 
 
 def test_buffer_layers_surround_a_region_at_each_coarser_level(tmp_path):
@@ -474,8 +656,18 @@ def test_snappy_dict_carves_the_whole_plate_under_symmetry(tmp_path):
 def test_snappy_dict_holds_each_region_at_its_level(tmp_path):
     cfg, geom, _, plan, _, _ = derived(tmp_path)
     text = mesh.render_snappy_hex_mesh_dict(cfg, geom, plan)
-    assert "type    searchableCylinder;" in text
-    assert "point1  (0 0 0);" in text and "point2  (1 0 0);" in text
+    geometry = text.split("castellatedMeshControls")[0]
+    entry = geometry.split("    exitCore\n")[1].split("    }")[0]
+    assert [line.strip() for line in entry.strip("{} \n").splitlines()] == [
+        "type          searchableCone;",
+        "point1        (0 0 0);",
+        "radius1       0.4;",
+        "innerRadius1  0;",
+        "point2        (1 0 0);",
+        "radius2       0.6;",
+        "innerRadius2  0;",
+    ]
+    assert "searchableCylinder" not in text
     regions = text.split("refinementRegions")[1].split("locationInMesh")[0]
     assert "exitCore" in regions and "mode    inside;" in regions
     assert "levels  ((1e15 3));" in regions
@@ -533,14 +725,101 @@ def test_with_nothing_to_carve_a_stale_snappy_dict_is_removed(tmp_path):
     assert not (tmp_path / "system" / "snappyHexMeshDict").exists()
 
 
+# --------------------------------------------------------------------------- #
+# the cone itself
+# --------------------------------------------------------------------------- #
+
+def _region(**changes) -> mesh.Region:
+    """0.4 m at x = 0 widening to 0.6 m at x = 1: 0.5 m at mid-length."""
+    params = dict(name="r", shape="cone", level=2, x_min_m=0.0, x_max_m=1.0,
+                  radius1_m=0.4, radius2_m=0.6)
+    params.update(changes)
+    return mesh.Region(**params)
+
+
+def test_a_cone_s_radius_is_linear_between_its_ends():
+    outer, inner = _region().radii_at([0.0, 0.25, 0.5, 1.0])
+    assert outer == pytest.approx([0.4, 0.45, 0.5, 0.6])
+    assert inner == pytest.approx([0.0, 0.0, 0.0, 0.0])
+    # Held at the end values beyond the caps, which only a grown volume reaches.
+    assert _region().radii_at([-1.0, 2.0])[0] == pytest.approx([0.4, 0.6])
+
+
+def test_a_cone_is_tested_as_snappyhexmesh_tests_it():
+    """searchableCone::getVolumeType: between the cap planes, and no farther
+    from the axis than the radius at that station -- every bound included."""
+    region = _region()
+    inside = [(0.0, 0.4, 0.0), (1.0, 0.0, 0.6), (0.5, 0.5, 0.0),
+              (0.5, 0.3, 0.3), (0.25, 0.45, 0.0), (0.5, 0.0, 0.0)]
+    outside = [(-1e-9, 0.0, 0.0), (1.0 + 1e-9, 0.0, 0.0), (0.5, 0.5 + 1e-9, 0.0),
+               (0.0, 0.45, 0.0), (0.25, 0.0, 0.4501), (0.5, 0.4, 0.4)]
+    for point in inside:
+        assert bool(region.contains(*point)), point
+    for point in outside:
+        assert not bool(region.contains(*point)), point
+
+
+def test_a_cone_that_narrows_downstream_is_tested_the_same_way():
+    region = _region(radius1_m=0.6, radius2_m=0.0)
+    assert bool(region.contains(0.0, 0.6, 0.0))
+    assert bool(region.contains(0.5, 0.29, 0.0))
+    assert not bool(region.contains(0.5, 0.31, 0.0))
+    assert bool(region.contains(1.0, 0.0, 0.0))          # the apex itself
+    assert not bool(region.contains(1.0, 0.001, 0.0))
+
+
+def test_a_hollow_cone_leaves_out_its_core():
+    region = _region(inner_radius1_m=0.1, inner_radius2_m=0.3)   # 0.2 at mid-length
+    assert not bool(region.contains(0.5, 0.0, 0.0))
+    assert not bool(region.contains(0.5, 0.19, 0.0))
+    assert bool(region.contains(0.5, 0.2, 0.0))
+    assert bool(region.contains(0.5, 0.5, 0.0))
+    assert not bool(region.contains(0.5, 0.51, 0.0))
+
+
 def test_region_membership_grows_with_the_margin():
-    region = mesh.Region(name="r", shape="cylinder", level=2, x_min_m=0.0,
-                         x_max_m=1.0, radius_m=0.5)
+    region = _region()
     assert bool(region.contains(0.5, 0.3, 0.3))
     assert not bool(region.contains(0.5, 0.4, 0.4))
     assert bool(region.contains(0.5, 0.4, 0.4, grow_m=0.1))
     assert not bool(region.contains(1.05, 0.0, 0.0))
     assert bool(region.contains(1.05, 0.0, 0.0, grow_m=0.1))
+    # A margin eats into the hole of a hollow one as it adds to the outside.
+    hollow = _region(inner_radius1_m=0.1, inner_radius2_m=0.3)
+    assert not bool(hollow.contains(0.5, 0.15, 0.0))
+    assert bool(hollow.contains(0.5, 0.15, 0.0, grow_m=0.1))
+
+
+def test_a_cone_s_bounding_box_takes_its_wider_end():
+    assert _region().bounds() == (0.0, 1.0, -0.6, 0.6, -0.6, 0.6)
+    assert _region(radius1_m=0.9).bounds(0.1) == pytest.approx(
+        (-0.1, 1.1, -1.0, 1.0, -1.0, 1.0))
+
+
+def test_a_cone_region_becomes_a_searchable_cone():
+    lines = _region(x_min_m=2.0, x_max_m=5.0, inner_radius2_m=0.25).searchable(
+    ).geometry_lines()
+    assert [line.strip() for line in lines] == [
+        "type          searchableCone;",
+        "point1        (2 0 0);",
+        "radius1       0.4;",
+        "innerRadius1  0;",
+        "point2        (5 0 0);",
+        "radius2       0.6;",
+        "innerRadius2  0.25;",
+    ]
+
+
+def test_a_cone_describes_itself_with_the_angle_its_radii_imply():
+    """Two radii are the input; the half-angle is derived, and printed."""
+    assert _region().half_angle_deg == pytest.approx(11.31, abs=0.005)
+    assert _region().describe() == (
+        "x 0 .. 1 m, r <= 0.4 -> 0.6 m (half-angle 11.3 deg)")
+    assert _region(radius2_m=0.4).describe() == (
+        "x 0 .. 1 m, r <= 0.4 -> 0.4 m (a cylinder)")
+    assert _region(inner_radius1_m=0.1, inner_radius2_m=0.3).describe() == (
+        "x 0 .. 1 m, r 0.1 .. 0.4 -> 0.3 .. 0.6 m (half-angle 11.3 deg)")
+    assert _region(radius1_m=0.6, radius2_m=0.4).half_angle_deg < 0.0
 
 
 def test_a_box_region_becomes_a_searchable_box():
