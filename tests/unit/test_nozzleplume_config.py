@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from _nozzleplume import MINIMAL_CASE, R4D_CASE, load_case, write_case
+from _nozzleplume import MINIMAL_CASE, R4D_CASE, REPO, load_case, write_case
 from plumetools.nozzleplume import MODEL
 from plumetools.nozzleplume.config import ConfigError, load_case_config
 
@@ -60,6 +60,137 @@ def test_the_shipped_r4d_case_labels_what_was_not_given():
                  "internal_degrees_of_freedom: 0"):
         tagged = [row for row in text.splitlines() if line in row]
         assert tagged and "[ASSUMPTION]" in tagged[0], line
+
+
+def test_the_shipped_viz_spec_loads_and_draws_the_plume_and_its_statistics():
+    """./Allpost --viz hands this to plumetools/viz; it has to be a valid spec.
+    The parcel count is in it because, for this case, it is half the story."""
+    from plumetools.viz.spec import load_spec
+
+    spec = load_spec(R4D_CASE / "viz.yaml")
+    assert [plane.name for plane in spec.planes] == ["xz", "xy", "plate"]
+    assert {"rhoN", "dsmcRhoN", "U", "Ttra"} <= {f.name for f in spec.fields}
+    assert not spec.video.enabled        # one time, three planes: not a film
+
+
+def test_the_shipped_viz_cross_section_sits_just_upstream_of_the_plate():
+    """It is in metres, so it does not follow plate.standoff_m by itself: move
+    the plate in case.yaml and this is what says the picture did not move."""
+    from plumetools.viz.spec import load_spec
+
+    standoff = load_case_config(R4D_CASE).plate.standoff_m
+    plane = load_spec(R4D_CASE / "viz.yaml").planes[-1]
+    x, y, z = plane.origin_m(None)
+    assert standoff - 1.0 < x < standoff
+    assert (y, z) == (0.0, 0.0)
+
+
+def test_the_shipped_viz_draws_the_plate_loads_on_its_loaded_face():
+    """A surface field is drawn from its plane's camera, and the view direction
+    is the plane's normal. From a centre plane the plate is edge-on -- a strip a
+    few pixels wide -- and from [-1, 0, 0] it is the lee face. Only +x shows the
+    face the plume hits."""
+    from plumetools.viz.spec import load_spec
+
+    spec = load_spec(R4D_CASE / "viz.yaml")
+    planes = {plane.name: plane for plane in spec.planes}
+    assert tuple(planes["plate"].normal) == (1.0, 0.0, 0.0)
+    for name in ("fD", "q"):
+        field = next(f for f in spec.fields if f.name == name)
+        assert tuple(field.planes) == ("plate",)
+
+
+#: The flow fields ./Allviz draws: both densities, the parcel count, the speed
+#: and the temperature.
+FLOW_FIELDS = ("rhoN", "rhoM", "dsmcRhoN", "U", "Ttra")
+
+
+def test_the_shipped_viz_spec_draws_the_five_flow_fields_on_every_plane():
+    """rhoM is the one the inherited default switches off, so it is the one that
+    goes missing if this spec's list is ever trimmed back to the default's."""
+    from plumetools.viz.spec import load_spec
+
+    fields = {f.name: f for f in load_spec(R4D_CASE / "viz.yaml").fields}
+    for name in FLOW_FIELDS:
+        assert name in fields, name
+        assert fields[name].enabled, name
+        assert fields[name].planes is None, name     # None: all of them
+
+
+def test_the_shipped_viz_spec_draws_the_averaged_samples_at_the_latest_time():
+    """What cases/cai2012-health draws from, too: the fieldAverage means. A
+    single step's field is that step's parcels, and looks entirely plausible."""
+    from plumetools.viz.spec import load_spec
+
+    sampling = load_spec(R4D_CASE / "viz.yaml").sampling
+    assert sampling.prefer_mean
+    assert sampling.time == "latest"
+
+
+def test_the_shipped_viz_densities_are_drawn_on_logarithmic_scales():
+    from plumetools.viz.spec import load_spec
+
+    fields = {f.name: f for f in load_spec(R4D_CASE / "viz.yaml").fields}
+    for name in ("rhoN", "rhoM", "dsmcRhoN"):
+        assert fields[name].log, name
+        assert fields[name].range is None, name      # follows the exit density
+
+
+def test_the_shipped_viz_linear_scales_top_out_just_above_what_the_gas_can_reach():
+    """They are pinned numbers in viz.yaml and do not follow case.yaml. Change
+    the exit state and this says the colour bars were left behind -- too low and
+    the plume saturates, too high and it is drawn in a sliver of the scale."""
+    from plumetools.nozzleplume import exitstate
+    from plumetools.viz.spec import load_spec
+
+    state = exitstate.from_config(load_case_config(R4D_CASE))
+    gamma = state.species.gamma
+    cp = gamma / (gamma - 1.0) * state.species.gas_constant_j_per_kg_k
+    stagnation_K = state.temperature_K + state.speed_m_per_s ** 2 / (2.0 * cp)
+    limiting_speed = (2.0 * cp * stagnation_K) ** 0.5
+    assert stagnation_K == pytest.approx(5502.0, abs=1.0)
+    assert limiting_speed == pytest.approx(3342.0, abs=1.0)
+
+    fields = {f.name: f for f in load_spec(R4D_CASE / "viz.yaml").fields}
+    for name, reach in (("U", limiting_speed), ("Ttra", stagnation_K)):
+        low, high = fields[name].range
+        assert low == 0.0, name
+        assert reach < high < 1.25 * reach, name
+
+
+def test_the_shipped_allviz_renders_this_spec_through_pvpython_itself():
+    """The same launch as ./Allpost --viz and as the studies' AllpostCases."""
+    script = (R4D_CASE / "Allviz").read_text(encoding="utf-8")
+    assert script.startswith("#!/bin/bash\n")
+    assert '"$PVPYTHON" --force-offscreen-rendering "$RENDERER" . --spec "$SPEC"' in script
+    assert "${PVPYTHON_PATH:-pvpython}" in script
+    assert "SPEC=viz.yaml" in script
+    assert "vifpara" not in script.lower()
+
+
+def test_the_shipped_allviz_hands_every_other_option_to_the_renderer():
+    """--field, --plane, --time, --output and the rest are the renderer's own.
+    Parsing them here would be a second list to keep in step with the first."""
+    script = (R4D_CASE / "Allviz").read_text(encoding="utf-8")
+    options = script.split("while [ $# -gt 0 ]; do")[1].split("done")[0]
+    assert "--spec)" in options and "-h|--help)" in options
+    assert '*)          PASS+=("$1") ;;' in options
+    assert "unknown option" not in options
+    assert '"${PASS[@]+"${PASS[@]}"}"' in script
+
+
+def test_the_shipped_allviz_is_checked_out_with_unix_line_endings():
+    """`#!/bin/bash\\r` is "bad interpreter" on Linux; .gitattributes pins it."""
+    assert b"\r" not in (R4D_CASE / "Allviz").read_bytes()
+    rules = (REPO / ".gitattributes").read_text(encoding="utf-8").split("\n")
+    assert any(rule.split() == ["Allviz", "text", "eol=lf"] for rule in rules)
+
+
+def test_the_shipped_allpost_still_offers_the_imagery_as_an_option():
+    """./Allviz is beside ./Allpost --viz, not instead of it."""
+    script = (R4D_CASE / "Allpost").read_text(encoding="utf-8")
+    assert "--viz)      VIZ=1 ;;" in script
+    assert '"$PVPYTHON" --force-offscreen-rendering "$RENDERER" .' in script
 
 
 # --------------------------------------------------------------------------- #

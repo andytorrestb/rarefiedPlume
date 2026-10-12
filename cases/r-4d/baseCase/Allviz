@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# Draw this case's flow field: 2-D slices through the plume, as ./viz.yaml lists
+# them. Needs ParaView's pvpython and a finished (or part-finished) run; changes
+# nothing in the case but results/viz/.
+#
+#   ./Allviz                     every field on every plane, at the latest time
+#   ./Allviz --field Ttra        one field; repeatable
+#   ./Allviz --plane xz          one plane; repeatable
+#   ./Allviz --time 0.0517723    a specific time directory
+#   ./Allviz --time all          every written time, as numbered frames
+#   ./Allviz --dry-run           name the images that would be drawn; draw none
+#   ./Allviz --list              the arrays the case has at that time; draw none
+#   ./Allviz --output DIR        write somewhere other than results/viz/
+#   ./Allviz --spec FILE         a sampling configuration other than ./viz.yaml
+#   ./Allviz --help
+#
+# A relative DIR or FILE is relative to this directory, wherever it is run from.
+#
+# ./viz.yaml draws five flow fields on three planes -- the two centre planes
+# through the plume axis, and a cross-section just ahead of the plate:
+#
+#   rhoN       number density [1/m^3]              rhoNMean_<plane>.png
+#   rhoM       mass density [kg/m^3]               rhoMMean_<plane>.png
+#   dsmcRhoN   simulated parcels per cell          dsmcRhoNMean_<plane>.png
+#   U          speed [m/s]                         U_<plane>.png
+#   Ttra       translational temperature [K]       Ttra_<plane>.png
+#
+# and the two loads on the plate itself, fDMean_plate.png and qMean_plate.png.
+# results/viz/manifest.yaml records what was drawn, from which time, at which
+# colour range. To draw something else, or somewhere else, edit ./viz.yaml.
+#
+# This is step 4 of ./Allpost --viz on its own, for when the plate loads and the
+# centreline are already computed and only a picture is wanted. --spec is this
+# script's; every other option is the renderer's and is passed through as given
+# (--preset, --field-type, --instantaneous and -v among them). See
+# docs/viz-slices.md.
+#
+# The TIME-AVERAGED fields are what gets drawn (rhoNMean, momentumMean, ...).
+# They exist only at times past the start of sampling, which ./Allmesh --describe
+# reports ("sampling starts at"): an earlier time has none and is drawn from a
+# single step's samples -- a picture of shot noise, and the renderer says so
+# when it happens.
+#
+# PVPYTHON_PATH names a pvpython that is not on PATH.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+SPEC=""
+PASS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --spec)     shift; SPEC=${1:?"--spec needs a file"} ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          PASS+=("$1") ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allviz: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a nozzle-plume case?"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+if [ -z "$SPEC" ]; then
+    [ -f viz.yaml ] || die "no viz.yaml here, and no --spec given"
+    SPEC=viz.yaml
+fi
+[ -f "$SPEC" ] || die "no sampling configuration '$SPEC'"
+
+PVPYTHON=${PVPYTHON_PATH:-pvpython}
+have "$PVPYTHON" || die "'$PVPYTHON' is not an executable. The imagery needs
+       ParaView's own interpreter: put pvpython on PATH, or point PVPYTHON_PATH
+       at one. See docs/environment.md."
+
+# Wherever the plumetools this case runs against lives -- the case may have been
+# copied out of the repository, so a relative path would not do.
+RENDERER=$($PYTHON -c "import os, plumetools
+print(os.path.join(os.path.dirname(plumetools.__file__), 'viz', 'render_slices.py'))") \
+    || die "plumetools is not importable"
+
+echo "==> $PVPYTHON render_slices.py . --spec $SPEC ${PASS[*]+${PASS[*]}}"
+"$PVPYTHON" --force-offscreen-rendering "$RENDERER" . --spec "$SPEC" \
+    "${PASS[@]+"${PASS[@]}"}" \
+    || die "rendering failed (see above)"
