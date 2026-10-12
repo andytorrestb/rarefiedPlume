@@ -1,0 +1,100 @@
+# cases/r-4d/baseCase/viz.yaml -- the flow-field imagery of this case: what
+# ./Allviz and ./Allpost --viz draw.
+#
+#   ./Allviz                 the imagery alone; see ./Allviz --help
+#   ./Allpost --viz          the plate loads and the centreline, then the imagery
+#
+# or directly:
+#
+#   pvpython --force-offscreen-rendering \
+#       ../../../plumetools/viz/render_slices.py . --spec viz.yaml
+#
+# `extends: default` inherits plumetools/viz/slices.yaml: the image size, the
+# colour preset, the output layout under results/viz/, and how U and Ttra are
+# derived from the moments dsmcFoam writes. The planes and the fields are this
+# case's own -- a list REPLACES the inherited one wholesale, so what is written
+# here is exactly what gets drawn. See docs/viz-slices.md.
+
+version: 1
+extends: default
+
+# One image per field per plane, at one time. The inherited default would also
+# stitch each field's images into a video -- which, with one time and three
+# different planes, is three unrelated pictures in a row.
+video:
+  enabled: false
+
+planes:
+  # The two centre planes through the plume axis: nozzle at the left, the plate
+  # at the right. For this axisymmetric jet the two differ only in how much of
+  # the plate they cut -- 11.88 m of it in xz, 34.14 m in xy.
+  - name: xz
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+  - name: xy
+    normal: [0, 0, -1]
+    camera_up: [0, 1, 0]
+    origin: [0, 0, 0]
+
+  # The plate AS THE PLUME SEES IT: looking downstream from the nozzle side, at
+  # a cross-section 0.2 m in front of the plate's face. The view direction is
+  # the plane's normal, so [1, 0, 0] looks along +x -- which is also what puts
+  # the plate's LOADED face, not its lee face, in front of the camera for the
+  # two surface fields below. Y runs right to left in this view.
+  #
+  # IN METRES, so it does not follow plate.standoff_m in case.yaml: move it
+  # with the plate.
+  - name: plate
+    normal: [1, 0, 0]
+    camera_up: [0, 0, 1]
+    origin: [19.8, 0, 0]
+
+# The five flow fields, each on all three planes. These are the fields
+# cases/cai2012-health/viz.yaml draws -- same renderer, same time-averaged
+# samples (rhoNMean, momentumMean, ... : sampling.prefer_mean is inherited ON) --
+# plus the mass density, which that study leaves out.
+fields:
+  - name: rhoN             # number density [1/m^3]: the plume, the shock layer,
+    log: true              # the spill round the plate's edges
+    log_decades: 8
+
+  - name: rhoM             # mass density [kg/m^3]. One species, so this is
+    log: true              # exactly m * rhoN: the picture is rhoN's, read in
+    log_decades: 8         # kg/m^3 -- 4.442e-4 at the exit plane.
+
+  - name: dsmcRhoN         # PARCELS PER CELL -- dimensionless, not a density.
+    log: true              # For this case it is half the story: one particle
+    log_decades: 6         # weight serves the whole domain, so this is the map
+                           # of where the other pictures are shot noise. Below
+                           # ~5 a cell's fields are not to be read.
+
+  # The two linear scales are PINNED, to what the gas can physically reach.
+  # Left to follow the data they follow the noise instead: a cell outside the
+  # plume that saw a handful of parcels reports 6600 m/s and 8700 K, and the
+  # whole plume is then drawn in the bottom half of the colour bar. Pinned, the
+  # three planes also share one scale and can be compared.
+  #
+  # Both limits come from the exit state in case.yaml (T = 498.04 K,
+  # U = 3187.19 m/s, monatomic) and do NOT follow it: move them with it.
+  #
+  #   stagnation temperature   T0 = T + U^2 / (2 cp)   = 5502 K
+  #   limiting speed           sqrt(2 cp T0)           = 3342 m/s
+  #
+  # Anything drawn at the top of either bar is above what the flow can do, and
+  # is noise.
+  #
+  # 6500 and not 6000 for the legend's sake: ParaView picks the tick interval,
+  # and at 6000 it picks 500 K, thirteen labels printed over one another.
+  - name: U                # speed [m/s]; derived: |momentum| / rhoM
+    range: [0, 3500]
+  - name: Ttra             # translational temperature [K]; derived
+    range: [0, 6500]
+
+  # The loads, on the plate itself. Surface fields are drawn on the wall patch
+  # rather than on a cutting plane, from the named plane's camera -- and from
+  # either centre plane the plate is edge-on, a strip a few pixels wide.
+  - name: fD               # force density [Pa]; its magnitude is, to within the
+    planes: [plate]        # shear, the surface pressure
+  - name: q                # heat flux into the plate [W/m^2]
+    planes: [plate]
