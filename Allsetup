@@ -2,16 +2,18 @@
 #
 # Set this repository up on a new machine, and verify the setup it produced.
 #
-#   ./Allsetup                  install the Python package, build the OpenFOAM library
+#   ./Allsetup                  install the Python package with every pip extra,
+#                               build the OpenFOAM library
 #   ./Allsetup --python-only    skip everything that needs OpenFOAM
 #   ./Allsetup --check          verify only; install nothing, build nothing
-#   ./Allsetup --extras a,b     pip extras to install (default: test)
+#   ./Allsetup --extras a,b     install only these pip extras
+#                               (default: all of them -- test,plots,cases)
 #   ./Allsetup --help
 #
 # THREE things have to be in place before a markelov1999 or cai2012 case will
 # run, and pip installs only the first:
 #
-#   1. the plumetools package         pip install -e ".[test]"
+#   1. the plumetools package         pip install -e ".[test,plots,cases]"
 #   2. standard OpenFOAM on PATH      dsmcFoam, dsmcInitialise, blockMesh, ...
 #   3. libplumeDsmcBoundaryModels.so  applications/dsmcBoundaryModels/Allwmake
 #
@@ -34,7 +36,10 @@ SELF=${0##*/}
 cd "${0%/*}" || exit 1
 ROOT=$PWD
 
-EXTRAS="test"
+# Every extra pyproject.toml declares, so that one run leaves nothing to come
+# back for. Slice imagery has no extra: it needs ParaView, which pip cannot
+# install, and is only reported on below.
+EXTRAS="test,plots,cases"
 PYTHON_ONLY=0
 CHECK_ONLY=0
 
@@ -67,6 +72,16 @@ lib_path() {
     return 1
 }
 
+# The modules an extra has to make importable. Checked by name so that --check
+# says which extra is missing, rather than leaving it to the script that needs it.
+extra_modules() {
+    case "$1" in
+        test)  echo "pytest" ;;
+        plots) echo "matplotlib pandas" ;;
+        cases) echo "casefoam" ;;
+    esac
+}
+
 echo "### rarefiedPlume setup"
 echo "    root=$ROOT  check-only=$CHECK_ONLY  python-only=$PYTHON_ONLY"
 
@@ -95,8 +110,8 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
     if ! $PYTHON -m pip install -e ".[$EXTRAS]"; then
         echo "" >&2
         echo "$SELF: pip install failed. If it was the 'cases' extra, CaseFoam pulls" >&2
-        echo "       in PyFoam and is the usual culprit; --extras test gets you a" >&2
-        echo "       working library and test suite without it." >&2
+        echo "       in PyFoam and is the usual culprit; --extras test,plots gets you" >&2
+        echo "       a working library, test suite and plots without it." >&2
         exit 1
     fi
 fi
@@ -106,6 +121,27 @@ if $PYTHON -c "import plumetools" 2>/dev/null; then
 else
     bad "plumetools is not importable -- run without --check to install it"
 fi
+
+for extra in ${EXTRAS//,/ }; do
+    for module in $(extra_modules "$extra"); do
+        if $PYTHON -c "import $module" 2>/dev/null; then
+            ok "$module ('$extra' extra)"
+        else
+            bad "$module is not importable -- the '$extra' extra is not installed"
+        fi
+    done
+done
+
+# --------------------------------------------------------------------------- #
+# slice imagery -- nothing pip installs, so nothing here is installed either
+# --------------------------------------------------------------------------- #
+
+step "Slice imagery (plumetools/viz)"
+
+PVPYTHON=${PVPYTHON_PATH:-pvpython}
+if have "$PVPYTHON"; then ok "$PVPYTHON"
+else skip "$PVPYTHON absent (no slice PNGs; install ParaView -- docs/environment.md)"; fi
+have ffmpeg && ok "ffmpeg" || skip "ffmpeg absent (frames are still written, no videos)"
 
 # --------------------------------------------------------------------------- #
 # 2. OpenFOAM

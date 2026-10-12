@@ -50,9 +50,23 @@ Three things have to be in place, and `pip` does only the first:
 
 | | | |
 |---|---|---|
-| 1 | the `plumetools` package | `pip install -e ".[test]"` |
+| 1 | the `plumetools` package | `pip install -e ".[test,plots,cases]"` |
 | 2 | standard OpenFOAM on PATH | `dsmcFoam`, `dsmcInitialise`, `blockMesh`, … |
 | 3 | `libplumeDsmcBoundaryModels.so` | `applications/dsmcBoundaryModels/Allwmake` |
+
+Step 1 installs **every** extra `pyproject.toml` declares, so one run leaves
+nothing to come back for, and then checks that each one imports:
+
+| extra | brings in | needed by |
+|---|---|---|
+| `test` | pytest | the test suite |
+| `plots` | matplotlib, pandas | the figures post-processing writes; without it the tables are still written |
+| `cases` | CaseFoam (and with it PyFoam) | `generate_cases.py` in `cases/markelov1999` and `cases/cai2012-health` |
+
+`./Allsetup --extras test,plots` narrows that — the way out if CaseFoam will not
+install. Slice imagery has no extra, because it needs ParaView and nothing pip
+can install; `./Allsetup` only reports whether `pvpython` and `ffmpeg` are there
+([below](#slice-imagery--plumetoolsviz-and-pvpython)).
 
 **Step 3 is the one that gets missed.** Nothing pip does touches it, and a case
 that needs it fails only at `./Allrun` — several steps into a study, with a

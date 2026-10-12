@@ -80,9 +80,14 @@ DECOMPOSITION_METHODS = ("scotch", "simple")
 
 #: Shapes a refinement region may take.
 #:
-#: ``cylinder``  coaxial with the plume, ``x_min_m .. x_max_m`` at ``radius_m``.
-#: ``box``       axis-aligned, all six bounds given.
-REGION_SHAPES = ("cylinder", "box")
+#: ``cone``  coaxial with the plume: ``radius1_m`` at ``x_min_m``, ``radius2_m``
+#:           at ``x_max_m``, linear between. A ``searchableCone``.
+#: ``box``   axis-aligned, all six bounds given.
+REGION_SHAPES = ("cone", "box")
+
+#: Keys that belong to one shape and are an error on the other.
+_CONE_KEYS = ("radius1_m", "radius2_m", "inner_radius1_m", "inner_radius2_m")
+_BOX_KEYS = ("y_min_m", "y_max_m", "z_min_m", "z_max_m")
 
 #: Patch roles and their default names.
 DEFAULT_PATCH_NAMES = {
@@ -233,18 +238,33 @@ class RegionConfig:
         level: octree level; the cell size is
             ``mesh.background_cell_size_m / 2**level``.
         x_max_m: downstream end [m].
-        shape: ``cylinder`` (coaxial with the plume) or ``box``.
+        shape: ``cone`` (coaxial with the plume) or ``box``.
         x_min_m: upstream end [m]. Zero is the exit plane.
-        radius_m: cylinder radius [m].
+        radius1_m: cone radius at ``x_min_m`` [m].
+        radius2_m: cone radius at ``x_max_m`` [m].
+        inner_radius1_m, inner_radius2_m: inner radii at the two ends [m], for a
+            hollow cone. ``null`` -- the default -- is solid.
         y_min_m, y_max_m, z_min_m, z_max_m: box bounds [m].
+
+    A cone is written as a ``searchableCone`` with ``point1 = (x_min_m 0 0)``
+    and ``point2 = (x_max_m 0 0)``, so the ``1`` and ``2`` of the radii are the
+    ``1`` and ``2`` of that dictionary: upstream end, downstream end. The radius
+    is linear in ``x`` between them, which is the shape of a plume: one that
+    widens downstream follows it with a fraction of the cells a cylinder wide
+    enough for its far end would spend on its near one.
+
+    Equal radii are a cylinder, and that is the only way one is written.
     """
 
     name: str
     level: int
     x_max_m: float
-    shape: str = "cylinder"
+    shape: str = "cone"
     x_min_m: float = 0.0
-    radius_m: float | None = None
+    radius1_m: float | None = None
+    radius2_m: float | None = None
+    inner_radius1_m: float | None = None
+    inner_radius2_m: float | None = None
     y_min_m: float | None = None
     y_max_m: float | None = None
     z_min_m: float | None = None
@@ -479,6 +499,19 @@ def _build_mesh(data, where: str) -> MeshConfig:
         raise ConfigError(
             f"{where}: refinement_regions must be a list of mappings, got "
             f"{type(regions).__name__}")
+    for i, region in enumerate(regions):
+        # Named before the generic unknown-key error can be: a case.yaml from
+        # before the cones would otherwise be told only that 'radius_m' is not
+        # a key, and not what replaced it.
+        if isinstance(region, dict) and (
+                region.get("shape") == "cylinder"
+                or ("radius_m" in region and "shape" not in region)):
+            raise ConfigError(
+                f"{where}:refinement_regions[{i}]: this region is written as a "
+                f"cylinder (radius_m, or shape: cylinder). The axisymmetric "
+                f"region is a cone now: give radius1_m, its radius at x_min_m, "
+                f"and radius2_m, its radius at x_max_m. The same number for "
+                f"both is the cylinder this was.")
     built = tuple(_build(RegionConfig, region, f"{where}:refinement_regions[{i}]")
                   for i, region in enumerate(regions))
 
@@ -744,21 +777,40 @@ def validate(cfg: CaseConfig, path: Path | str = "case.yaml") -> None:
         if not float(region.x_max_m) > float(region.x_min_m):
             fail(f"{where}: x_max_m ({region.x_max_m}) must be greater than "
                  f"x_min_m ({region.x_min_m})")
-        box_keys = ("y_min_m", "y_max_m", "z_min_m", "z_max_m")
-        if region.shape == "cylinder":
-            if region.radius_m is None or not float(region.radius_m) > 0.0:
-                fail(f"{where}: a cylinder needs a positive radius_m")
-            stray = [k for k in box_keys if getattr(region, k) is not None]
+        if region.shape == "cone":
+            stray = [k for k in _BOX_KEYS if getattr(region, k) is not None]
             if stray:
                 fail(f"{where}: {stray} belong to shape 'box', and this is a "
-                     f"cylinder")
+                     f"cone")
+            missing = [k for k in ("radius1_m", "radius2_m")
+                       if getattr(region, k) is None]
+            if missing:
+                fail(f"{where}: a cone needs {missing} -- radius1_m is its "
+                     f"radius at x_min_m, radius2_m its radius at x_max_m. "
+                     f"Equal, they make a cylinder.")
+            thickness = 0.0
+            for end in ("1", "2"):
+                outer = float(getattr(region, f"radius{end}_m"))
+                inner = getattr(region, f"inner_radius{end}_m")
+                inner = 0.0 if inner is None else float(inner)
+                if not (math.isfinite(outer) and outer >= 0.0):
+                    fail(f"{where}: radius{end}_m is {outer}; a radius is a "
+                         f"number >= 0 (zero puts the cone's apex at that end)")
+                if not (math.isfinite(inner) and 0.0 <= inner <= outer):
+                    fail(f"{where}: inner_radius{end}_m is {inner}; it lies "
+                         f"between 0 (solid) and radius{end}_m ({outer})")
+                thickness = max(thickness, outer - inner)
+            if not thickness > 0.0:
+                fail(f"{where}: the cone encloses no volume: at neither end is "
+                     f"its radius greater than its inner radius")
         else:
-            missing = [k for k in box_keys if getattr(region, k) is None]
+            missing = [k for k in _BOX_KEYS if getattr(region, k) is None]
             if missing:
                 fail(f"{where}: a box needs {missing}")
-            if region.radius_m is not None:
-                fail(f"{where}: radius_m belongs to shape 'cylinder', and this "
-                     f"is a box")
+            stray = [k for k in _CONE_KEYS if getattr(region, k) is not None]
+            if stray:
+                fail(f"{where}: {stray} belong to shape 'cone', and this is a "
+                     f"box")
             for axis in ("y", "z"):
                 lo = getattr(region, f"{axis}_min_m")
                 hi = getattr(region, f"{axis}_max_m")

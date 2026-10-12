@@ -30,7 +30,8 @@ R4D_CASE = REPO / "cases" / "r-4d" / "baseCase"
 #: The smallest case.yaml this family's loader accepts, as a data structure.
 #:
 #: Round numbers, so an expected value can be worked out by hand: a 0.4 m exit,
-#: a 4 x 2 m plate 4 m downstream, a 6 x 6 x 4 m box of 0.5 m cells.
+#: a 4 x 2 m plate 4 m downstream, a 6 x 6 x 4 m box of 0.5 m cells, and one
+#: refinement cone over the exit that widens from 0.4 m to 0.6 m in its metre.
 MINIMAL_CASE = {
     "model": "nozzle_exit_plume",
     "meta": {"case_name": "test"},
@@ -56,7 +57,8 @@ MINIMAL_CASE = {
         "background_cell_size_m": 0.5,
         "plate_refinement_level": 2,
         "refinement_regions": [
-            {"name": "exitCore", "level": 3, "x_max_m": 1.0, "radius_m": 0.5},
+            {"name": "exitCore", "level": 3, "x_max_m": 1.0,
+             "radius1_m": 0.4, "radius2_m": 0.6},
         ],
     },
     "dsmc": {"n_equivalent_particles": 1.0e+17},

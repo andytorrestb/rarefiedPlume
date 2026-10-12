@@ -17,6 +17,7 @@ from plumetools.foamio.primitives import (
     BoxPatch,
     RefinementRegion,
     SearchableBox,
+    SearchableCone,
     SearchableCylinder,
     SearchableSphere,
     check_surfaces_are_resolvable,
@@ -440,6 +441,113 @@ def test_a_region_with_a_negative_level_or_a_degenerate_volume_is_rejected():
             level=-1, surface=SearchableBox(name="b"))])
     with pytest.raises(ValueError, match="degenerate"):
         render_refinement_regions_block([RefinementRegion(level=1, surface=flat)])
+
+
+# --------------------------------------------------------------------------- #
+# the cone
+# --------------------------------------------------------------------------- #
+#
+# Added for refinement regions that follow a plume. Nothing that was here before
+# it uses one, and the other primitives are as they were.
+
+def _cone(**changes) -> SearchableCone:
+    params = dict(name="plume", point1=(0.0, 0.0, 0.0), radius1=0.4,
+                  point2=(8.0, 0.0, 0.0), radius2=2.0)
+    params.update(changes)
+    return SearchableCone(**params)
+
+
+def test_cone_renders_in_openfoam_s_own_spelling():
+    """searchableCone reads point1/radius1/innerRadius1 and the same at 2."""
+    text = "\n".join(render_geometry_block([_cone(
+        inner_radius1=0.25, inner_radius2=1.0)]))
+    for line in ("type          searchableCone;", "point1        (0 0 0);",
+                 "radius1       0.4;", "innerRadius1  0.25;",
+                 "point2        (8 0 0);", "radius2       2;",
+                 "innerRadius2  1;"):
+        assert f"        {line}\n" in text + "\n", line
+    assert ".stl" not in text and "triSurfaceMesh" not in text
+
+
+def test_a_solid_cone_says_so_rather_than_leaving_it_to_a_default():
+    lines = _cone().geometry_lines()
+    assert "        innerRadius1  0;" in lines
+    assert "        innerRadius2  0;" in lines
+    assert len(lines) == 7
+
+
+def test_cone_end_caps_follow_the_points_they_belong_to():
+    """radius1 is at point1 and radius2 at point2, whichever way the axis runs."""
+    lines = _cone(point1=(3.0, 1.0, 0.0), radius1=0.5,
+                  point2=(1.0, 1.0, 0.0), radius2=0.9).geometry_lines()
+    assert lines.index("        point1        (3 1 0);") + 1 == lines.index(
+        "        radius1       0.5;")
+    assert lines.index("        point2        (1 1 0);") + 1 == lines.index(
+        "        radius2       0.9;")
+
+
+def test_cone_length_is_the_distance_between_caps():
+    assert _cone(point1=(1.0, 2.0, 2.0), point2=(4.0, 6.0, 2.0)).length_m() == (
+        pytest.approx(5.0, rel=1e-12))
+
+
+def test_cone_feature_sizes():
+    """The widest thing about it is the diameter of its big end, or its length;
+    the thinnest is its wall -- the radius itself when it is solid."""
+    solid = _cone()
+    assert solid.max_feature_size_m() == pytest.approx(8.0)
+    assert solid.min_feature_size_m() == pytest.approx(2.0)
+    stubby = _cone(point2=(0.5, 0.0, 0.0))
+    assert stubby.max_feature_size_m() == pytest.approx(4.0)
+    assert stubby.min_feature_size_m() == pytest.approx(0.5)
+    hollow = _cone(inner_radius1=0.3, inner_radius2=1.5)
+    assert hollow.min_feature_size_m() == pytest.approx(0.5)
+
+
+def test_equal_radii_make_a_cylinder_and_a_zero_radius_an_apex():
+    """Both are cones as far as the inside test goes, and both are accepted."""
+    _cone(radius1=1.0, radius2=1.0).validate()
+    _cone(radius1=0.0).validate()
+    _cone(radius2=0.0).validate()
+
+
+def test_degenerate_cones_are_rejected():
+    with pytest.raises(ValueError, match="radii must be >= 0"):
+        _cone(radius1=-0.1).validate()
+    with pytest.raises(ValueError, match="radii must be >= 0"):
+        _cone(inner_radius2=-0.1).validate()
+    with pytest.raises(ValueError, match="radii must be >= 0"):
+        _cone(radius2=float("nan")).validate()
+    with pytest.raises(ValueError, match="innerRadius1 .* is greater than radius1"):
+        _cone(inner_radius1=0.5).validate()
+    with pytest.raises(ValueError, match="encloses no volume"):
+        _cone(radius1=0.0, radius2=0.0).validate()
+    with pytest.raises(ValueError, match="encloses no volume"):
+        _cone(inner_radius1=0.4, inner_radius2=2.0).validate()
+    with pytest.raises(ValueError, match="end caps coincide"):
+        _cone(point2=(0.0, 0.0, 0.0)).validate()
+    with pytest.raises(ValueError, match="refinement level must be >= 0"):
+        _cone(level=-1).validate()
+
+
+def test_a_cone_is_a_refinement_region_like_any_other_primitive(surfaces):
+    text = render_snappy_dict(
+        surfaces, location_in_mesh=(0.7, 0.15, 0.3), n_cells_between_levels=3,
+        generator=GEN, note="t",
+        refinement_regions=[RefinementRegion(level=2, surface=_cone())])
+    geometry = text[text.index("geometry"):text.index("castellatedMeshControls")]
+    assert "type          searchableCone;" in geometry
+    block = text[text.index("refinementRegions"):text.index("locationInMesh")]
+    assert re.search(r"plume\s*\{\s*mode\s+inside;\s*levels\s+\(\(1e15 2\)\);", block)
+    surfaces_block = text[text.index("refinementSurfaces"):
+                          text.index("resolveFeatureAngle")]
+    assert "plume" not in surfaces_block
+
+
+def test_a_degenerate_cone_is_refused_as_a_region():
+    with pytest.raises(ValueError, match="encloses no volume"):
+        render_refinement_regions_block([RefinementRegion(
+            level=1, surface=_cone(radius1=0.0, radius2=0.0))])
 
 
 def test_feature_snapping_is_off_unless_asked_for():

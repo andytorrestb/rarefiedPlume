@@ -12,6 +12,8 @@ Python:
 
 * does ``snappyHexMesh`` carve the plate the plan describes, exactly, and leave
   the exit plane at the one refinement level the plan predicts?
+* does it take a ``searchableCone`` as a refinement region, and refine exactly
+  the cells the Python cone contains?
 * does ``topoSet`` select the nozzle faces the Python rule says it will?
 * does ``plumeFieldInflow`` inject at the Maxwellian flux, on the nozzle only?
 * does the plate feel the load it must?
@@ -70,9 +72,12 @@ VALIDATION = {
     "plate": {"standoff_m": 2.0, "size_y_m": 10.0, "size_z_m": 10.0},
     "domain": {"x_max_m": 3.0, "y_half_m": 6.0, "z_half_m": 6.0,
                "symmetry_planes": ["y", "z"]},
+    # The shipped cone, r = 0.4 + 0.2 x, cut off at the plate instead.
     "mesh": {"refinement_regions": [
-        {"name": "exitCore", "level": 4, "x_max_m": 1.0, "radius_m": 0.5},
-        {"name": "nearField", "level": 3, "x_max_m": 2.0, "radius_m": 1.0},
+        {"name": "exitCore", "level": 4, "x_max_m": 1.0,
+         "radius1_m": 0.4, "radius2_m": 0.6},
+        {"name": "nearField", "level": 3, "x_max_m": 2.0,
+         "radius1_m": 0.4, "radius2_m": 0.8},
     ]},
     "dsmc": {
         "collision_model": "NoBinaryCollision",
@@ -216,10 +221,60 @@ def test_snappy_carves_the_plate_exactly(meshed):
     assert not np.any(np.abs(plate.normals).max(axis=1) < 0.999)   # no oblique face
 
 
+def _cells_by_level(case) -> dict:
+    """What snappyHexMesh reports having built, level by level."""
+    log = (case / "log.snappyHexMesh").read_text(encoding="utf-8", errors="replace")
+    block = log[log.rindex("Cells per refinement level:"):]
+    return {int(level): int(count) for level, count in
+            re.findall(r"^\s+(\d+)\s+(\d+)\s*$", block, re.M)}
+
+
+def test_the_refinement_regions_go_to_snappy_as_cones(meshed):
+    text = (meshed / "system" / "snappyHexMeshDict").read_text(encoding="utf-8")
+    geometry = text.split("castellatedMeshControls")[0]
+    assert geometry.count("type          searchableCone;") == 2
+    assert "radius1       0.4;" in geometry and "radius2       0.8;" in geometry
+    assert "searchableCylinder" not in text
+
+
+def test_snappy_refines_exactly_the_cells_the_cone_rule_says(meshed):
+    """searchableCone's inside test and Region.contains are meant to be the same
+    test. The finest level is where that can be checked to the cell: nothing
+    but the finest cone puts a cell there -- buffer layers only ever add coarser
+    ones -- so the mesh has eight children for every cell of the level below
+    whose centre the cone contains, and no others."""
+    _, geom, _, plan, _ = _plan(meshed)
+    finest = max(plan.regions, key=lambda region: region.level)
+    assert finest.shape == "cone" and finest.level == plan.max_level
+    parent = plan.cell_size_m(finest.level - 1)
+
+    def centres(lo: float, hi: float, reach_lo: float, reach_hi: float) -> np.ndarray:
+        """Centres of the level below on the domain's lattice, along one axis
+        -- only those the region can reach, not the whole domain's."""
+        every = lo + (np.arange(round((hi - lo) / parent)) + 0.5) * parent
+        return every[(every > reach_lo - parent) & (every < reach_hi + parent)]
+
+    x0, x1, y0, y1, z0, z1 = geom.bounds
+    rx0, rx1, ry0, ry1, rz0, rz1 = finest.bounds()
+    x, y, z = np.meshgrid(centres(x0, x1, rx0, rx1), centres(y0, y1, ry0, ry1),
+                          centres(z0, z1, rz0, rz1), indexing="ij")
+    predicted = 8 * int(np.count_nonzero(finest.contains(x, y, z)))
+    assert predicted > 1000
+    assert _cells_by_level(meshed)[finest.level] == predicted
+
+
 def test_the_cell_estimate_is_close_to_the_mesh(meshed):
+    """Overall, and level by level: the buffer layers and the plate's skin are
+    most of the mesh, and a model of them that was wrong would show here. This
+    is a small mesh -- a level of it is a few hundred to a few thousand cells --
+    so it is held more loosely than the full-size ones the unit tests pin."""
     *_, plan, _ = _plan(meshed)
     assert meshread.read_cell_count(meshed) == pytest.approx(
-        plan.estimated_cells, rel=0.10)
+        plan.estimated_cells, rel=0.05)
+    built = _cells_by_level(meshed)
+    assert sum(built.values()) == meshread.read_cell_count(meshed)
+    for level, count in built.items():
+        assert plan.cells_by_level[level] == pytest.approx(count, rel=0.15), level
 
 
 # --------------------------------------------------------------------------- #

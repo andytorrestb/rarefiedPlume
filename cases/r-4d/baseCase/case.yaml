@@ -92,13 +92,37 @@ domain:
 mesh:
   background_cell_size_m: 0.5
   plate_refinement_level: 2          # 0.125 m: two cells through the plate
-  refinement_regions:                # cylinders coaxial with the plume, from
-                                     # x_min_m (default 0) to x_max_m
-    - {name: exitCore,  level: 4, x_max_m: 1.0,  radius_m: 0.5}   # 31.25 mm
-    - {name: nearField, level: 3, x_max_m: 3.0,  radius_m: 1.0}   # 62.5 mm
-    - {name: plumeCore, level: 2, x_max_m: 8.0,  radius_m: 2.0}   # 0.125 m
-    - {name: plume,     level: 1, x_max_m: 20.0, radius_m: 4.0}   # 0.25 m
-  n_cells_between_levels: 3
+
+  # Volumes held at a level. Each is a CONE coaxial with the plume, written to
+  # snappyHexMeshDict as a searchableCone from x_min_m (default 0, the exit
+  # plane) to x_max_m:
+  #
+  #     radius1_m    its radius at x_min_m      -> radius1, at point1
+  #     radius2_m    its radius at x_max_m      -> radius2, at point2
+  #
+  # with a straight line between them. Equal radii make a cylinder. A HOLLOW
+  # cone also takes inner_radius1_m and inner_radius2_m; left out, it is solid.
+  # (shape: box, with x/y/z bounds, is the other shape there is.)
+  #
+  # These four lie on ONE surface, r = 0.4 + 0.2 x, cut off at four stations --
+  # a half-angle of 11.3 degrees. That is a choice, not a given. It is the cone
+  # through the rims of the cylinders this replaced (1 m at x = 3, 2 m at
+  # x = 8), and in the run made on those the gas on it is at 0.3% of the
+  # on-axis density at 1 m, 4% at 3 m and 16% at 8 m. For another exit, the
+  # slope 1/S is where to start: 0.2 is this one's (speed ratio S = 5.0).
+  #
+  # snappyHexMesh refines a cell when its CENTRE is inside. So what the exit
+  # needs is a cone wide enough at x = 0.25 m, where the first background cells
+  # have their centres 0.354 m off the axis, to contain them. --describe says
+  # if it is not.
+  refinement_regions:
+    - {name: exitCore,  level: 4, x_max_m: 1.0,  radius1_m: 0.4, radius2_m: 0.6}  # 31.25 mm
+    - {name: nearField, level: 3, x_max_m: 3.0,  radius1_m: 0.4, radius2_m: 1.0}  # 62.5 mm
+    - {name: plumeCore, level: 2, x_max_m: 8.0,  radius1_m: 0.4, radius2_m: 2.0}  # 0.125 m
+    - {name: plume,     level: 1, x_max_m: 20.0, radius1_m: 0.4, radius2_m: 4.4}  # 0.25 m
+  n_cells_between_levels: 3          # snappyHexMesh's nCellsBetweenLevels. It
+                                     # moves the mesh in steps, not smoothly:
+                                     # 342k cells at 2, 459k at 3, 490k at 4.
   max_cells: 3000000                 # refuse a mesh ESTIMATED above this
 
 # --- DSMC ---------------------------------------------------------------------

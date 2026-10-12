@@ -113,28 +113,69 @@ Cell size at refinement level *N* is `background_cell_size_m / 2**N`:
 
 | where | level | cell | |
 |---|---|---|---|
-| exit, to 1 m | 4 | 31.25 mm | 12 cells across the exit |
+| the plume cone, to 1 m | 4 | 31.25 mm | 12 cells across the exit |
 | to 3 m | 3 | 62.5 mm | |
 | to 8 m | 2 | 0.125 m | |
-| to the plate, within 4 m of the axis | 1 | 0.25 m | |
+| to the plate | 1 | 0.25 m | |
 | plate surface | 2 | 0.125 m | 2 cells through its thickness |
 | elsewhere | 0 | 0.5 m | |
 
-That is **529,126 cells** (`Mesh OK`, max non-orthogonality 28°), built in about
-90 s. `mesh.refinement_regions` is a list of cylinders coaxial with the plume
-(or boxes); edit it freely — `--describe` re-estimates the cell count, and the
-estimate is within 3% of what snappyHexMesh builds for this case.
+That is **459,007 cells** (`Mesh OK`, max non-orthogonality 28°), built in about
+a minute and a half.
 
-Two things worth knowing before editing it:
+### The refinement regions are cones
+
+`mesh.refinement_regions` is a list of **cones** coaxial with the plume, each
+written to `snappyHexMeshDict` as a `searchableCone`:
+
+```yaml
+- {name: plumeCore, level: 2, x_max_m: 8.0, radius1_m: 0.4, radius2_m: 2.0}
+```
+
+`radius1_m` is the radius at `x_min_m` (default 0, the exit plane) and
+`radius2_m` the radius at `x_max_m` — the `radius1` and `radius2` of the
+dictionary — with a straight line between. Equal radii are a cylinder.
+`inner_radius1_m` and `inner_radius2_m` hollow it out; left out, it is solid.
+(`shape: box`, with `y`/`z` bounds, is the other shape.) `--describe` prints
+each one with the half-angle its radii imply.
+
+The four shipped lie on **one surface, r = 0.4 m + 0.2 x** — a half-angle of
+11.3° — cut off at 1, 3, 8 and 20 m. A plume widens as it goes, and a cone
+follows it; a cylinder wide enough for the far end of a stage is far wider than
+the plume at the near end. This case was first meshed with four cylinders
+reaching the same radii at those stations, and that took 529,126 cells: the
+cones give up 70,000 of them, none on the exit or on the plate, whose patches
+have the same faces either way. In the run made on the cylinders, the gas on
+the cone's surface is at 0.3% of the on-axis density at 1 m, 4% at 3 m and 16%
+at 8 m, with a mean free path longer in proportion — so the cells given up are
+the ones that needed refining least.
+
+The slope is a choice, not a given. `1/S` is where to start for another exit:
+0.2 is this one's, at a speed ratio of 5.0.
+
+Edit the list freely — `--describe` re-estimates the cell count, to within 2%
+of what snappyHexMesh builds for this case. Three things worth knowing first:
 
 * **The exit must sit at one refinement level**, and snappyHexMesh refines a
   cell when its *centre* is inside a region — so a region smaller than the cells
-  around it is never seen at all. The plan applies that rule and refuses a
-  configuration that would split the exit, rather than letting it mesh.
+  around it is never seen at all. For a cone that is decided where the centres
+  are, not on the exit plane: the first background cells have theirs at
+  x = 0.25 m, 0.354 m off the axis, and the exit cone has to have widened past
+  that by then. The plan applies the rule and refuses a configuration that
+  would split the exit, rather than letting it mesh.
 * **The nozzle is a staircase.** Its area is 1.98% short of the disk at 12 cells
   across, so the injected mass flow is 1.98% low. That is not monotone in
   resolution: it is +0.64% at level 5 and −0.02% at level 6. A finer exit also
   halves the time step per level.
+* **`n_cells_between_levels` is not a number of cells**, and it moves the cell
+  count in steps. snappyHexMesh builds buffers out of whole cells of the level
+  below, so the skin of cells kept at the plate's level is 2 deep at 1 or 2,
+  4 deep at 3 or 4, and 6 at 5 — and on 811 m² of plate that skin is half the
+  mesh:
+
+  | `n_cells_between_levels` | 1 | 2 | **3** | 4 | 5 |
+  |---|---|---|---|---|---|
+  | cells built | 318,104 | 341,512 | **459,007** | 489,905 | 640,916 |
 
 The plate is exact: every face of its patch is axis-aligned and its upstream
 face is 405.5832 m² = 34.14 × 11.88.
@@ -175,18 +216,22 @@ run in progress cannot change weight — `./Allclean` first.
 As shipped the run is **45,348 steps** of 1.37 µs (6 domain transits of
 transient, then 3 of averaging).
 
+The timings below were all taken on the mesh this case had first — cylinders
+where the cones are now, 529,126 cells. The parcels are what a step costs, and
+they are the same on either mesh; the cells are 13% fewer now.
+
 Measured over the first 10,000 of those steps on a 12-core workstation, 12
 ranks: the wall-clock time per step is **0.05 s + 0.57 µs per parcel**, plus
 about 0.12 s once `fieldAverage` is accumulating. Those 10,000 steps took 74
 minutes end to end and finished at 1.07 million parcels and 0.85 s a step.
 
 The parcel count was levelling off by then — net growth had fallen from 62 to 29
-thousand per 500 steps — which points at a plateau near 1.2–1.3 million, against
-the table's rough 1.5 million. At about 1 s a step that makes the whole run
-**roughly eleven hours**. The plateau is the soft part of that figure: watch
-`Number of dsmc particles` in `log.dsmcFoam` flatten rather than trusting an
-estimate of how long gas is held up at a plate. A written time is 90–280 MB,
-growing with the parcel count.
+thousand per 500 steps — which pointed at a plateau near 1.2–1.3 million,
+against the table's rough 1.5 million, and at a whole run of roughly eleven
+hours. The whole run has since been made, on 8 ranks: it levelled off at **1.23
+million parcels** and took **18.3 hours**. Watch `Number of dsmc particles` in
+`log.dsmcFoam` flatten rather than trusting an estimate of how long gas is held
+up at a plate. A written time is 90–280 MB, growing with the parcel count.
 
 The other levers, in rough order of value:
 
@@ -243,7 +288,7 @@ samples, that `cases/cai2012-health` draws its mid-plane from. It writes
 
 `<plane>` is `xz` and `xy`, the two centre planes through the plume axis, and
 `plate`, a cross-section 0.2 m ahead of the plate seen from the nozzle side: 17
-images, a little over a minute on this mesh. `manifest.yaml` beside them records
+images, a little over a minute on a mesh of this size. `manifest.yaml` beside them records
 the time and the colour range each was drawn at.
 
 ```bash
@@ -274,24 +319,43 @@ opens the case in ParaView directly.
 
 ## What has been checked
 
-Against OpenFOAM v2512, with the case's own scripts:
+Against OpenFOAM v2512, with the case's own scripts. The case has had two
+meshes, and each check below belongs to one of them.
+
+**On the mesh as it ships**, with the cones:
 
 * **The mesh is the one described.** `./Allmesh` ends by measuring it: 112
   nozzle faces as predicted, plate box and face area exact, patch types right.
-* **Injection is right.** 124.745 ± 0.08 parcels per step measured over 5,770
-  steps, against 124.744 predicted from the Maxwellian flux — through the
-  `nozzle` patch only.
+* **snappyHexMesh refines exactly where the cones say.** The finest level holds
+  nothing but the exit cone, so its cells can be counted instead of estimated:
+  eight for every 62.5 mm cell whose centre is inside the cone, 25,824 — and
+  25,824 were built, at each `n_cells_between_levels` from 1 to 5. A hollow
+  cone added at a level of its own came out the same way: 78,016 predicted,
+  78,016 built.
+* **The solver takes it.** The first 1,500 steps on 12 ranks, at the shipped
+  weight: 124.74 ± 0.16 parcels injected per step against 124.744 predicted
+  from the Maxwellian flux, through the `nozzle` patch only, and no solver
+  warning. At 187,000 parcels a step was taking 0.14 s, which is what the
+  timings [above](#cost-and-the-knobs), taken on the earlier mesh, give for
+  that many.
 * **The plate feels what conservation says it must.** With collisions off and a
   plate that catches the whole jet, momentum and energy balance alone fix the
   totals. A quarter-symmetry run returned the force to 0.1% and the heat load to
-  0.2% (F/thrust 1.1130 against 1.1120, Q/power 0.9391 against 0.9374). That is
+  0.2% (F/thrust 1.1105 against 1.1120, Q/power 0.9352 against 0.9374). That is
   inflow, wall model, `fD`/`q` accumulation, symmetry and post-processing
   agreeing at once, and it is kept as `tests/openfoam/test_nozzleplume_openfoam.py`.
-* **It survives impingement, and behaves like a gas.** The shipped mesh and
-  weight were run for 10,000 steps (13.7 ms, two domain transits) on 12 ranks;
-  the jet reaches the plate at about step 4,600. No solver warning, 1.07
-  million parcels at the end. Three things in that transient are worth more
-  than "it ran", because nothing imposed them:
+
+**On the mesh it had first** — four cylinders where the cones are, 529,126
+cells, with the same exit, plate, particle weight and run length:
+
+* **Injection is right.** 124.745 ± 0.08 parcels per step measured over 5,770
+  steps, against 124.744 predicted from the Maxwellian flux — through the
+  `nozzle` patch only.
+* **It survives impingement, and behaves like a gas.** That mesh and the
+  shipped weight were run for 10,000 steps (13.7 ms, two domain transits) on
+  12 ranks; the jet reaches the plate at about step 4,600. No solver warning,
+  1.07 million parcels at the end. Three things in that transient are worth
+  more than "it ran", because nothing imposed them:
   * the lateral force on the plate is −0.14 N and +0.04 N beside 529 N axial —
     a full 3-D mesh, symmetric to 0.03%;
   * the plume accelerates to 1.0483 of its exit speed and stays there, against
@@ -299,16 +363,22 @@ Against OpenFOAM v2512, with the case's own scripts:
   * a shock layer stands about 1.7 m ahead of the plate, and the translational
     temperature in it peaks at 10.8 times the exit value, against a stagnation
     temperature of 11.0 times.
+* **It runs to its end.** All 45,348 steps, on 8 ranks: the parcel count is
+  steady at 1.23 million from about step 25,000. Averaged over the last three
+  domain transits the plate takes **553.4 N**, 1.078 times the jet's thrust,
+  and 0.281 of its power as heat; the pressure on it peaks at 9.10 Pa; and the
+  lateral force is 0.04 N and 0.02 N — symmetric to 0.01%.
 
-What has **not** been done: the shipped case has not been run to its end time,
-so **there is no converged plate load to quote** — the numbers above are 3.4 ms
-of averaging, started 4 ms after the jet arrived. Nothing has been compared
-with measurement, with another DSMC code, or with a continuum plume model; and
-no resolution or weight study has been made.
+What has **not** been done: the mesh as it ships has not been run to its end
+time. **The converged plate load above is the cylinder mesh's**, and it is what
+a run on the cones is to be compared with — the two differ only in where the
+plume is refined, so a difference between them is a measure of how much that
+matters. Nothing has been compared with measurement, with another DSMC code, or
+with a continuum plume model; and no resolution or weight study has been made.
 
 ## Tests
 
 ```bash
-pytest tests/unit -k nozzleplume                    # 331 tests, no OpenFOAM needed
+pytest tests/unit -k nozzleplume                    # 383 tests, no OpenFOAM needed
 pytest tests/openfoam/test_nozzleplume_openfoam.py -m needs_openfoam    # ~1 min
 ```
