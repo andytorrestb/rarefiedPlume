@@ -31,8 +31,10 @@ One length sizes everything::
 
 ``mesh.refinement_regions`` are volumes held at a level -- cylinders coaxial with
 the plume, or boxes. The plate surface is held at ``mesh.plate_refinement_level``.
-Between two levels snappyHexMesh leaves ``mesh.n_cells_between_levels`` cells of
-each intermediate level, so the mesh never jumps by more than a factor of two.
+Between two levels snappyHexMesh leaves a buffer of each intermediate level, so
+the mesh never jumps by more than a factor of two.
+``mesh.n_cells_between_levels`` sets how thick -- though not to that many cells:
+:func:`buffer_shell_cells` has what it actually builds.
 
 The nozzle patch is a staircase
 -------------------------------
@@ -347,6 +349,56 @@ class MeshPlan:
         return lines
 
 
+def buffer_shell_cells(n_cells_between_levels: int) -> float:
+    """Mean thickness of one buffer shell, in cells of the shell's own level.
+
+    It is not ``nCellsBetweenLevels`` cells. A shell is made of whole cells of
+    the level *below* it, each split in two, so it comes out an even or an odd
+    number of cells thick according to where the finer volume happens to end on
+    that coarser lattice. How many, snappyHexMesh decides by one of two rules
+    (``snappyRefineDriver::shellRefine``, v2512):
+
+    * for three or more, ``hexRef8::consistentSlowRefinement2`` spaces the
+      levels by the **distance between cell centres**: a cell two levels coarser
+      than another has to have its centre at least ``n/2`` of its own size
+      away. That takes ``n - 1.25`` cells of the level between, and rounding up
+      to the lattice makes it ``n - 1`` or ``n``;
+    * for one or two, ``hexRef8::consistentSlowRefinement`` **counts** cells,
+      and ``n`` of them rounds up to ``n`` or ``n + 1``.
+
+    Each pair is as likely one as the other, hence the half. Read off the R-4D
+    mesh at ``n = 3``: two cells of level 1 ahead of the plate's skin and three
+    behind it.
+    """
+    n = int(n_cells_between_levels)
+    return n - 0.5 if n >= 3 else n + 0.5
+
+
+def surface_skin_cells(n_cells_between_levels: int) -> int:
+    """Cells at a surface's own level that are kept on each side of it.
+
+    Two for ``nCellsBetweenLevels`` of 1 or 2, four for 3 or 4, six for 5: what
+    the R-4D plate has at each of those, continued in the same pattern beyond.
+    The cells come in pairs because, again, they are whole cells of the level
+    below split in two. For three or more the pattern is the distance rule of
+    :func:`buffer_shell_cells` applied from the first cell centre off the
+    surface -- a pair is kept when its centre is within ``n`` surface cells of
+    that -- and the six at ``n = 5`` was that rule's prediction before the mesh
+    was built.
+
+    It is **not** ``n + 1``, though at ``n = 3`` that is also four. An estimate
+    built on ``n + 1`` was 26% over at the plate's level for ``n = 4`` and 45%
+    over for ``n = 2``.
+
+    Counted on faces that lie on a lattice plane of the level below, as the two
+    large faces of the R-4D plate do. Its four edges do not, and are a small
+    part of its skin; a plate whose stand-off or thickness is not a whole number
+    of cells is not covered by these counts.
+    """
+    n = int(n_cells_between_levels)
+    return 2 if n <= 2 else 2 * math.ceil((n - 0.5) / 2.0)
+
+
 def refinement_layers(geom: PlumeGeometry, background_cell_size_m: float,
                       regions, plate_level: int | None,
                       n_cells_between_levels: int) -> list:
@@ -358,16 +410,24 @@ def refinement_layers(geom: PlumeGeometry, background_cell_size_m: float,
         region (or ``"the plate"``) that asked for it.
 
     Each feature contributes itself at its own level, then one shell per coarser
-    level around it, ``n_cells_between_levels`` cells of that level thick -- the
-    buffer snappyHexMesh adds so that levels change one at a time.
+    level around it, :func:`buffer_shell_cells` cells of that level thick -- the
+    buffer snappyHexMesh adds so that levels change one at a time. A shell is as
+    thick along a diagonal as along an axis, which is what a rule about distance
+    gives.
 
     A region and a surface differ in what "the feature at its own level" is. A
     region is exactly the cells whose centres are inside it. A **surface** is
-    the cells it cuts *plus* ``n_cells_between_levels`` more at the same level
-    on each side -- a skin ``n + 1`` cells thick, measured on the R-4D plate.
+    the cells it cuts *plus* a skin of :func:`surface_skin_cells` at the same
+    level on each side.
+
+    The plate's skin and shells are everything within that reach of the plate
+    **in a straight line**, so they are rounded off along its edges and at its
+    corners. A box grown by the same amount keeps the corners square, and on the
+    R-4D plate -- 92 m of edge -- that alone put the plate's level 2% over.
     """
     bg = float(background_cell_size_m)
     n_between = int(n_cells_between_levels)
+    shell_cells = buffer_shell_cells(n_between)
 
     def size(level: int) -> float:
         return bg / 2 ** int(level)
@@ -379,7 +439,7 @@ def refinement_layers(geom: PlumeGeometry, background_cell_size_m: float,
         layers.append((int(level), lambda x, y, z, g=grow: contains(x, y, z, g),
                        bounds(grow), source))
         for lower in range(int(level) - 1, 0, -1):
-            grow += n_between * size(lower)
+            grow += shell_cells * size(lower)
             layers.append((lower, lambda x, y, z, g=grow: contains(x, y, z, g),
                            bounds(grow), source))
 
@@ -388,15 +448,26 @@ def refinement_layers(geom: PlumeGeometry, background_cell_size_m: float,
 
     plate = geom.plate
     if plate is not None and plate_level is not None:
-        skin = (n_between + 1) * size(plate_level)
+        skin = surface_skin_cells(n_between) * size(plate_level)
 
         def plate_bounds(grow: float) -> tuple:
             x0, x1, y0, y1, z0, z1 = plate.bounds
             g = skin + grow
             return (x0 - g, x1 + g, y0 - g, y1 + g, z0 - g, z1 + g)
 
+        def near_plate(x, y, z, reach: float):
+            """Within ``reach`` of the plate in a straight line."""
+            x0, x1, y0, y1, z0, z1 = plate.bounds
+            x = np.asarray(x, dtype=np.float64)
+            y = np.asarray(y, dtype=np.float64)
+            z = np.asarray(z, dtype=np.float64)
+            dx = np.maximum(np.maximum(x0 - x, x - x1), 0.0)
+            dy = np.maximum(np.maximum(y0 - y, y - y1), 0.0)
+            dz = np.maximum(np.maximum(z0 - z, z - z1), 0.0)
+            return dx * dx + dy * dy + dz * dz <= reach * reach
+
         add(plate_level,
-            lambda x, y, z, g: plate.contains(x, y, z, skin + g), plate_bounds,
+            lambda x, y, z, g: near_plate(x, y, z, skin + g), plate_bounds,
             "the plate")
     return layers
 
@@ -527,13 +598,16 @@ def estimate_cells(geom: PlumeGeometry, background_cell_size_m: float, regions,
     wrapped in its buffer shells -- are claimed finest-first, so an overlap is
     counted once at its finest level, and what nobody claims is background.
 
-    The plate's skin is where an estimate goes wrong. snappyHexMesh keeps
-    ``n_cells_between_levels + 1`` cells at the surface level on each side of a
-    surface, not one, and getting that wrong is most of the error there is to
-    have: on the R-4D plate (811 m^2 of surface at 0.125 m) a one-cell skin
-    undercounts the mesh by a third, 360 000 cells against the 529 126
-    snappyHexMesh built, while this model gives 542 000 -- 2.5% over, and within
-    8% at every level.
+    The plate's skin and the buffer shells are where an estimate goes wrong,
+    because they are most of the mesh -- the R-4D plate is 811 m^2 of surface at
+    0.125 m, and some 230 000 of that mesh's cells are within half a metre of
+    it -- and neither is as thick as ``nCellsBetweenLevels`` reads. See
+    :func:`surface_skin_cells` and :func:`buffer_shell_cells`.
+
+    On the R-4D mesh this gives 528 283 cells against the 529 126 snappyHexMesh
+    built, 0.2% under, and is within 3.2% at every level. Read as a number of
+    cells -- three to a shell, and a skin of ``n + 1`` -- the same setting gave
+    542 398: 2.5% over, and 7.9% over at level 1.
 
     Each volume is integrated on a lattice of :data:`ESTIMATE_SAMPLES` points
     per axis over its own bounding box, so a small fine region costs the same to

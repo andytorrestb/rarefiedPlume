@@ -48,19 +48,19 @@ def test_r4d_nozzle_area_is_within_the_configured_tolerance(r4d):
 
 
 def test_r4d_cell_estimate_is_close_to_the_mesh_openfoam_built(r4d):
-    """Within 5% overall. An octree's size is not known until it is built, so
+    """Within 4% overall. An octree's size is not known until it is built, so
     this is a guard, not a count -- but a guard a third out is not one."""
     _, _, _, plan, _, _ = r4d
-    assert plan.estimated_cells == pytest.approx(R4D_MEASURED_CELLS, rel=0.05)
+    assert plan.estimated_cells == pytest.approx(R4D_MEASURED_CELLS, rel=0.04)
 
 
 def test_r4d_cell_estimate_is_close_at_every_level(r4d):
     """Level 2 is the plate's skin, and the level a naive estimate gets wrong:
-    snappyHexMesh keeps nCellsBetweenLevels + 1 cells at the surface level, not
-    one, and on 811 m^2 of plate that is half the mesh."""
+    on 811 m^2 of plate, the cells kept at the surface level are half the
+    mesh."""
     _, _, _, plan, _, _ = r4d
     for level, measured in R4D_MEASURED_CELLS_BY_LEVEL.items():
-        assert plan.cells_by_level[level] == pytest.approx(measured, rel=0.10), level
+        assert plan.cells_by_level[level] == pytest.approx(measured, rel=0.06), level
 
 
 def test_r4d_background_is_cubic_and_whole(r4d):
@@ -327,6 +327,69 @@ def test_a_plate_too_thin_for_its_level_is_refused(tmp_path):
     """One cell through the thickness is a dented layer, not a body."""
     with pytest.raises(ValueError, match="plate_refinement_level"):
         derived(tmp_path, mesh={"plate_refinement_level": 1})
+
+
+# --------------------------------------------------------------------------- #
+# buffer layers
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("n_between,shell,skin", [
+    (1, 1.5, 2), (2, 2.5, 2),               # hexRef8::consistentSlowRefinement
+    (3, 2.5, 4), (4, 3.5, 4), (5, 4.5, 6),  # consistentSlowRefinement2
+    (6, 5.5, 6), (7, 6.5, 8),
+])
+def test_buffer_layers_are_whole_cells_of_the_level_below(n_between, shell, skin):
+    """Two rules, changing at three, each rounded to pairs of cells: a shell is
+    n or n + 1 cells thick below three and n - 1 or n from there on; a surface
+    keeps two cells a side up to two, then two more for every second step."""
+    assert mesh.buffer_shell_cells(n_between) == shell
+    assert mesh.surface_skin_cells(n_between) == skin
+
+
+@pytest.mark.parametrize("n_between,skin_m", [(2, 0.25), (3, 0.5), (4, 0.5),
+                                             (5, 0.75)])
+def test_the_plate_s_skin_is_as_thick_as_its_cells_say(tmp_path, n_between, skin_m):
+    """The minimal plate's upstream face is at x = 4 m and its cells are 0.125 m."""
+    cfg = load_case(tmp_path)
+    geom = geometry.from_config(cfg)
+    level, inside, _, source = mesh.refinement_layers(geom, 0.5, [], 2, n_between)[0]
+    assert (level, source) == (2, "the plate")
+    assert bool(inside(4.0 - skin_m + 0.01, 0.0, 0.0))
+    assert not bool(inside(4.0 - skin_m - 0.01, 0.0, 0.0))
+
+
+def test_the_plate_s_skin_is_rounded_at_its_edges(tmp_path):
+    """Within reach in a straight line, as a rule about distance makes it. The
+    plate's edge is at y = 2 m and its skin is 0.5 m: a point 0.4 m ahead of the
+    face AND 0.4 m beyond the edge is 0.57 m from the plate, and outside -- a
+    box grown by 0.5 m would take it in."""
+    cfg = load_case(tmp_path)
+    geom = geometry.from_config(cfg)
+    _, inside, bounds, _ = mesh.refinement_layers(geom, 0.5, [], 2, 3)[0]
+    assert bool(inside(3.6, 2.0, 0.0))                  # 0.4 m, straight ahead
+    assert bool(inside(4.1, 2.4, 0.0))                  # 0.4 m, straight out
+    assert bool(inside(3.7, 2.3, 0.0))                  # 0.42 m, diagonally
+    assert not bool(inside(3.6, 2.4, 0.0))              # 0.57 m, diagonally
+    # The bounding box is still the square-cornered one that contains it.
+    assert bounds == pytest.approx((3.5, 4.75, -2.5, 2.5, -1.5, 1.5))
+
+
+def test_each_buffer_shell_adds_its_thickness_to_the_reach(tmp_path):
+    """Level 2 skin 0.5 m, then one shell of level 1: 2.5 cells of 0.25 m."""
+    cfg = load_case(tmp_path)
+    geom = geometry.from_config(cfg)
+    layers = mesh.refinement_layers(geom, 0.5, [], 2, 3)
+    assert [level for level, *_ in layers] == [2, 1]
+    _, shell, _, _ = layers[1]
+    assert bool(shell(4.0 - 0.5 - 0.625 + 0.01, 0.0, 0.0))
+    assert not bool(shell(4.0 - 0.5 - 0.625 - 0.01, 0.0, 0.0))
+
+
+def test_three_cells_between_levels_is_not_three_cells():
+    """The case's own setting: 2.5 on average, measured as two ahead of the
+    plate and three behind it."""
+    assert mesh.buffer_shell_cells(3) == pytest.approx((2 + 3) / 2)
+    assert mesh.buffer_shell_cells(2) == mesh.buffer_shell_cells(3)
 
 
 # --------------------------------------------------------------------------- #
