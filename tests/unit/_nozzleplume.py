@@ -19,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from plumetools.nozzleplume import exitstate, geometry, mesh, run
 from plumetools.nozzleplume.config import load_case_config
 
 REPO = Path(__file__).resolve().parents[2]
@@ -98,3 +99,19 @@ def load_case(directory: Path, **sections):
     """Write and load a case config in one step."""
     write_case(directory, **sections)
     return load_case_config(directory)
+
+
+def derive(cfg):
+    """``(geom, exit_state, plan, nozzle, run)`` for a loaded config."""
+    geom = geometry.from_config(cfg)
+    exit_state = exitstate.from_config(cfg)
+    plan = mesh.plan(cfg, geom, exit_state)
+    nozzle = mesh.predicted_nozzle_faces(plan, geom)
+    settings = run.derive(cfg, exit_state, geom, plan, nozzle)
+    return geom, exit_state, plan, nozzle, settings
+
+
+def derived(directory: Path, **sections):
+    """``(cfg, geom, exit_state, plan, nozzle, run)`` -- the whole chain."""
+    cfg = load_case(directory, **sections)
+    return (cfg, *derive(cfg))
