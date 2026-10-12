@@ -405,15 +405,79 @@ def check_surfaces_are_resolvable(surfaces, background_cell_size_m: float) -> No
             )
 
 
-def render_snap_controls() -> list[str]:
-    """``snapControls``, tuned for analytic primitives with no feature edges.
+@dataclass(frozen=True)
+class RefinementRegion:
+    """A volume refined to a fixed octree level. Creates no patch.
 
-    Feature snapping is off. The primitives here have no feature edges to capture
-    except where a surface meets a domain boundary, and explicit feature snapping
-    tends to pull points *off* such a surface rather than onto it. The one place
-    it would matter -- the rim where the inflow hemisphere crosses ``x = 0`` -- is
-    a right-angle crossing, the well-conditioned case.
+    Attributes:
+        surface: the closed primitive bounding the volume. Only its name and its
+            ``geometry`` entry are used -- its own ``level`` and ``patch_type``
+            belong to ``refinementSurfaces`` and are ignored here.
+        level: octree level inside the volume; the cell size is
+            ``background_cell_size / 2**level``.
+
+    ``mode inside`` only. A cell is refined when its **centre** is inside the
+    primitive, so the refined volume is the primitive rounded to whole cells of
+    the level below -- which is why a region meant to cover a feature has to
+    overshoot it by a couple of those cells rather than fit it exactly.
     """
+
+    surface: SearchableSurface
+    level: int
+
+    @property
+    def name(self) -> str:
+        return self.surface.name
+
+    def validate(self) -> None:
+        """Raise ``ValueError`` for a negative level or a degenerate primitive."""
+        if int(self.level) < 0:
+            raise ValueError(
+                f"{self.name}: refinement level must be >= 0, got {self.level}")
+        self.surface.validate()
+
+
+def render_refinement_regions_block(regions, indent: str = "    ") -> list[str]:
+    """The ``refinementRegions { ... }`` block, one ``inside`` entry per region.
+
+    The distance in ``levels ((1e15 N))`` is ignored by ``mode inside``; 1e15 is
+    the value OpenFOAM's own dictionaries write there.
+    """
+    lines = [f"{indent}refinementRegions", f"{indent}{{"]
+    for region in regions:
+        region.validate()
+        lines += [
+            f"{indent}    {region.name}",
+            f"{indent}    {{",
+            f"{indent}        mode    inside;",
+            f"{indent}        levels  ((1e15 {int(region.level)}));",
+            f"{indent}    }}",
+        ]
+    lines += [f"{indent}}}"]
+    return lines
+
+
+def render_snap_controls(implicit_feature_snap: bool = False) -> list[str]:
+    """``snapControls``, tuned for analytic primitives.
+
+    Args:
+        implicit_feature_snap: let snappyHexMesh find feature edges from the
+            surface itself and snap to them. Off by default.
+
+    Feature snapping is off by default. A sphere or a cylinder has no feature
+    edges to capture except where it meets a domain boundary, and explicit
+    feature snapping tends to pull points *off* such a surface rather than onto
+    it. The one place it would matter -- the rim where the inflow hemisphere
+    crosses ``x = 0`` -- is a right-angle crossing, the well-conditioned case.
+
+    A **box** is the opposite case: it is nothing but feature edges. Without
+    feature snapping its twelve edges come out chamfered -- measured on a
+    34.14 x 11.88 x 0.25 m plate at 0.125 m cells, 1096 oblique faces and a
+    front face 1.4% short of its area. With ``implicit_feature_snap`` the same
+    mesh has no oblique face at all and every face area is exact, so a caller
+    carving a box should ask for it.
+    """
+    implicit = "true" if implicit_feature_snap else "false"
     return [
         "snapControls",
         "{",
@@ -422,7 +486,7 @@ def render_snap_controls() -> list[str]:
         "    nSolveIter      50;",
         "    nRelaxIter      5;",
         "    nFeatureSnapIter        10;",
-        "    implicitFeatureSnap     false;",
+        f"    implicitFeatureSnap     {implicit};",
         "    explicitFeatureSnap     false;",
         "    multiRegionFeatureSnap  false;",
         "}",
@@ -463,7 +527,9 @@ def render_add_layers_controls() -> list[str]:
 def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: int,
                        generator: str, note: str, preamble: list[str] | None = None,
                        max_global_cells: int = 20_000_000,
-                       resolve_feature_angle: int = 30) -> str:
+                       resolve_feature_angle: int = 30,
+                       refinement_regions=None,
+                       implicit_feature_snap: bool = False) -> str:
     """A complete ``snappyHexMeshDict`` for a list of searchable surfaces.
 
     Args:
@@ -480,13 +546,19 @@ def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: in
             under-resolved* mesh rather than an error, so the ceiling should be a
             backstop against a runaway configuration, not a budget.
         resolve_feature_angle: castellation feature angle [deg].
+        refinement_regions: :class:`RefinementRegion` volumes to refine without
+            carving anything. ``None`` or empty writes the empty block.
+        implicit_feature_snap: see :func:`render_snap_controls`. Wanted when a
+            box is among ``surfaces``.
 
     Returns:
         The dictionary text.
 
     Raises:
         ValueError: for ``n_cells_between_levels < 0``, or from
-            :func:`render_geometry_block` for a duplicate or degenerate surface.
+            :func:`render_geometry_block` for a duplicate or degenerate surface
+            -- and a region's primitive shares that namespace, so a region named
+            after a surface is a duplicate too.
 
     Layer addition is off. A DSMC wall interaction is a discrete particle-surface
     collision, so there is no viscous sublayer for a prism stack to resolve, and
@@ -495,6 +567,7 @@ def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: in
     if int(n_cells_between_levels) < 0:
         raise ValueError(
             f"n_cells_between_levels must be >= 0, got {n_cells_between_levels}")
+    regions = list(refinement_regions or [])
 
     lines = header("snappyHexMeshDict", generator, note)
     lines += [
@@ -504,7 +577,7 @@ def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: in
         "",
     ]
     lines += list(preamble or [])
-    lines += render_geometry_block(surfaces)
+    lines += render_geometry_block(list(surfaces) + [r.surface for r in regions])
     lines += [
         "",
         "castellatedMeshControls",
@@ -525,11 +598,22 @@ def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: in
         "",
         f"    resolveFeatureAngle {int(resolve_feature_angle)};",
         "",
-        "    // No wake, shock or gap refinement regions yet -- deliberately. This",
-        "    // block is the clean place to add them.",
-        "    refinementRegions",
-        "    {",
-        "    }",
+    ]
+    if regions:
+        lines += [
+            "    // Volumes refined to a fixed level. 'inside' tests the CELL CENTRE,",
+            "    // so each is rounded to whole cells of the level below.",
+        ]
+        lines += render_refinement_regions_block(regions, indent="    ")
+    else:
+        lines += [
+            "    // No wake, shock or gap refinement regions yet -- deliberately. This",
+            "    // block is the clean place to add them.",
+            "    refinementRegions",
+            "    {",
+            "    }",
+        ]
+    lines += [
         "",
         "    // In the fluid: inside the box, outside every carved body, and off",
         "    // every symmetry plane. snappyHexMesh keeps the region connected to",
@@ -540,7 +624,7 @@ def render_snappy_dict(surfaces, *, location_in_mesh, n_cells_between_levels: in
         "}",
         "",
     ]
-    lines += render_snap_controls()
+    lines += render_snap_controls(implicit_feature_snap)
     lines += [""]
     lines += render_add_layers_controls()
     lines += [

@@ -161,18 +161,31 @@ def _source_flow_facts(directory: Path) -> tuple[float, float] | None:
     return float(cfg.geometry.sphere_radius_m), float(mass_kg)
 
 
+def _nozzleplume_facts(directory: Path) -> tuple[float, float] | None:
+    """``(length_scale_m, mass_kg)`` if this is a nozzle-plume case, else ``None``.
+
+    The general nozzle-exit family (``cases/r-4d``). Its length scale is the
+    exit **diameter**, as for the Cai family it generalises -- the length its
+    Knudsen number is built on.
+    """
+    from plumetools.nozzleplume.config import load_case_config
+
+    cfg = load_case_config(directory)
+    return float(cfg.nozzle.exit_diameter_m), float(cfg.gas.molecular_mass_kg)
+
+
 #: Case-family readers, tried in order. Each raises if the case is not its own.
-CASE_READERS = (_cai2012_facts, _source_flow_facts)
+CASE_READERS = (_cai2012_facts, _nozzleplume_facts, _source_flow_facts)
 
 
 def discover_case(case_dir: str | Path) -> CaseFacts:
     """Locate the ``.foam`` stub and read what the case knows about itself.
 
     The gas and the length scale come from the case's own ``case.yaml``, via
-    whichever family loader recognises it -- the two schemas reject each other
-    on their ``model:`` key, so trying both in turn is unambiguous.
+    whichever family loader recognises it -- the schemas reject each other on
+    their ``model:`` key, so trying each in turn is unambiguous.
 
-    Both are optional. A case of a family neither loader knows still renders; it
+    Both are optional. A case of a family no loader knows still renders; it
     just cannot use ``origin_over_L`` or the ``{R}`` and ``{m}`` placeholders,
     and the specs that need those fail with their own message rather than
     silently substituting a wrong gas constant.

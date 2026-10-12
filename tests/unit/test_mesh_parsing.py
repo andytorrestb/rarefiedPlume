@@ -7,7 +7,7 @@ import pytest
 
 from _helpers import HEADER, SQUARE_POINTS, TRI_FACES, make_case, patch, write
 from plumetools.mesh.boundary import read_boundary, require_patch
-from plumetools.mesh.polymesh import read_faces, read_points
+from plumetools.mesh.polymesh import read_face_range, read_faces, read_points
 from plumetools.mesh.sets import read_face_set
 
 
@@ -133,3 +133,51 @@ def test_parsers_terminate_on_garbage(tmp_path):
     write(mesh / "points", "not an OpenFOAM file at all\n")
     with pytest.raises(ValueError, match="list block"):
         read_points(tmp_path / "junk")
+
+
+# --- read_face_range: one patch, without converting the rest of the file ----- #
+
+@pytest.mark.parametrize("fixture", ["tri_case", "quad_case", "mixed_case",
+                                     "crlf_case"])
+def test_a_face_range_is_the_same_slice_of_the_full_read(fixture, request):
+    """It exists to be faster, not different."""
+    case = request.getfixturevalue(fixture)
+    faces = read_faces(case)
+    for start in range(len(faces)):
+        for count in range(len(faces) - start + 1):
+            assert read_face_range(case, start, count) == faces[start:start + count]
+
+
+def test_a_face_range_reads_a_patch_by_its_boundary_entry(panel_case):
+    info = read_boundary(panel_case)["panel"]
+    assert read_face_range(panel_case, info.start_face, info.n_faces) == (
+        read_faces(panel_case)[info.start_face:info.start_face + info.n_faces])
+
+
+def test_a_face_range_past_the_end_of_the_mesh_is_rejected(tri_case):
+    with pytest.raises(ValueError, match="the mesh has 2"):
+        read_face_range(tri_case, 1, 2)
+    with pytest.raises(ValueError, match="requested"):
+        read_face_range(tri_case, -1, 1)
+
+
+def test_a_face_range_rejects_a_binary_mesh_like_the_full_read(tmp_path):
+    mesh = tmp_path / "bin" / "constant" / "polyMesh"
+    write(mesh / "faces",
+          HEADER.format(cls="faceList", obj="faces").replace("format      ascii;",
+                                                             "format      binary;")
+          + "\n2\n(\n\x00\x01\x02\x03\n)\n")
+    with pytest.raises(ValueError, match="writeFormat"):
+        read_face_range(tmp_path / "bin", 0, 1)
+
+
+def test_a_face_range_stops_on_a_line_that_is_not_a_face(tmp_path):
+    """Only the header is stripped of comments, so a payload that is not what
+    OpenFOAM writes has to fail rather than be mis-read."""
+    mesh = tmp_path / "odd" / "constant" / "polyMesh"
+    write(mesh / "faces",
+          HEADER.format(cls="faceList", obj="faces")
+          + "\n2\n(\n3(0 1 2)\n// not a face\n)\n")
+    assert read_face_range(tmp_path / "odd", 0, 1) == [[0, 1, 2]]
+    with pytest.raises(ValueError, match="expected 'N"):
+        read_face_range(tmp_path / "odd", 1, 1)

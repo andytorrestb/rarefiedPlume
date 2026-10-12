@@ -125,6 +125,16 @@ cases/cai2012-health/rmCases
 cases/cai2012-health/results/*
 !cases/cai2012-health/results/cost-model.yaml
 
+# r-4d, the first case of the general nozzle-plume family
+# (plumetools/nozzleplume). Same rule, and here it covers both directories
+# whole: NOTHING under system/ or constant/ is hand-written -- the mesh
+# dictionaries, the solver dictionaries and the mesh itself all follow from
+# case.yaml -- so the directories are ignored rather than their contents listed.
+cases/r-4d/*/system/
+cases/r-4d/*/constant/
+cases/r-4d/*/results/
+cases/r-4d/*/case-summary.json
+
 # NOT ignored, deliberately: cases/*/constant/polyMesh. Regenerating it with
 # ./Allmesh does overwrite it, but for most cases it is the only copy of a
 # Pointwise export that cannot be reproduced without an interactive licensed

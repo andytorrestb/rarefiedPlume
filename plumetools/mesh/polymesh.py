@@ -82,3 +82,55 @@ def read_patch_faces(case_dir: Path, start_face: int, n_faces: int) -> list[list
     patch's ``startFace``.
     """
     return read_faces(case_dir)[start_face:start_face + n_faces]
+
+
+def read_face_range(case_dir: Path, start_face: int, n_faces: int) -> list[list[int]]:
+    """Read a contiguous range of faces, parsing **only** that range.
+
+    Args:
+        case_dir: an OpenFOAM case directory.
+        start_face: global label of the first face wanted.
+        n_faces: how many faces to read.
+
+    Returns:
+        ``n_faces`` point-label lists, in winding order.
+
+    Raises:
+        ValueError: if the range runs past the end of the file, or a line in it
+            is malformed.
+
+    The same answer as :func:`read_patch_faces`, without converting the rest of
+    the file. Boundary faces are a few percent of a mesh, and on a mesh of a few
+    million faces converting all of them to reach one patch takes longer than
+    everything else a caller does with the result.
+
+    Comments are stripped from the **header only** -- everything up to the
+    list's opening parenthesis. :func:`strip_comments` walks its input a
+    character at a time, which on a 50 MB ``faces`` file is most of the cost of
+    reading it (8.5 s of 10.7 s, measured on a 530 000-cell mesh), and the
+    payload of a file OpenFOAM wrote carries no comments to strip. A line in the
+    requested range that is not a face is still an error, so a payload that did
+    carry one would stop the read rather than be mis-parsed.
+    """
+    path = Path(case_dir) / "constant" / "polyMesh" / "faces"
+    text = read_text(path)
+    opening = text.find("\n(\n")
+    if opening < 0:
+        raise ValueError(f"{path}: no '<count> ( ... )' list block found")
+    count, _ = find_list_block(strip_comments(text[:opening + 3]), path)
+    if start_face < 0 or n_faces < 0 or start_face + n_faces > count:
+        raise ValueError(
+            f"{path}: faces {start_face} .. {start_face + n_faces} requested, but "
+            f"the mesh has {count}")
+    lines = text[opening + 3:].split("\n")
+
+    faces: list[list[int]] = []
+    for i in range(start_face, start_face + n_faces):
+        raw = lines[i].strip()
+        open_paren = raw.find("(")
+        close_paren = raw.rfind(")")
+        if open_paren < 0 or close_paren < open_paren:
+            raise ValueError(
+                f"{path}: face {i}: expected 'N(a b c ...)', got {raw!r}")
+        faces.append([int(v) for v in raw[open_paren + 1:close_paren].split()])
+    return faces
