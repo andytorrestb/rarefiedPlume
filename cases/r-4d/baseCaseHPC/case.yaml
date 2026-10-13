@@ -116,10 +116,11 @@ mesh:
   # have their centres 0.354 m off the axis, to contain them. --describe says
   # if it is not.
   refinement_regions:
-    - {name: exitCore,  level: 5, x_max_m: 1.0,  radius1_m: 0.4, radius2_m: 0.6}  # 31.25 mm
-    - {name: nearField, level: 4, x_max_m: 3.0,  radius1_m: 0.4, radius2_m: 1.0}  # 62.5 mm
-    - {name: plumeCore, level: 3, x_max_m: 8.0,  radius1_m: 0.4, radius2_m: 10.0}  # 0.125 m
-    - {name: plume,     level: 2, x_max_m: 20.0, radius1_m: 0.4, radius2_m: 20.0}  # 0.25 m
+    - {name: exitCore,  level: 6, x_max_m: 1.0,  radius1_m: 0.4, radius2_m: 0.6}
+    - {name: exitCore1, level: 5, x_max_m: 2.0,  radius1_m: 0.5, radius2_m: 1.0}  # 31.25 mm
+    - {name: nearField, level: 4, x_max_m: 10.0,  radius1_m: 1.0, radius2_m: 5.0}  # 62.5 mm
+    - {name: plumeCore, level: 3, x_max_m: 20.0,  radius1_m: 2.0, radius2_m: 20.0} # 0.125 m
+    - {name: plume,     level: 2, x_max_m: 30.0, radius1_m: 4.0, radius2_m: 30.0}  # 0.25 m
   n_cells_between_levels: 3          # snappyHexMesh's nCellsBetweenLevels. It
                                      # moves the mesh in steps, not smoothly:
                                      # 342k cells at 2, 459k at 3, 490k at 4.
