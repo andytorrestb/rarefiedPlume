@@ -43,6 +43,7 @@ from plumetools.nozzleplume.gas import (
     SPECIES_NAME,
     VhsSpecies,
 )
+from plumetools.rarefaction.settings import DiagnosticSettings, SettingsError
 
 
 class ConfigError(ValueError):
@@ -405,6 +406,10 @@ class CaseConfig:
     dsmc: DsmcConfig = field(default_factory=DsmcConfig)
     checks: ChecksConfig = field(default_factory=ChecksConfig)
     post: PostConfig = field(default_factory=PostConfig)
+    #: Local mean free path, Knudsen numbers and mesh resolution after a run;
+    #: see :mod:`plumetools.rarefaction`. The exit diameter is always one of
+    #: its reference lengths, as ``D``.
+    diagnostics: DiagnosticSettings = field(default_factory=DiagnosticSettings)
     model: str = MODEL
     #: Free-form provenance. Not validated: it records where a case came from,
     #: and over-constraining that makes recording an awkward fact harder than
@@ -430,7 +435,7 @@ _OPTIONAL_SECTIONS = {
     "post": PostConfig,
 }
 _TOP_LEVEL = (set(_REQUIRED_SECTIONS) | set(_OPTIONAL_SECTIONS)
-              | {"plate", "model", "meta"})
+              | {"plate", "model", "meta", "diagnostics"})
 
 
 def _build(cls, data, where: str):
@@ -581,6 +586,12 @@ def load_case_config(case_dir: Path) -> CaseConfig:
                           else _build(cls, raw[name], where))
     for name, cls in _OPTIONAL_SECTIONS.items():
         sections[name] = _build(cls, raw.get(name) or {}, f"{path}:{name}")
+
+    try:
+        sections["diagnostics"] = DiagnosticSettings.from_mapping(
+            raw.get("diagnostics"), f"{path}:diagnostics")
+    except SettingsError as exc:
+        raise ConfigError(str(exc)) from None
 
     plate = raw.get("plate")
     cfg = CaseConfig(
@@ -817,6 +828,12 @@ def validate(cfg: CaseConfig, path: Path | str = "case.yaml") -> None:
                 if not float(hi) > float(lo):
                     fail(f"{where}: {axis}_max_m ({hi}) must be greater than "
                          f"{axis}_min_m ({lo})")
+
+    # --- diagnostics ---------------------------------------------------------
+    if "D" in cfg.diagnostics.reference_lengths_m:
+        fail("diagnostics.reference_lengths_m has 'D', which is reserved: it is "
+             "always the nozzle exit diameter, nozzle.exit_diameter_m, and gives "
+             "KnD. Name the other length something else.")
 
     # --- checks and post -----------------------------------------------------
     if not 0.0 < float(cfg.checks.warn_courant) <= float(cfg.checks.max_courant):

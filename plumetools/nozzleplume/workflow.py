@@ -10,6 +10,9 @@ they do that is not an OpenFOAM utility is one of these::
     verify     measure the built mesh against case.yaml
     fields     write 0/ for the mesh that was built
     post       plate loads and centreline into results/
+    diagnostics
+               mean free path, Knudsen numbers and mesh resolution: volume
+               fields into the time directory, a summary into results/
 
 Kept here rather than as Python embedded in each case's scripts, so a second
 case of this family is a ``case.yaml`` and a copy of four files with no logic in
@@ -26,6 +29,7 @@ from pathlib import Path
 from plumetools.mesh.boundary import read_boundary
 from plumetools.nozzleplume import (
     checks,
+    diagnostics as diagnostics_module,
     dictionaries,
     exitstate,
     foamfields,
@@ -243,6 +247,33 @@ def post(case_dir: Path, time: str | None = None,
     return 0
 
 
+def diagnostics(case_dir: Path, time: str | None = None,
+                results: str | None = None) -> int:
+    """Rarefaction and resolution diagnostics of one sampled time.
+
+    Needs the averaged fields and the cell centres and volumes ``./Allpost``
+    writes. Changes no mesh and no run: it is what to read before editing the
+    refinement in ``case.yaml``. See :mod:`plumetools.nozzleplume.diagnostics`.
+    """
+    case = load(case_dir)
+    print(f"### {case.label}")
+    if not case.cfg.diagnostics.enabled:
+        print("    diagnostics.enabled is false in case.yaml; nothing to do")
+        return 0
+    try:
+        fields, written = diagnostics_module.run(
+            case, time=time, results=Path(results) if results else None)
+    except post_module.PostError as exc:
+        print(f"diagnostics: {exc}", file=sys.stderr)
+        return 1
+    if fields:
+        print(f"    wrote {len(fields)} fields into {fields[0].parent}: "
+              + " ".join(path.name for path in fields))
+    for path in written:
+        print(f"    wrote {path}")
+    return 0
+
+
 def main(argv=None) -> int:
     """``python -m plumetools.nozzleplume <command> [case]``."""
     parser = argparse.ArgumentParser(
@@ -268,6 +299,13 @@ def main(argv=None) -> int:
                      help="time directory to read (default: the latest)")
     sub.add_argument("--results", default=None, metavar="DIR",
                      help="where to write (default: <case>/results)")
+    sub = add("diagnostics", "mean free path, Knudsen numbers and mesh "
+                             "resolution of a sampled time")
+    sub.add_argument("--time", default=None,
+                     help="time directory to read (default: the latest)")
+    sub.add_argument("--results", default=None, metavar="DIR",
+                     help="where the summary goes (default: <case>/results); "
+                          "the fields always go into the time directory")
 
     args = parser.parse_args(argv)
     case_dir = Path(args.case)
@@ -280,6 +318,8 @@ def main(argv=None) -> int:
             return verify(case_dir)
         if args.command == "fields":
             return fields(case_dir, run_checks=not args.no_checks)
+        if args.command == "diagnostics":
+            return diagnostics(case_dir, time=args.time, results=args.results)
         return post(case_dir, time=args.time, results=args.results)
     except (ConfigError, geometry.GeometryError) as exc:
         print(f"{args.command}: {exc}", file=sys.stderr)

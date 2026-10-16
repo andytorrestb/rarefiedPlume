@@ -2,8 +2,9 @@
 
 A few focused checks, not a census: the mean free path against the
 hard-sphere formula and against the scalar gas module it restates; the
-gradient against fields it must reproduce exactly; and the handling of cells
-that cannot be trusted. The same pipeline on a real dsmcFoam run, and
+gradient against fields it must reproduce exactly; the handling of cells that
+cannot be trusted; and one run of the whole pipeline on a small synthetic case,
+reading back what it wrote. The same pipeline on a real dsmcFoam run, and
 ParaView reading it, is ``tests/openfoam/test_nozzleplume_openfoam.py``.
 """
 
@@ -16,7 +17,7 @@ import pytest
 import yaml
 
 from _nozzleplume import write_case, write_field
-from plumetools.nozzleplume import gas
+from plumetools.nozzleplume import gas, post, workflow
 from plumetools.rarefaction import core, foam, summary
 from plumetools.rarefaction.settings import DiagnosticSettings, SettingsError
 
@@ -374,6 +375,52 @@ def synthetic_case(tmp_path, *, steps=(400, 400)):
             for name in names) + "}\n", encoding="utf-8")
     return centres, n
 
+
+def test_the_pipeline_writes_fields_paraview_can_read_and_a_matching_summary(tmp_path):
+    centres, n = synthetic_case(tmp_path)
+    assert workflow.main(["diagnostics", str(tmp_path)]) == 0
+
+    directory = tmp_path / TIME
+    lam = post.read_internal_field(directory / "mfp")
+    valid = n > 0.0
+    assert lam[valid] == pytest.approx(core.mean_free_path(n[valid], 400.0, SPECIES),
+                                       rel=1e-9)
+    assert np.all(lam[~valid] == -1.0)                    # the fill, not a value
+    assert post.read_internal_field(directory / "cellSizeMax") == pytest.approx(1.0)
+    assert post.read_internal_field(directory / "cellSizeV") == pytest.approx(0.25 ** (1 / 3))
+    # Linear along x, so the gradient is exact -- one-sided at the edge of
+    # the valid region and through the symmetry plane at y = 0 alike.
+    kn_grad = post.read_internal_field(directory / "KnGradN")
+    expected = core.mean_free_path(n, 0, SPECIES) * (1e18 / 8.0) / n
+    assert kn_grad[valid] == pytest.approx(expected[valid], rel=1e-9)
+    text = (directory / "mfp").read_text(encoding="utf-8")
+    assert "dimensions      [0 1 0 0 0 0 0];" in text
+    assert "type            symmetry;" in text
+
+    document = yaml.safe_load(
+        (tmp_path / "results" / "diagnostics_summary.yaml").read_text(encoding="utf-8"))
+    assert document["sampling"]["window"]["averaged_steps"] == 400
+    assert document["checks"]["particle_weight"]["consistent"]
+    assert document["validity"]["valid_cells"] == int(valid.sum())
+    assert document["validity"]["invalid_by_reason"]["no_parcels_sampled"]["cells"] == \
+        int((~valid).sum())
+    ratio = 1.0 / core.mean_free_path(n[valid], 0, SPECIES)
+    assert document["resolution"]["bounding_box_max"]["max"] == pytest.approx(ratio.max())
+    assert document["planning"]["refinement_levels"]["finest_permitted_level"] == 5
+
+    # The centreline export is the volume-weighted mean of the written field
+    # over the valid cells of each station.
+    table = np.genfromtxt(tmp_path / "results" / "centreline_diagnostics.csv",
+                          delimiter=",", names=True)
+    near_axis = (np.hypot(centres[:, 1], centres[:, 2]) <= 0.75 * 0.25 ** (1 / 3))
+    assert table.size == 4 and np.isnan(table["mfp"][-1])     # 0.5 .. 3.5 m
+    for row in table:
+        cells = near_axis & (np.abs(centres[:, 0] - row["x_m"]) < 0.5)
+        good = cells & (lam > 0)
+        if good.any():
+            assert row["mfp"] == pytest.approx(lam[good].mean(), rel=1e-9)
+        else:
+            assert np.isnan(row["mfp"])
 
 
 def test_fields_averaged_over_different_windows_are_refused(tmp_path):
