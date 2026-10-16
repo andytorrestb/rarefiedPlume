@@ -304,9 +304,27 @@ print('(%d %d %d)' % simple_split($NP))") || die "could not factor $NP subdomain
     echo "    (-np $NP overrides decomposeParDict via $OVERRIDE)"
 fi
 
+# OpenFOAM's OWN decomposePar and reconstructPar, from $FOAM_APPBIN, not whatever
+# is first on PATH. $FOAM_USER_APPBIN comes first, and a fork built there can
+# install same-named tools: the MNF dsmcFoam+ build's decomposePar writes
+# processor meshes with no points, faces, owner, neighbour or boundary, and
+# decomposePar then dies with 'Cannot find file "points"'.
+stock_tool() {
+    if [ -n "${FOAM_APPBIN:-}" ] && [ -x "$FOAM_APPBIN/$1" ]; then
+        echo "$FOAM_APPBIN/$1"
+    else
+        command -v "$1"
+    fi
+}
+
 if [ "$NP" -gt 1 ]; then
-    have decomposePar || die "'decomposePar' is not on PATH"
+    DECOMPOSEPAR=$(stock_tool decomposePar)
+    RECONSTRUCTPAR=$(stock_tool reconstructPar)
+    [ -n "$DECOMPOSEPAR" ] || die "'decomposePar' is not on PATH"
+    [ -n "$RECONSTRUCTPAR" ] || die "'reconstructPar' is not on PATH"
     have mpirun || die "'mpirun' is not on PATH (use --serial for one process)"
+    echo "    using $DECOMPOSEPAR"
+    echo "      and $RECONSTRUCTPAR"
 
     # Whether the processor directories can be reused, and if not, what to
     # decompose. `decomposePar -force` DELETES processor*/ before it writes, so
@@ -330,9 +348,9 @@ if [ "$NP" -gt 1 ]; then
         if [ "$PROC_COUNT" -ne 0 ] && [ "$PROC_COUNT" -ne "$NP" ]; then
             echo "    processor count changed ($PROC_COUNT -> $NP); re-decomposing t = $RESUME"
         fi
-        run decomposePar decomposePar -force -latestTime $DECOMP_ARGS
+        run decomposePar "$DECOMPOSEPAR" -force -latestTime $DECOMP_ARGS
     else
-        run decomposePar decomposePar -force $DECOMP_ARGS
+        run decomposePar "$DECOMPOSEPAR" -force $DECOMP_ARGS
     fi
 
     run dsmcFoam mpirun -np "$NP" dsmcFoam -parallel $DECOMP_ARGS
@@ -341,8 +359,7 @@ if [ "$NP" -gt 1 ]; then
     #
     # -newTimes skips whatever is already reconstructed, so resuming a case does
     # not re-reconstruct every earlier write.
-    have reconstructPar || die "'reconstructPar' is not on PATH"
-    run reconstructPar reconstructPar -newTimes
+    run reconstructPar "$RECONSTRUCTPAR" -newTimes
 else
     run dsmcFoam dsmcFoam
 fi
