@@ -1,10 +1,12 @@
 #!/bin/bash
 #
-# Post-process this case: the loads on the plate, and the plume centreline.
+# Post-process this case: the loads on the plate, the plume centreline, and the
+# rarefaction and mesh-resolution diagnostics.
 #
-#   ./Allpost                post-process the latest time
-#   ./Allpost --time 0.05    a specific time directory
-#   ./Allpost --viz          also render slice imagery (needs ParaView's pvpython)
+#   ./Allpost                   post-process the latest time
+#   ./Allpost --time 0.05       a specific time directory
+#   ./Allpost --viz             also render slice imagery (needs ParaView's pvpython)
+#   ./Allpost --no-diagnostics  skip step 4
 #   ./Allpost --help
 #
 # Steps:
@@ -12,7 +14,9 @@
 #   1. postProcess -func writeCellCentres   -> C, Cx, Cy, Cz
 #   2. postProcess -func writeCellVolumes   -> V
 #   3. plumetools.nozzleplume post          -> results/
-#   4. plumetools/viz/render_slices.py      -> results/viz/      (--viz only)
+#   4. plumetools.nozzleplume diagnostics   -> mfp, KnD, cellOverMfpMax, ... in
+#                                              the time directory; results/
+#   5. plumetools/viz/render_slices.py      -> results/viz/      (--viz only)
 #
 # Produces, under results/:
 #
@@ -24,10 +28,24 @@
 #                         (needs matplotlib)
 #   viz/                  slices through the plume, as ./viz.yaml lists them
 #
-# Steps 1 and 2 need OpenFOAM and serve only the centreline; step 3 does not, and
-# the plate loads need neither -- they are read off the plate patch itself.
+# and, from step 4, the rarefaction and mesh-resolution diagnostics:
 #
-# Step 4 is opt-in because it is slow -- tens of seconds an image on a mesh this
+#   <time>/mfp, KnD, ...  VOLUME FIELDS beside rhoNMean: open open.foam in
+#                         ParaView. -1 where there is no value; diagValid = 0
+#                         where a value is not to be trusted
+#   diagnostics_summary.yaml   valid fractions, Delta/lambda statistics, the
+#                         worst violations, the refinement levels allowed
+#   centreline_diagnostics.csv, centreline-diagnostics.png
+#
+# They are what to read before editing the refinement in case.yaml. To act on
+# that edit, prepare a FRESH iteration (python -m plumetools.iteration; see the
+# README) rather than re-meshing this case.
+#
+# Steps 1 and 2 need OpenFOAM and serve the centreline and the diagnostics;
+# step 3 does not, and the plate loads need neither -- they are read off the
+# plate patch itself.
+#
+# Step 5 is opt-in because it is slow -- tens of seconds an image on a mesh this
 # size -- and needs ParaView. PVPYTHON_PATH names a pvpython that is not on PATH.
 #
 # Reads the TIME-AVERAGED fields only (fDMean, qMean, rhoNMean, ...). A single
@@ -40,10 +58,12 @@ cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for
 
 TIME=""
 VIZ=0
+DIAGNOSTICS=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --time)     shift; TIME=${1:?"--time needs a value"} ;;
         --viz)      VIZ=1 ;;
+        --no-diagnostics) DIAGNOSTICS=0 ;;
         -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
         *)          echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
@@ -85,6 +105,17 @@ $PYTHON -m plumetools.nozzleplume post . --time "$TIME" \
     || die "post-processing failed (see above)"
 
 # --------------------------------------------------------------------------- #
+# rarefaction and mesh-resolution diagnostics
+# --------------------------------------------------------------------------- #
+
+if [ "$DIAGNOSTICS" -eq 1 ]; then
+    echo ""
+    $PYTHON -m plumetools.nozzleplume diagnostics . --time "$TIME" \
+        || die "the diagnostics failed (see above); the results above are
+       unaffected. ./Allpost --no-diagnostics skips them."
+fi
+
+# --------------------------------------------------------------------------- #
 # slice imagery
 # --------------------------------------------------------------------------- #
 
@@ -112,3 +143,6 @@ fi
 
 echo ""
 echo "### $CASE_NAME: results/ holds plate_loads.csv, plate_summary.yaml, centreline.csv"
+if [ "$DIAGNOSTICS" -eq 1 ]; then
+    echo "    and diagnostics_summary.yaml; $TIME/ holds the diagnostic fields"
+fi

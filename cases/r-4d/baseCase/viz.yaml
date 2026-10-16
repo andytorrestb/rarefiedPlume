@@ -98,3 +98,117 @@ fields:
     planes: [plate]        # shear, the surface pressure
   - name: q                # heat flux into the plate [W/m^2]
     planes: [plate]
+
+  # --- the rarefaction and mesh-resolution diagnostics ----------------------- #
+  # ./Allpost writes them into the time directory (python -m
+  # plumetools.nozzleplume diagnostics), then draws them here. Computed FROM
+  # the averaged fields, so there is no *Mean to prefer. A time without them --
+  # an older run, or ./Allpost --no-diagnostics -- skips them with a message.
+  # On the plume's centre plane and in the shock layer ahead of the plate; the
+  # xy plane would repeat xz.
+  #
+  # Two kinds of cell are not to be trusted. An under-sampled one keeps its
+  # values and has diagValid = 0. One with nothing to compute from holds -1,
+  # which the renderer draws in the BOTTOM colour of its bar -- on a log scale
+  # that looks like a very small value, and it is not: it is no data. (In
+  # ParaView itself, Threshold on diagValid >= 1.)
+
+  # THE MESH CRITERION. A cell resolves the local mean free path when
+  # lambda / Delta_max >= 3 -- diagnostics.cells_per_mean_free_path in
+  # case.yaml. The two below are pinned to that 3: move them with it.
+  - name: mfpResolved      # the criterion as a map: 1 resolved, 0 not, -1 no
+    prefer_mean: false     # data -- the one image where "no data" has its own
+    planes: [xz, plate]    # colour. Trust it where diagValid = 1.
+    range: [-1, 1]
+    legend_title: "mfpResolved: 1 yes, 0 no, -1 no data"
+  - name: KnCellMax        # lambda / Delta_max -- mean free path over the cell
+    prefer_mean: false     # edge: how FAR from the criterion. Diverging, log,
+    planes: [xz, plate]    # centred on 3: red cells resolve lambda/3, blue ones
+    log: true              # do not, white is on the line. Pinned, so that two
+    range: [0.003, 3000]   # iterations can be compared. -1 (no data) is drawn
+    preset: Cool to Warm   # deepest blue: read mfpResolved for that.
+    legend_title: "KnCellMax = mfp / cell edge (3 = criterion)"
+  - name: KnCellV          # lambda / V^(1/3): the same against the volume-
+    prefer_mean: false     # equivalent size. Equal to KnCellMax on the cubic
+    planes: [xz, plate]    # octree cells; they differ where the plate cuts one.
+    log: true
+    range: [0.003, 3000]
+    preset: Cool to Warm
+    legend_title: "KnCellV = mfp / V^(1/3) (3 = criterion)"
+  - name: cellOverMfpMax   # Delta_max / lambda, the inverse; above 1/3 a cell
+    prefer_mean: false     # is coarser than the lambda/3 target
+    planes: [xz, plate]
+    log: true
+    log_decades: 5
+  - name: cellOverMfpV     # V^(1/3) / lambda
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 5
+
+  # Sizes: what the mesh has, and what lambda/3 asks for.
+  - name: cellSizeTarget   # lambda / 3 [m], never clipped to a minimum
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 6
+  - name: cellSizeMax      # Delta_max [m], the largest bounding-box dimension
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 3
+  - name: cellSizeV        # V^(1/3) [m]
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 3
+
+  # Rarefaction: the flow, not the mesh.
+  - name: mfp              # mean free path lambda [m]
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 6
+  - name: KnD              # lambda / D: on the exit diameter
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 6
+  - name: KnGradN          # lambda |grad n| / n: on the density's own scale
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 4
+  - name: KnGradT          # lambda |grad T| / T: on the temperature's own scale
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 4
+
+  # Statistics and validity.
+  - name: parcelsPerStep   # parcels in the cell per step (dsmcRhoNMean). The
+    prefer_mean: false     # validity rule: MORE than 20
+    planes: [xz, plate]
+    log: true
+    log_decades: 6
+  - name: sampledParcels   # x steps averaged: every parcel sample behind a cell
+    prefer_mean: false
+    planes: [xz, plate]
+    log: true
+    log_decades: 8
+  - name: diagValid        # 1 where the diagnostics above can be trusted
+    prefer_mean: false
+    planes: [xz, plate]
+    range: [0, 1]
+  - name: diagValidGradN   # 1 where grad n was fitted from valid neighbours
+    prefer_mean: false
+    planes: [xz, plate]
+    range: [0, 1]
+  - name: diagValidGradT   # 1 where grad T was
+    prefer_mean: false
+    planes: [xz, plate]
+    range: [0, 1]
+  - name: diagStatus       # why not: a sum of 1 no parcels, 2 too few,
+    prefer_mean: false     # 4 n <= 0, 8 no resolved T
+    planes: [xz, plate]
+    range: [0, 15]

@@ -40,6 +40,7 @@ The case is the shipped ``cases/r-4d/baseCase`` -- its own ``Allmesh``,
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -85,6 +86,10 @@ VALIDATION = {
         "end_time_s": 3.5e-3,
         "average_start_s": 1.5e-3,
     },
+    # At this weight an exit cell holds ~4 parcels, so the default threshold --
+    # more than 20 per cell -- marks the whole jet invalid: the right verdict
+    # for so coarse a weight, and one that would leave nothing to check.
+    "diagnostics": {"min_sampled_particles": 2.0},
 }
 
 
@@ -399,3 +404,142 @@ def test_rerunning_a_finished_case_is_a_no_op(solved):
     result = _script("Allrun", solved, "--serial")
     assert "already reached endTime" in result.stdout
     assert sorted(p.name for p in solved.iterdir()) == before
+
+
+# --------------------------------------------------------------------------- #
+# the rarefaction diagnostics ./Allpost writes -- on a real run
+# --------------------------------------------------------------------------- #
+
+#: Diagnostic fields checked against the files and against ParaView.
+DIAGNOSTIC_FIELDS = ("mfp", "KnD", "cellOverMfpMax", "cellSizeTarget", "KnGradN",
+                     "KnGradT", "sampledParcels", "diagValid", "diagStatus")
+
+
+def _diagnostics(case):
+    time = post.latest_time(case)
+    fields = {name: post.read_internal_field(case / time / name)
+              for name in DIAGNOSTIC_FIELDS}
+    summary = yaml.safe_load(
+        (case / "results" / "diagnostics_summary.yaml").read_text(encoding="utf-8"))
+    return time, fields, summary
+
+
+def test_allpost_writes_diagnostics_from_one_consistent_sample(solved):
+    """On the mesh and at the time they came from, from fields averaged over one
+    window -- the one controlDict set -- and with dsmcRhoN a parcel COUNT:
+    rhoNMean V / dsmcRhoNMean is the configured particle weight in every cell."""
+    cfg, *_ = _plan(solved)
+    time, fields, summary = _diagnostics(solved)
+    n_cells = meshread.read_cell_count(solved)
+    for name, values in fields.items():
+        assert values.shape == (n_cells,), name
+
+    window = summary["sampling"]["window"]
+    assert window["end_s"] == pytest.approx(float(time))
+    assert window["start_s"] == pytest.approx(cfg.dsmc.average_start_s, rel=0.01)
+    weight = summary["checks"]["particle_weight"]
+    assert weight["consistent"]
+    assert weight["implied_particle_weight"] == pytest.approx(1.0e17, rel=1e-6)
+    assert 0 < summary["validity"]["valid_cells"] < n_cells
+
+
+def test_the_mean_free_path_is_the_hard_sphere_one_and_invalid_cells_say_so(solved):
+    """Wherever it can be computed: 1/(sqrt 2 pi d^2 n) of the written rhoNMean,
+    trusted or not. Where it cannot -- no parcels, no resolved T -- -1, never a
+    substitute value. Next to the exit, the exit's own lambda."""
+    cfg, _, exit_state, *_ = _plan(solved)
+    time, fields, _ = _diagnostics(solved)
+    n = post.read_internal_field(solved / time / "rhoNMean")
+    status = fields["diagStatus"].astype(int)
+    valid = fields["diagValid"] == 1.0
+    uncomputable = (status & 13) > 0                # flags 1, 4, 8; not 2
+    sigma = math.pi * cfg.gas.molecular_diameter_m ** 2
+    assert fields["mfp"][~uncomputable] == pytest.approx(
+        1.0 / (math.sqrt(2.0) * sigma * n[~uncomputable]), rel=1e-8)
+    assert np.all(fields["mfp"][uncomputable] == -1.0)
+    assert np.all(status[valid] == 0) and np.all(status[~valid] > 0)
+    # Under-sampled cells are shown, and flagged, not blanked.
+    low = status == 2
+    assert low.any() and np.all(fields["KnD"][low] > 0.0)
+
+    table = np.genfromtxt(solved / "results" / "centreline_diagnostics.csv",
+                          delimiter=",", names=True)
+    first = table[np.isfinite(table["mfp"])][0]
+    assert first["x_m"] < 0.1
+    assert first["mfp"] == pytest.approx(exit_state.mean_free_path_m, rel=0.1)
+
+
+def _pvpython():
+    candidate = os.environ.get("PVPYTHON_PATH") or shutil.which("pvpython")
+    if not candidate:
+        pytest.skip("pvpython is not on PATH (or PVPYTHON_PATH)")
+    return candidate
+
+
+#: Run by pvpython: read the case as plumetools/viz does, and report the
+#: diagnostic arrays of the internal mesh and of a slice through it.
+PARAVIEW_PROBE = r'''
+import json, sys
+import paraview.simple as pv
+from paraview.simple import OpenFOAMReader, Slice, servermanager
+
+case, time, names = sys.argv[1], float(sys.argv[2]), sys.argv[3].split(",")
+reader = OpenFOAMReader(FileName=case + "/open.foam", CaseType=1,
+                        Createcelltopointfiltereddata=0)
+if hasattr(reader, "Decomposepolyhedra"):
+    reader.Decomposepolyhedra = 0
+reader.MeshRegions = ["internalMesh"]
+reader.UpdatePipeline(time)
+mesh = servermanager.Fetch(reader).GetBlock(0)
+out = {"cells": mesh.GetNumberOfCells(), "arrays": {}}
+for name in names:
+    array = mesh.GetCellData().GetArray(name)
+    out["arrays"][name] = (None if array is None else
+                           [array.GetValue(i) for i in range(array.GetNumberOfTuples())])
+
+# Tag every cell with its index, so each polygon of the slice says which cell
+# it was cut from. The filter is GenerateIds up to 5.11, PointAndCellIds after.
+tagged = (getattr(pv, "PointAndCellIds", None) or getattr(pv, "GenerateIds"))(
+    Input=reader)
+tagged.GenerateCellIds = 1
+tagged.CellIdsArrayName = "cellIndex"
+cut = Slice(Input=tagged)
+cut.SliceType = "Plane"
+cut.SliceType.Origin = [0.97, 0.0, 0.0]
+cut.SliceType.Normal = [1.0, 0.0, 0.0]
+cut.UpdatePipeline(time)
+polys = servermanager.Fetch(cut).GetBlock(0)
+index = polys.GetCellData().GetArray("cellIndex")
+cut_mfp = polys.GetCellData().GetArray("mfp")
+out["slice_pairs"] = [
+    [cut_mfp.GetValue(i), mesh.GetCellData().GetArray("mfp").GetValue(int(index.GetValue(i)))]
+    for i in range(polys.GetNumberOfCells())]
+print("PROBE" + json.dumps(out))
+'''
+
+
+def test_paraview_reads_the_diagnostics_and_a_slice_samples_them_exactly(solved, tmp_path):
+    """What ./Allviz draws is what was written: ParaView's OpenFOAM reader finds
+    every diagnostic beside rhoNMean with one value per cell, those values are
+    the file's, and a cutting plane carries each cut cell's own value."""
+    pvpython = _pvpython()
+    time, fields, _ = _diagnostics(solved)
+    script = tmp_path / "probe.py"
+    script.write_text(PARAVIEW_PROBE, encoding="utf-8")
+    env = dict(os.environ, HWLOC_COMPONENTS="-pci")
+    result = subprocess.run(
+        [pvpython, "--force-offscreen-rendering", str(script), str(solved), time,
+         ",".join(DIAGNOSTIC_FIELDS)],
+        capture_output=True, text=True, timeout=600, env=env, check=False)
+    lines = [line for line in result.stdout.splitlines() if line.startswith("PROBE")]
+    assert lines, result.stdout[-2000:] + result.stderr[-2000:]
+    probe = json.loads(lines[-1][len("PROBE"):])
+
+    assert probe["cells"] == fields["mfp"].size
+    for name in DIAGNOSTIC_FIELDS:
+        assert probe["arrays"][name] is not None, name
+        assert np.asarray(probe["arrays"][name]) == pytest.approx(
+            fields[name], rel=1e-6, abs=1e-30), name
+    pairs = np.asarray(probe["slice_pairs"])
+    assert pairs.shape[0] > 100
+    assert pairs[:, 0] == pytest.approx(pairs[:, 1], rel=1e-6)
