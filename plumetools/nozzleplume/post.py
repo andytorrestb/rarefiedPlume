@@ -403,6 +403,43 @@ def plate_loads(case_dir: Path, cfg, geom, *, time: str | None = None) -> PlateL
 # the centreline
 # --------------------------------------------------------------------------- #
 
+def centreline_tube(centres: np.ndarray, volumes: np.ndarray | None, cfg,
+                    geom) -> tuple:
+    """Which cells the centreline samples, and into which station.
+
+    Args:
+        centres: ``(n, 3)`` cell centres [m].
+        volumes: ``(n,)`` cell volumes [m^3], or ``None`` -- in which case the
+            tube is not widened where the cells outgrow it.
+        cfg, geom: the case config and geometry.
+
+    Returns:
+        ``(inside, index, edges)``: a mask over the cells, the station of each
+        cell in it, and the ``post.centreline_points + 1`` station edges.
+
+    Shared with :mod:`plumetools.nozzleplume.diagnostics`, so the diagnostic
+    centreline samples the same cells at the same stations as this one.
+    """
+    x = centres[:, 0]
+    radial = np.hypot(centres[:, 1], centres[:, 2])
+    x_end = geom.flow_length_m
+
+    # The tube, widened where the mesh is coarser than it. The plume axis is a
+    # lattice line -- y = 0 and z = 0 are lattice planes -- so the four cells
+    # round it have their centres 0.71 cell sizes from it and the next ring
+    # 1.58. Three quarters of a cell therefore takes exactly the axis cells, and
+    # nothing else, wherever the configured tube would have caught none.
+    reach = np.maximum(
+        float(cfg.post.centreline_radius_over_D) * geom.diameter_m,
+        0.75 * np.cbrt(volumes) if volumes is not None else 0.0)
+    inside = (radial <= reach) & (x >= 0.0) & (x <= x_end)
+
+    n_bins = int(cfg.post.centreline_points)
+    edges = np.linspace(0.0, x_end, n_bins + 1)
+    index = np.clip(np.digitize(x[inside], edges) - 1, 0, n_bins - 1)
+    return inside, index, edges
+
+
 def centreline(case_dir: Path, cfg, geom, exit_state, *,
                time: str | None = None) -> dict:
     """The plume along its axis: ``n``, ``U_x`` and ``T``, normalised by the exit.
@@ -456,23 +493,9 @@ def centreline(case_dir: Path, cfg, geom, exit_state, *,
                 f"mesh.")
         values[name] = array
 
-    x = centres[:, 0]
-    radial = np.hypot(centres[:, 1], centres[:, 2])
-    x_end = geom.flow_length_m
-
-    # The tube, widened where the mesh is coarser than it. The plume axis is a
-    # lattice line -- y = 0 and z = 0 are lattice planes -- so the four cells
-    # round it have their centres 0.71 cell sizes from it and the next ring
-    # 1.58. Three quarters of a cell therefore takes exactly the axis cells, and
-    # nothing else, wherever the configured tube would have caught none.
-    reach = np.maximum(
-        float(cfg.post.centreline_radius_over_D) * geom.diameter_m,
-        0.75 * np.cbrt(volumes) if volumes_path.is_file() else 0.0)
-    inside = (radial <= reach) & (x >= 0.0) & (x <= x_end)
-
-    n_bins = int(cfg.post.centreline_points)
-    edges = np.linspace(0.0, x_end, n_bins + 1)
-    index = np.clip(np.digitize(x[inside], edges) - 1, 0, n_bins - 1)
+    inside, index, edges = centreline_tube(
+        centres, volumes if volumes_path.is_file() else None, cfg, geom)
+    n_bins = edges.size - 1
 
     volume = volumes[inside]
     density = values["rhoNMean"][inside]
