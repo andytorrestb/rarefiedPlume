@@ -149,6 +149,54 @@ FIELD_CATALOG: dict[str, CatalogEntry] = {
         kind=FieldKind.SURFACE, units="m/s", component="Magnitude",
         description="boundary velocity"),
 
+    # --- written by plumetools.rarefaction, not by the solver --------------- #
+    # Computed from the averaged fields, so they have no Mean counterpart: a
+    # spec draws them with prefer_mean: false. Cells with no value hold a negative
+    # fill (-1 by default) and diagValid marks them; on a log scale they take
+    # the bottom of the colour bar, so draw diagValid beside them.
+    "mfp": CatalogEntry(
+        units="m", log=True,
+        description="local mean free path lambda, from the averaged n and T"),
+    "KnD": CatalogEntry(
+        log=True, description="lambda / D, rarefaction on the nozzle exit diameter"),
+    "cellOverMfpMax": CatalogEntry(
+        log=True, description="Delta_max / lambda, MESH RESOLUTION; above 1/3 "
+                              "the cell is coarser than lambda/3"),
+    "cellOverMfpV": CatalogEntry(
+        log=True, description="V^(1/3) / lambda, MESH RESOLUTION"),
+    "KnGradN": CatalogEntry(
+        log=True, description="lambda |grad n| / n, rarefaction on the density "
+                              "gradient's length scale"),
+    "KnGradT": CatalogEntry(
+        log=True, description="lambda |grad T| / T, rarefaction on the "
+                              "temperature gradient's length scale"),
+    "cellSizeTarget": CatalogEntry(
+        units="m", log=True, description="lambda / 3, the cell that resolves the "
+                                         "local mean free path; never clipped"),
+    "sampledParcels": CatalogEntry(
+        units="parcel samples", log=True,
+        description="parcel samples behind the cell's averages"),
+    "diagValid": CatalogEntry(
+        units="0/1", description="1 where the diagnostics can be trusted"),
+    "mfpResolved": CatalogEntry(
+        units="1/0/-1", description="the mesh criterion: 1 where lambda / "
+                                    "Delta_max >= 3, 0 where not, -1 no data"),
+    "KnCellMax": CatalogEntry(
+        log=True, description="lambda / Delta_max, mean free path over cell "
+                              "edge: >= 3 resolves the local mean free path"),
+    "KnCellV": CatalogEntry(
+        log=True, description="lambda / V^(1/3)"),
+    "cellSizeMax": CatalogEntry(
+        units="m", log=True, description="largest bounding-box dimension"),
+    "cellSizeV": CatalogEntry(
+        units="m", log=True, description="volume-equivalent cell size V^(1/3)"),
+    "parcelsPerStep": CatalogEntry(
+        units="parcels", log=True,
+        description="parcels in the cell per step (dsmcRhoNMean)"),
+    "diagStatus": CatalogEntry(
+        units="flags", description="why a cell is not valid: 1 no parcels, "
+                                   "2 too few, 4 n <= 0, 8 no resolved T"),
+
     # --- written by postProcess, not by the solver -------------------------- #
     "V": CatalogEntry(
         units="m^3", log=True,
