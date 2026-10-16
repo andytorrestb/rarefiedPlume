@@ -35,7 +35,9 @@ cd cases/r-4d/baseCase
 ./Allmesh --describe   # what case.yaml implies and what it costs. Writes nothing.
 ./Allmesh              # dictionaries, blockMesh, snappyHexMesh, nozzle patch, verify
 ./Allrun               # 0/ fields, dsmcInitialise, decomposePar, dsmcFoam, reconstructPar
-./Allpost              # plate loads and centreline -> results/   (--viz: slice imagery)
+./Allpost              # plate loads, centreline, the rarefaction diagnostics, and
+                       #   images of all of it -> results/, results/viz/, <time>/
+                       #   (--no-viz skips the images)
 ./Allviz               # the flow field as 2-D slices -> results/viz/   (needs pvpython)
 ./Allclean             # reset (--mesh also removes the mesh; --dry-run previews)
 ```
@@ -46,7 +48,9 @@ Needs OpenFOAM v2512 on `PATH`, `libplumeDsmcBoundaryModels.so` built
 
 `./Allrun` **continues** a case from its newest time directory, so an
 interrupted run is restarted by running it again. To run past the end time,
-raise it in `case.yaml`, then `./Allmesh --dict-only && ./Allrun`.
+raise it in `case.yaml`, then `./Allmesh --dict-only && ./Allrun`. To change
+the mesh after a run, do not re-mesh the case in place: prepare a fresh
+iteration beside it ([below](#inspect-remesh-start-fresh)).
 
 ## One file
 
@@ -285,11 +289,22 @@ samples, that `cases/cai2012-health` draws its mid-plane from. It writes
 | `U_<plane>.png` | speed [m/s] | 0 – 3500, pinned |
 | `Ttra_<plane>.png` | translational temperature [K] | 0 – 6500, pinned |
 | `fDMean_plate.png`, `qMean_plate.png` | force density [Pa] and heat flux [W/m²] on the plate's loaded face | follows the data |
+| **`mfpResolved_<plane>.png`** | **the mesh criterion**: 1 where λ/Δ_max ≥ 3, 0 where not, −1 no data | −1 – 1, pinned |
+| **`KnCellMax_<plane>.png`** | **λ/Δ_max, mean free path over cell edge**: how far from the criterion | log 0.003 – 3000, diverging, white at 3 |
+| `KnCellV`, `cellOverMfpMax`, `cellOverMfpV`, `cellSizeTarget`, `cellSizeMax`, `cellSizeV`, `mfp`, `KnD`, `KnGradN`, `KnGradT`, `parcelsPerStep`, `sampledParcels` `_<plane>.png` | the other [diagnostics](#inspect-remesh-start-fresh) | log |
+| `diagValid`, `diagValidGradN`, `diagValidGradT`, `diagStatus` `_<plane>.png` | what can be trusted, and why not | 0 – 1; 0 – 15 |
 
 `<plane>` is `xz` and `xy`, the two centre planes through the plume axis, and
-`plate`, a cross-section 0.2 m ahead of the plate seen from the nozzle side: 17
-images, a little over a minute on a mesh of this size. `manifest.yaml` beside them records
-the time and the colour range each was drawn at.
+`plate`, a cross-section 0.2 m ahead of the plate seen from the nozzle side.
+The flow fields are drawn on all three, 17 images; the diagnostics on `xz` and
+`plate`, 36 more. `./Allpost` draws all of them by default — `--no-viz` skips
+them, and without `pvpython` they are skipped with a note. `manifest.yaml`
+beside them records the time and the colour range each was drawn at.
+
+**Read `mfpResolved` before `KnCellMax`.** A cell with no data holds −1, and
+the renderer draws it in the **bottom** colour of its bar: in `KnCellMax` that
+is the deep blue of a badly under-resolved cell. `mfpResolved` gives "no data"
+its own colour. `diagValid` says which values are trusted.
 
 ```bash
 ./Allviz                          # everything, at the latest time
@@ -316,6 +331,85 @@ the time and the colour range each was drawn at.
 `./Allpost --viz` draws the same images after the plate loads and the
 centreline. Both need `pvpython` on `PATH` (or `PVPYTHON_PATH`). `open.foam`
 opens the case in ParaView directly.
+
+## Inspect, remesh, start fresh
+
+This case does not refine its mesh while it runs — `dsmcFoam` cannot — and
+nothing here refines it automatically. Changing the mesh is a person editing
+`mesh.refinement_regions`, informed by what the last run sampled:
+
+```bash
+cd cases/r-4d/baseCase
+./Allrun                    # 1. run, and accumulate samples
+./Allpost                   # 2. diagnostics -> <time>/mfp, KnD, ... and results/
+#                                then open.foam in ParaView; ./Allviz for slices
+cd ..
+python -m plumetools.iteration baseCase iter01-exit5 --note "exit cone to level 5"
+#                             3. a NEW case: inputs copied, nothing from the run
+#                                edit iter01-exit5/case.yaml by hand
+cd iter01-exit5
+./Allmesh --describe        # 4. what the edit implies, then mesh it
+./Allmesh
+./Allrun                    # 5. new parcels from t = 0
+```
+
+**Step 2** computes, cell by cell, from the time-averaged `rhoNMean`, the
+translational temperature of the averaged moments, and the cell geometry:
+
+| field | | |
+|---|---|---|
+| `mfp` | λ = 1/(√2 π d² n) — a hard sphere, so T does not enter | m |
+| `KnD` | λ / D: rarefaction on the exit diameter | |
+| `cellOverMfpMax`, `cellOverMfpV` | Δ_max/λ, V^(1/3)/λ: **mesh resolution**; above 1/3 is under-resolved | |
+| `KnCellMax`, `KnCellV` | their inverses, λ/Δ | |
+| `KnGradN`, `KnGradT` | λ\|∇n\|/n, λ\|∇T\|/T: rarefaction on the gradients' own scales | |
+| `cellSizeTarget` | λ/3, never clipped | m |
+| `parcelsPerStep`, `sampledParcels` | parcels in the cell per step; × steps averaged | |
+| `diagValid`, `diagStatus` | whether a cell can be trusted, and why not | |
+
+and writes them into the sampled time directory, beside `rhoNMean`, where
+ParaView finds them. `results/diagnostics_summary.yaml` gives the sampling
+window, valid and invalid fractions, Δ/λ statistics and the fraction above 1/3,
+the worst violations by location, a row per cell size, the octree levels the
+10 mm practical minimum allows, the cells whose λ/3 is below it, and a
+lower-bound cell count for a mesh that met λ/3 against the 10-million budget.
+`centreline_diagnostics.csv` and `centreline-diagnostics.png` carry the same
+along the axis.
+
+Read them knowing three things:
+
+- **The cell numbers measure the mesh; `KnD` and the gradient numbers measure
+  the flow.** None of them, and no threshold on one, says the DSMC solution is
+  valid — the time step and the parcels per cell matter as much.
+- **A cell is valid with more than 20 sampled parcels**, time-averaged, per
+  cell — the same 20 as `dsmc.target_particles_per_exit_cell`. At the shipped
+  weight an exit cell holds about 8, so **the exit region is reported invalid**
+  (its bounds are under `validity.invalid_by_reason`) until the weight comes
+  down to about 2e16. `diagnostics.particle_count_basis: accumulated` counts
+  samples over the window instead, a much weaker test.
+- **λ/3 is far below any permitted cell at the exit.** λ there is 0.14 mm, so
+  λ/3 is 0.047 mm; with a 0.5 m background and a 10 mm floor the finest level
+  allowed is 5, 15.625 mm (level 6, 7.8 mm, is not). The summary reports that
+  gap rather than clipping it.
+
+**Step 3** copies `case.yaml`, `viz.yaml`, `open.foam` and the `All*`
+scripts — nothing else. The mesh, every dictionary, `0/`, and the time step
+derived from the smallest cell are generated again from the edited
+`case.yaml`; no time or processor directory, parcel or averaging state is
+carried over, and the new directory is checked for all of them. `baseCase` is
+only read. `iteration.yaml` and `provenance/` record the parent and its
+`case.yaml`, so
+
+```bash
+diff provenance/parent-case.yaml case.yaml
+```
+
+is exactly the edit that made the iteration. Keep iterations beside
+`baseCase`, as `cases/r-4d/<name>`, so the ignore rules for generated files
+cover them.
+
+The thresholds are the optional `diagnostics:` section of `case.yaml`. Full
+reference: [`docs/rarefaction-diagnostics.md`](../../docs/rarefaction-diagnostics.md).
 
 ## What has been checked
 
@@ -369,6 +463,28 @@ cells, with the same exit, plate, particle weight and run length:
   and 0.281 of its power as heat; the pressure on it peaks at 9.10 Pa; and the
   lateral force is 0.04 N and 0.02 N — symmetric to 0.01%.
 
+**The diagnostics**, on the quarter-symmetric collisionless run that
+`tests/openfoam/test_nozzleplume_openfoam.py` makes (26,483 cells, 1,462 steps
+averaged):
+
+* `rhoNMean · V / dsmcRhoNMean` is 1.000000e17 in every occupied cell — the
+  configured weight, to a spread of 2e-9 — so `dsmcRhoN` is the parcel count
+  and `rhoN` the molecule density they are taken to be.
+* `mfp` is 1/(√2 π d² n) of the written `rhoNMean` in every valid cell, and
+  −1 wherever it cannot be computed; an under-sampled cell keeps its value,
+  flagged by `diagValid`. Beside the exit it is 0.14 mm, the exit's own, and
+  the exit cells are about 220 mean free paths wide — both what this README
+  works out from `case.yaml` before any run.
+* ParaView 5.11.2 and 6.2.0 read all the fields beside `rhoNMean`, one value
+  per cell and equal to the files; a cutting plane carries each cut cell's own
+  value exactly.
+* What it found: cells sampled by **one** parcel, lingering, pass a count of
+  20 accumulated samples, and report T ≈ 1e-9 K and `KnGradT` ≈ 1e11. Hence the
+  per-step count, and the rule that a temperature at the round-off of its
+  moments is no temperature.
+
+The diagnostics have not yet been run on a full-length R-4D run.
+
 What has **not** been done: the mesh as it ships has not been run to its end
 time. **The converged plate load above is the cylinder mesh's**, and it is what
 a run on the cones is to be compared with — the two differ only in where the
@@ -379,6 +495,8 @@ with a continuum plume model; and no resolution or weight study has been made.
 ## Tests
 
 ```bash
-pytest tests/unit -k nozzleplume                    # 383 tests, no OpenFOAM needed
-pytest tests/openfoam/test_nozzleplume_openfoam.py -m needs_openfoam    # ~1 min
+pytest tests/unit -k nozzleplume                    # no OpenFOAM needed
+pytest tests/unit/test_rarefaction.py tests/unit/test_iteration.py   # the diagnostics
+pytest tests/openfoam/test_nozzleplume_openfoam.py -m needs_openfoam    # ~1 min;
+                                    # its ParaView check needs pvpython, else skips
 ```

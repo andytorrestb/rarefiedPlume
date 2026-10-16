@@ -58,6 +58,11 @@ plumetools/          the analytical model and OpenFOAM I/O, as a package
                        snappyHexMesh mesh. cases/r-4d is its first case
   viz/                 YAML-driven ParaView slice imagery; video.py and
                        dissect.py need ffmpeg but not ParaView
+  rarefaction/         after a run: local mean free path, Knudsen numbers and
+                       mesh resolution as volume fields, and a summary for
+                       planning the next mesh. Any dsmcFoam case
+  iteration.py         the next mesh iteration of a case, in a new directory:
+                       its inputs, nothing from its run
 applications/        custom OpenFOAM code
   dsmcBoundaryModels/  plumeFieldInflow -- per-face, patch-selected DSMC inflow
 cases/               standard OpenFOAM cases -- see the scope split below
@@ -174,6 +179,13 @@ cd cases/r-4d/baseCase
 ./Allviz                  # the flow field as 2-D slices (needs pvpython)
 ```
 
+`./Allpost` also writes the local mean free path, Knudsen numbers and Δ/λ into
+the sampled time directory for ParaView, with a summary of where the mesh is
+too coarse. The mesh is then changed by hand, in a **fresh iteration** —
+`python -m plumetools.iteration baseCase <new>`, edit its `case.yaml`, and
+`./Allmesh && ./Allrun` from t = 0. See
+[`docs/rarefaction-diagnostics.md`](docs/rarefaction-diagnostics.md).
+
 Everything is in one `case.yaml`, including `dsmc.n_equivalent_particles`, which
 is written to `dsmcProperties` exactly as given. At that Knudsen number the exit
 cannot be resolved — the exit cell is ~220 mean free paths — so the particle
@@ -262,6 +274,9 @@ archived output is not achievable. See
   generation had to wait for the centroid fix
 - [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,
   conventions, and what could not be verified
+- [`docs/rarefaction-diagnostics.md`](docs/rarefaction-diagnostics.md) — mean
+  free path, Knudsen numbers and mesh resolution from a sampled run; the
+  run → inspect → remesh → start-fresh workflow; adding a diagnostic
 - [`docs/viz-slices.md`](docs/viz-slices.md) — YAML-driven slice imagery of any
   solver field, through ParaView's own `pvpython`, and the four ways it misleads
   you
