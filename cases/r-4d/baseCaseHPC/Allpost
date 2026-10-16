@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+# Post-process this case: the loads on the plate, and the plume centreline.
+#
+#   ./Allpost                post-process the latest time
+#   ./Allpost --time 0.05    a specific time directory
+#   ./Allpost --viz          also render slice imagery (needs ParaView's pvpython)
+#   ./Allpost --help
+#
+# Steps:
+#
+#   1. postProcess -func writeCellCentres   -> C, Cx, Cy, Cz
+#   2. postProcess -func writeCellVolumes   -> V
+#   3. plumetools.nozzleplume post          -> results/
+#   4. plumetools/viz/render_slices.py      -> results/viz/      (--viz only)
+#
+# Produces, under results/:
+#
+#   plate_loads.csv       pressure, shear and heat flux on every plate face
+#   plate_summary.yaml    force and heat load on the plate, beside the jet's
+#                         thrust and power
+#   centreline.csv        n, U_x and T along the plume axis, over the exit values
+#   *.png                 maps of the plate's upstream face; the centreline
+#                         (needs matplotlib)
+#   viz/                  slices through the plume, as ./viz.yaml lists them
+#
+# Steps 1 and 2 need OpenFOAM and serve only the centreline; step 3 does not, and
+# the plate loads need neither -- they are read off the plate patch itself.
+#
+# Step 4 is opt-in because it is slow -- tens of seconds an image on a mesh this
+# size -- and needs ParaView. PVPYTHON_PATH names a pvpython that is not on PATH.
+#
+# Reads the TIME-AVERAGED fields only (fDMean, qMean, rhoNMean, ...). A single
+# written fD is one step's tally of wall hits -- DSMCCloud::resetFields zeroes it
+# every step -- and reading that as a load measures shot noise.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+TIME=""
+VIZ=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --time)     shift; TIME=${1:?"--time needs a value"} ;;
+        --viz)      VIZ=1 ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allpost: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a nozzle-plume case?"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+CASE_NAME=${PWD##*/}
+
+if [ -z "$TIME" ]; then
+    # `sort -g`, not -n: OpenFOAM's general time format writes 2e-05.
+    TIME=$(ls -d [0-9]* 2>/dev/null | grep -v '^0$' | sort -g | tail -1)
+    [ -n "$TIME" ] || die "no time directory past 0; the solver wrote nothing.
+       Run ./Allrun first."
+fi
+[ -d "$TIME" ] || die "no time directory '$TIME'"
+
+if [ ! -f "$TIME/C" ] || [ ! -f "$TIME/V" ]; then
+    if have postProcess; then
+        echo "==> postProcess -func writeCellCentres -time $TIME"
+        postProcess -func writeCellCentres -time "$TIME" > log.writeCellCentres 2>&1 \
+            || die "writeCellCentres failed; see log.writeCellCentres"
+        echo "==> postProcess -func writeCellVolumes -time $TIME"
+        postProcess -func writeCellVolumes -time "$TIME" > log.writeCellVolumes 2>&1 \
+            || die "writeCellVolumes failed; see log.writeCellVolumes"
+    else
+        echo "    'postProcess' is not on PATH and $TIME has no cell centres, so the"
+        echo "    centreline will be skipped. The plate loads do not need them."
+    fi
+    echo ""
+fi
+
+$PYTHON -m plumetools.nozzleplume post . --time "$TIME" \
+    || die "post-processing failed (see above)"
+
+# --------------------------------------------------------------------------- #
+# slice imagery
+# --------------------------------------------------------------------------- #
+
+if [ "$VIZ" -eq 1 ]; then
+    echo ""
+    PVPYTHON=${PVPYTHON_PATH:-pvpython}
+    have "$PVPYTHON" || die "'$PVPYTHON' is not an executable. --viz needs
+       ParaView's own interpreter: put pvpython on PATH, or point PVPYTHON_PATH
+       at one. See docs/environment.md."
+
+    # Wherever the plumetools this case runs against lives -- the case may have
+    # been copied out of the repository, so a relative path would not do.
+    RENDERER=$($PYTHON -c "import os, plumetools
+print(os.path.join(os.path.dirname(plumetools.__file__), 'viz', 'render_slices.py'))") \
+        || die "plumetools is not importable"
+
+    SPEC_ARGS=()
+    [ -f viz.yaml ] && SPEC_ARGS=(--spec viz.yaml)
+
+    echo "==> $PVPYTHON render_slices.py . ${SPEC_ARGS[*]+${SPEC_ARGS[*]}} --time $TIME"
+    "$PVPYTHON" --force-offscreen-rendering "$RENDERER" . \
+        "${SPEC_ARGS[@]+"${SPEC_ARGS[@]}"}" --time "$TIME" \
+        || die "rendering failed (see above); the results above are unaffected"
+fi
+
+echo ""
+echo "### $CASE_NAME: results/ holds plate_loads.csv, plate_summary.yaml, centreline.csv"
