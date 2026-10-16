@@ -1,11 +1,12 @@
 #!/bin/bash
 #
-# Post-process this case: the loads on the plate, the plume centreline, and the
-# rarefaction and mesh-resolution diagnostics.
+# Post-process this case: the loads on the plate, the plume centreline, the
+# rarefaction and mesh-resolution diagnostics, and images of all of them.
 #
-#   ./Allpost                   post-process the latest time
+#   ./Allpost                   post-process the latest time, images included
 #   ./Allpost --time 0.05       a specific time directory
-#   ./Allpost --viz             also render slice imagery (needs ParaView's pvpython)
+#   ./Allpost --no-viz          skip step 5, the images
+#   ./Allpost --viz             make a missing pvpython an error, not a skip
 #   ./Allpost --no-diagnostics  skip step 4
 #   ./Allpost --help
 #
@@ -16,7 +17,7 @@
 #   3. plumetools.nozzleplume post          -> results/
 #   4. plumetools.nozzleplume diagnostics   -> mfp, KnD, cellOverMfpMax, ... in
 #                                              the time directory; results/
-#   5. plumetools/viz/render_slices.py      -> results/viz/      (--viz only)
+#   5. plumetools/viz/render_slices.py      -> results/viz/   (needs pvpython)
 #
 # Produces, under results/:
 #
@@ -26,7 +27,10 @@
 #   centreline.csv        n, U_x and T along the plume axis, over the exit values
 #   *.png                 maps of the plate's upstream face; the centreline
 #                         (needs matplotlib)
-#   viz/                  slices through the plume, as ./viz.yaml lists them
+#   viz/                  slices through the plume, as ./viz.yaml lists them:
+#                         the averaged flow fields and every diagnostic field,
+#                         about 53 images. mfpResolved_*.png and KnCellMax_*.png
+#                         are the mesh criterion, lambda / Delta_max >= 3
 #
 # and, from step 4, the rarefaction and mesh-resolution diagnostics:
 #
@@ -45,8 +49,10 @@
 # step 3 does not, and the plate loads need neither -- they are read off the
 # plate patch itself.
 #
-# Step 5 is opt-in because it is slow -- tens of seconds an image on a mesh this
-# size -- and needs ParaView. PVPYTHON_PATH names a pvpython that is not on PATH.
+# Step 5 is the slow one -- seconds to tens of seconds an image, and ParaView
+# reads every array of the time into memory: several GB on a mesh of millions of
+# cells. Without pvpython it is skipped with a note; ./Allviz redraws later.
+# PVPYTHON_PATH names a pvpython that is not on PATH.
 #
 # Reads the TIME-AVERAGED fields only (fDMean, qMean, rhoNMean, ...). A single
 # written fD is one step's tally of wall hits -- DSMCCloud::resetFields zeroes it
@@ -57,12 +63,13 @@ SELF=${0##*/}
 cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
 
 TIME=""
-VIZ=0
+VIZ=auto           # draw if pvpython is there; --viz insists, --no-viz skips
 DIAGNOSTICS=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --time)     shift; TIME=${1:?"--time needs a value"} ;;
         --viz)      VIZ=1 ;;
+        --no-viz)   VIZ=0 ;;
         --no-diagnostics) DIAGNOSTICS=0 ;;
         -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
         *)          echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -119,9 +126,21 @@ fi
 # slice imagery
 # --------------------------------------------------------------------------- #
 
+PVPYTHON=${PVPYTHON_PATH:-pvpython}
+if [ "$VIZ" = auto ]; then
+    if have "$PVPYTHON"; then
+        VIZ=1
+    else
+        VIZ=0
+        echo ""
+        echo "    no images: '$PVPYTHON' is not an executable. Put ParaView's pvpython"
+        echo "    on PATH, or point PVPYTHON_PATH at one, and run ./Allviz -- or"
+        echo "    ./Allpost --viz to make this an error. See docs/environment.md."
+    fi
+fi
+
 if [ "$VIZ" -eq 1 ]; then
     echo ""
-    PVPYTHON=${PVPYTHON_PATH:-pvpython}
     have "$PVPYTHON" || die "'$PVPYTHON' is not an executable. --viz needs
        ParaView's own interpreter: put pvpython on PATH, or point PVPYTHON_PATH
        at one. See docs/environment.md."
@@ -145,4 +164,8 @@ echo ""
 echo "### $CASE_NAME: results/ holds plate_loads.csv, plate_summary.yaml, centreline.csv"
 if [ "$DIAGNOSTICS" -eq 1 ]; then
     echo "    and diagnostics_summary.yaml; $TIME/ holds the diagnostic fields"
+fi
+if [ "$VIZ" -eq 1 ]; then
+    echo "    results/viz/ holds the images: read mfpResolved_*.png and KnCellMax_*.png"
+    echo "    for the mesh, diagValid_*.png for what can be trusted"
 fi

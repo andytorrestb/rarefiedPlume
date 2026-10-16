@@ -27,6 +27,11 @@
 #   Ttra       translational temperature [K]       Ttra_<plane>.png
 #
 # and the two loads on the plate itself, fDMean_plate.png and qMean_plate.png.
+# Once ./Allpost has written them, also every rarefaction and resolution
+# diagnostic, on xz and the plate cross-section -- first the mesh criterion,
+# mfpResolved (1 / 0 / -1 no data) and KnCellMax = lambda / Delta_max on a
+# scale centred on 3, then the sizes, the Knudsen numbers and the validity
+# masks. ./Allpost draws all of this by default; this redraws it alone.
 # results/viz/manifest.yaml records what was drawn, from which time, at which
 # colour range. To draw something else, or somewhere else, edit ./viz.yaml.
 #
