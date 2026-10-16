@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from _helpers import HEADER, SQUARE_POINTS, TRI_FACES, make_case, patch, write
+from plumetools.mesh import polymesh
 from plumetools.mesh.boundary import read_boundary, require_patch
 from plumetools.mesh.polymesh import read_face_range, read_faces, read_points
 from plumetools.mesh.sets import read_face_set
@@ -181,3 +182,25 @@ def test_a_face_range_stops_on_a_line_that_is_not_a_face(tmp_path):
     assert read_face_range(tmp_path / "odd", 0, 1) == [[0, 1, 2]]
     with pytest.raises(ValueError, match="expected 'N"):
         read_face_range(tmp_path / "odd", 1, 1)
+
+
+def test_the_array_mesh_readers_agree_with_the_line_readers(tmp_path):
+    """Including a 12-vertex face (a two-digit count) and the one-line form
+    OpenFOAM uses for ten entries or fewer."""
+    poly = tmp_path / "constant" / "polyMesh"
+    poly.mkdir(parents=True)
+    header = "FoamFile\n{\n    format ascii;\n    class faceList;\n}\n\n"
+    faces = [[0, 1, 2, 3], list(range(12)), [4, 5, 6], list(range(20, 27))]
+    (poly / "faces").write_text(
+        header + f"{len(faces)}\n(\n"
+        + "\n".join(f"{len(f)}({' '.join(map(str, f))})" for f in faces) + "\n)\n",
+        encoding="utf-8")
+    offsets, labels = polymesh.read_faces_flat(tmp_path)
+    assert [labels[a:b].tolist() for a, b in zip(offsets[:-1], offsets[1:])] \
+        == polymesh.read_faces(tmp_path) == faces
+
+    (poly / "faces").write_text(header + "2(4(0 1 2 3) 3(4 5 6))\n", encoding="utf-8")
+    offsets, labels = polymesh.read_faces_flat(tmp_path)
+    assert offsets.tolist() == [0, 4, 7] and labels.tolist() == list(range(7))
+    (poly / "neighbour").write_text(header + "3(7 8 9)\n", encoding="utf-8")
+    assert polymesh.read_label_list(poly / "neighbour").tolist() == [7, 8, 9]
