@@ -393,6 +393,9 @@ class PostConfig:
     centreline_points: int = 200
 
 
+EXECUTION_PROFILES = ("smoke", "production")
+
+
 @dataclass(frozen=True)
 class CaseConfig:
     """A whole validated ``case.yaml``."""
@@ -411,10 +414,16 @@ class CaseConfig:
     #: its reference lengths, as ``D``.
     diagnostics: DiagnosticSettings = field(default_factory=DiagnosticSettings)
     model: str = MODEL
+    execution_profile: str = "production"
     #: Free-form provenance. Not validated: it records where a case came from,
     #: and over-constraining that makes recording an awkward fact harder than
     #: omitting it.
     meta: dict = field(default_factory=dict)
+
+    @property
+    def is_smoke(self) -> bool:
+        """Whether this case is intended for a reduced laptop smoke test."""
+        return self.execution_profile == "smoke"
 
     def species(self) -> VhsSpecies:
         """The VHS species, as the gas section describes it."""
@@ -435,7 +444,8 @@ _OPTIONAL_SECTIONS = {
     "post": PostConfig,
 }
 _TOP_LEVEL = (set(_REQUIRED_SECTIONS) | set(_OPTIONAL_SECTIONS)
-              | {"plate", "model", "meta", "diagnostics"})
+              | {"plate", "model", "meta", "diagnostics",
+                 "execution_profile"})
 
 
 def _build(cls, data, where: str):
@@ -594,8 +604,16 @@ def load_case_config(case_dir: Path) -> CaseConfig:
         raise ConfigError(str(exc)) from None
 
     plate = raw.get("plate")
+    execution_profile = raw.get("execution_profile", "production")
+    if execution_profile not in EXECUTION_PROFILES:
+        raise ConfigError(
+            f"{path}: execution_profile is {execution_profile!r}; valid values are "
+            f"{list(EXECUTION_PROFILES)}. Use 'smoke' for laptop-only reduced runs "
+            f"and 'production' for HPC-quality settings."
+        )
     cfg = CaseConfig(
         model=model,
+        execution_profile=execution_profile,
         meta=raw.get("meta") or {},
         plate=None if plate is None else _build(PlateConfig, plate, f"{path}:plate"),
         **sections,
@@ -623,6 +641,10 @@ def validate(cfg: CaseConfig, path: Path | str = "case.yaml") -> None:
     """
     def fail(message: str):
         raise ConfigError(f"{path}: {message}")
+
+    if cfg.execution_profile not in EXECUTION_PROFILES:
+        fail(f"execution_profile is {cfg.execution_profile!r}; valid values are "
+             f"{list(EXECUTION_PROFILES)}")
 
     # --- exactly-one-of -----------------------------------------------------
     for label, keys in (

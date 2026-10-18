@@ -28,6 +28,25 @@ def test_the_shipped_r4d_case_loads():
     assert load_case_config(R4D_CASE).model == MODEL
 
 
+def test_execution_profile_defaults_to_production_and_accepts_smoke(tmp_path):
+    cfg = load_case_config(R4D_CASE)
+    assert cfg.execution_profile == "production"
+    assert not cfg.is_smoke
+
+    smoke_case = tmp_path / "smoke-case"
+    write_case(smoke_case, execution_profile="smoke")
+    smoke_cfg = load_case_config(smoke_case)
+    assert smoke_cfg.execution_profile == "smoke"
+    assert smoke_cfg.is_smoke
+
+
+def test_invalid_execution_profile_is_rejected(tmp_path):
+    bad_case = tmp_path / "bad-case"
+    write_case(bad_case, execution_profile="debug")
+    with pytest.raises(ConfigError, match="execution_profile"):
+        load_case_config(bad_case)
+
+
 def test_the_shipped_r4d_case_carries_the_given_exit_plane_data():
     """The values the case was set up from. These must not drift."""
     cfg = load_case_config(R4D_CASE)

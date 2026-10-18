@@ -42,6 +42,22 @@ def test_loads_a_valid_config(tmp_path):
     assert cfg.stagnation.p0_pa == 3275009.71275
 
 
+def test_execution_profile_defaults_to_production_and_accepts_smoke(tmp_path):
+    cfg = load_case_config(write_case(tmp_path, MINIMAL))
+    assert cfg.execution_profile == "production"
+    assert not cfg.is_smoke
+
+    smoke_cfg = load_case_config(write_case(tmp_path, {**MINIMAL, "execution_profile": "smoke"}))
+    assert smoke_cfg.execution_profile == "smoke"
+    assert smoke_cfg.is_smoke
+
+
+def test_invalid_execution_profile_is_rejected(tmp_path):
+    cfg = {**MINIMAL, "execution_profile": "debug"}
+    with pytest.raises(ConfigError, match="execution_profile"):
+        load_case_config(write_case(tmp_path, cfg))
+
+
 def test_defaults_fill_in_omitted_sections(tmp_path):
     cfg = load_case_config(write_case(tmp_path, MINIMAL))
     assert cfg.angular.exponent_offset == 0.41

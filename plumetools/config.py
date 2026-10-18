@@ -496,9 +496,13 @@ class LegacyConfig:
     emit_absent_patches: bool = True
 
 
+EXECUTION_PROFILES = ("smoke", "production")
+
+
 @dataclass(frozen=True)
 class CaseConfig:
     model: str = "source_flow"
+    execution_profile: str = "production"
     mesh: MeshConfig = field(default_factory=MeshConfig)
     geometry: GeometryConfig = field(default_factory=GeometryConfig)
     gas: GasConfig = field(default_factory=GasConfig)
@@ -520,6 +524,11 @@ class CaseConfig:
     #: would make recording an awkward fact harder than omitting it.
     meta: dict = field(default_factory=dict)
 
+    @property
+    def is_smoke(self) -> bool:
+        """Whether this case is intended for a reduced laptop smoke test."""
+        return self.execution_profile == "smoke"
+
 
 _SECTIONS = {
     "mesh": MeshConfig,
@@ -538,7 +547,7 @@ _SECTIONS = {
 }
 
 #: Top-level keys that are passed through rather than built into a dataclass.
-_PASSTHROUGH = ("model", "meta")
+_PASSTHROUGH = ("model", "meta", "execution_profile")
 
 
 def _build(cls, data: dict, where: str):
@@ -636,8 +645,16 @@ def load_case_config(case_dir: Path) -> CaseConfig:
         name: _build(cls, raw.get(name, {}) or {}, f"{path}:{name}")
         for name, cls in _SECTIONS.items()
     }
+    exec_profile = raw.get("execution_profile", "production")
+    if exec_profile not in EXECUTION_PROFILES:
+        raise ConfigError(
+            f"{path}: execution_profile is {exec_profile!r}; valid values are "
+            f"{list(EXECUTION_PROFILES)}. Use 'smoke' for laptop-only reduced runs "
+            f"and 'production' for HPC-quality settings."
+        )
     cfg = CaseConfig(
         model=raw.get("model", "source_flow"),
+        execution_profile=exec_profile,
         meta=raw.get("meta") or {},
         **sections,
     )
@@ -760,6 +777,12 @@ def validate_against_case(cfg: CaseConfig, case_dir: Path, path: Path) -> None:
     Checks 2-4 are skipped when the corresponding file is absent, so a config can
     be loaded before the mesh has been generated.
     """
+    if cfg.execution_profile not in EXECUTION_PROFILES:
+        raise ConfigError(
+            f"{path}: execution_profile is {cfg.execution_profile!r}; valid values "
+            f"are {list(EXECUTION_PROFILES)}"
+        )
+
     if cfg.mesh.sphere_radius_m != cfg.geometry.sphere_radius_m:
         raise ConfigError(
             f"{path}: mesh.sphere_radius_m ({cfg.mesh.sphere_radius_m}) must equal "
