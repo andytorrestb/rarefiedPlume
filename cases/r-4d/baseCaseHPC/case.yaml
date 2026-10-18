@@ -18,6 +18,7 @@
 # See cases/r-4d/README.md.
 
 model: nozzle_exit_plume
+execution_profile: production  # smoke for laptop-only reduced runs; production for HPC-quality studies
 
 meta:
   case_name: r-4d
