@@ -1,0 +1,167 @@
+# cases/r-4d/baseCaseFreePlumeHPC -- an R-4D free plume expanding into vacuum.
+#
+# THE AUTHORITATIVE SOURCE OF PHYSICAL INPUTS FOR THIS CASE. Every OpenFOAM
+# dictionary and every 0/ field is generated from this file by ./Allmesh and
+# ./Allrun; none of them is edited by hand.
+#
+# After ANY edit, see what it implies before meshing or running anything:
+#
+#     ./Allmesh --describe        prints the exit state, the mesh, the run cost
+#                                 and the quality checks. Writes nothing.
+#
+# Values are tagged:
+#
+#   [GIVEN]       the R-4D exit-plane data this case was set up from
+#   [DERIVED]     computed and printed by --describe; never typed in here
+#   [ASSUMPTION]  not given. A modelling choice, stated so it can be changed
+#
+# See cases/r-4d/README.md.
+
+model: nozzle_exit_plume
+execution_profile: production  # smoke for laptop-only reduced runs; production for HPC-quality studies
+
+meta:
+  case_name: r-4d-free-plume
+  description: R-4D nozzle exit-plane free plume expanding into vacuum
+
+# --- the nozzle exit ----------------------------------------------------------
+# The exit plane is the DSMC inlet: the disk r <= D/2 at x = 0, plume along +x.
+nozzle:
+  exit_diameter_m: 0.376936 
+  # exit_diameter_m: 1.0         # [GIVEN]   exit area 0.111590 m^2 [DERIVED]
+
+# --- the state on the exit plane ----------------------------------------------
+# Uniform across the disk. Give exactly ONE speed and ONE density; the other
+# forms (speed_ratio; mass_density_kg_per_m3, knudsen) are printed as derived.
+exit:
+  temperature_K: 498.04              # [GIVEN]
+  speed_m_per_s: 3187.19             # [GIVEN]   bulk speed
+  number_density_per_m3: 1.306e+22   # [GIVEN]   mass density 4.442e-4 kg/m^3
+                                     #           [DERIVED]
+
+# --- the gas ------------------------------------------------------------------
+# The exhaust as ONE species with the mixture's mean molecular mass.
+gas:
+  species_name: exhaust
+  molecular_mass_kg: 3.40055e-26     # [GIVEN]   20.48 g/mol
+  molecular_diameter_m: 3.5e-10      # [GIVEN]   cross-section pi d^2 =
+                                     #           3.84845e-19 m^2 [DERIVED]
+  omega: 0.5                         # [ASSUMPTION] hard sphere. It is what makes
+                                     # the collision cross-section exactly the
+                                     # pi d^2 above at every temperature. A VHS
+                                     # exponent (0.5 < omega <= 1) also needs the
+                                     # t_ref_K the diameter belongs to.
+  internal_degrees_of_freedom: 0     # [ASSUMPTION] no internal modes, so the
+                                     # simulated gas has gamma = 5/3. Real
+                                     # exhaust has rotational modes; to model
+                                     # them set this (2 for gamma = 1.4) AND
+                                     # dsmc.collision_model:
+                                     # LarsenBorgnakkeVariableHardSphere.
+
+# --- free plume ---------------------------------------------------------------
+# No plate: the plume expands without an impingement surface.
+plate: null
+
+# --- the domain ---------------------------------------------------------------
+# A vacuum box from the exit plane x = 0. All boundaries are open: molecules
+# that reach them are deleted. Extents are rounded UP to whole background cells.
+domain:
+  x_max_m: 50.0
+  y_half_m: 40.0
+  z_half_m: 16.0
+  symmetry_planes: []                # [] is the full 3-D box. [y, z] models one
+                                     # quarter -- a quarter of the cells AND of
+                                     # the parcels for the same answer when the
+                                     # geometry and conditions are symmetric.
+
+# --- the mesh -----------------------------------------------------------------
+# blockMesh makes a uniform cubic background; snappyHexMesh refines the plume;
+# topoSet + createPatch cut the nozzle disk out of x = 0.
+#
+#     cell size at level N  =  background_cell_size_m / 2**N
+mesh:
+  background_cell_size_m: 1.0
+  plate_refinement_level: 3          # unused when plate is null
+
+  # Volumes held at a level. Each is a CONE coaxial with the plume, written to
+  # snappyHexMeshDict as a searchableCone from x_min_m (default 0, the exit
+  # plane) to x_max_m:
+  #
+  #     radius1_m    its radius at x_min_m      -> radius1, at point1
+  #     radius2_m    its radius at x_max_m      -> radius2, at point2
+  #
+  # with a straight line between them. Equal radii make a cylinder. A HOLLOW
+  # cone also takes inner_radius1_m and inner_radius2_m; left out, it is solid.
+  # (shape: box, with x/y/z bounds, is the other shape there is.)
+  #
+  # These four lie on ONE surface, r = 0.4 + 0.2 x, cut off at four stations --
+  # a half-angle of 11.3 degrees. That is a choice, not a given. It is the cone
+  # through the rims of the cylinders this replaced (1 m at x = 3, 2 m at
+  # x = 8), and in the run made on those the gas on it is at 0.3% of the
+  # on-axis density at 1 m, 4% at 3 m and 16% at 8 m. For another exit, the
+  # slope 1/S is where to start: 0.2 is this one's (speed ratio S = 5.0).
+  #
+  # snappyHexMesh refines a cell when its CENTRE is inside. So what the exit
+  # needs is a cone wide enough at x = 0.25 m, where the first background cells
+  # have their centres 0.354 m off the axis, to contain them. --describe says
+  # if it is not.
+  refinement_regions:
+    - {name: exitCore,  level: 6, x_max_m: 1.0,  radius1_m: 0.4, radius2_m: 0.6}
+    - {name: exitCore1, level: 5, x_max_m: 2.0,  radius1_m: 0.5, radius2_m: 1.0}  # 31.25 mm
+    - {name: nearField, level: 4, x_max_m: 10.0,  radius1_m: 1.0, radius2_m: 5.0}  # 62.5 mm
+    - {name: plumeCore, level: 3, x_max_m: 20.0,  radius1_m: 2.0, radius2_m: 20.0} # 0.125 m
+    - {name: plume,     level: 2, x_max_m: 30.0, radius1_m: 4.0, radius2_m: 30.0}  # 0.25 m
+  n_cells_between_levels: 3          # snappyHexMesh's nCellsBetweenLevels. It
+                                     # moves the mesh in steps, not smoothly:
+                                     # 342k cells at 2, 459k at 3, 490k at 4.
+  max_cells: 30000000                 # refuse a mesh ESTIMATED above this
+
+# --- DSMC ---------------------------------------------------------------------
+dsmc:
+  n_equivalent_particles: 1.0e+18    # THE COST KNOB: real molecules per
+                                     # simulated parcel, written to
+                                     # dsmcProperties exactly as given.
+                                     #
+                                     # At Kn ~ 4e-4 the exit is far too dense to
+                                     # resolve, so this is chosen by what the
+                                     # machine can hold, not by a criterion.
+                                     # LOWER = more parcels = less noise, more
+                                     # memory, longer steps. --describe prints
+                                     # the parcels per exit cell and the total
+                                     # this value implies.
+                                     #
+                                     # null derives it from
+                                     # target_particles_per_exit_cell instead.
+  # target_particles_per_exit_cell: 20.0   # used only when the weight is null
+
+  collision_model: VariableHardSphere
+  wall_interaction_model: MaxwellianThermal   # fully diffuse at the plate
+
+  delta_t_s: null                    # null -> from courant_target and the
+  courant_target: 0.2                # smallest cell
+
+  end_time_s: null                   # null -> average_start + the sampling
+  average_start_s: null              # null -> the transient below
+  write_interval_s: null             # null -> a handful of writes, at least two
+                                     # of them inside the averaging window
+  transient_domain_transits: 6.0     # run this many transits of the domain at
+                                     # the exit speed before averaging ...
+  sampling_domain_transits: 3.0      # ... then average over this many
+
+  n_subdomains: 12                   # MPI ranks
+  decomposition_method: scotch
+
+# --- DSMC quality checks ------------------------------------------------------
+# Thresholds for the WARNINGS ./Allmesh prints. At this exit density the cell
+# size and collision-time criteria cannot be met and will always warn; the
+# report says by how much.
+checks:
+  min_particles_per_cell: 5.0
+  min_nozzle_faces: 12
+  max_nozzle_area_error: 0.05
+  warn_parcels: 3.0e+7
+
+# --- post-processing ----------------------------------------------------------
+post:
+  centreline_radius_over_D: 0.25
+  centreline_points: 200
