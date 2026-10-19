@@ -1,0 +1,168 @@
+#!/bin/bash
+#
+# Post-process this case: the plume centreline, optional plate loads, rarefaction
+# and mesh-resolution diagnostics, and images of the available fields.
+#
+#   ./Allpost                   post-process the latest time, images included
+#   ./Allpost --time 0.05       a specific time directory
+#   ./Allpost --no-viz          skip step 5, the images
+#   ./Allpost --viz             make a missing pvpython an error, not a skip
+#   ./Allpost --no-diagnostics  skip step 4
+#   ./Allpost --help
+#
+# Steps:
+#
+#   1. postProcess -func writeCellCentres   -> C, Cx, Cy, Cz
+#   2. postProcess -func writeCellVolumes   -> V
+#   3. plumetools.nozzleplume post          -> results/
+#   4. plumetools.nozzleplume diagnostics   -> mfp, KnD, cellOverMfpMax, ... in
+#                                              the time directory; results/
+#   5. plumetools/viz/render_slices.py      -> results/viz/   (needs pvpython)
+#
+# Produces, under results/:
+#
+#   plate_loads.csv       (when a plate is configured) pressure, shear and heat
+#                         flux on every plate face
+#   plate_summary.yaml    (when a plate is configured) force and heat load
+#   centreline.csv        n, U_x and T along the plume axis, over the exit values
+#   *.png                 centreline and optional plate maps (needs matplotlib)
+#   viz/                  slices through the plume, as ./viz.yaml lists them:
+#                         the averaged flow fields and every diagnostic field,
+#                         about 53 images. mfpResolved_*.png and KnCellMax_*.png
+#                         are the mesh criterion, lambda / Delta_max >= 3
+#
+# and, from step 4, the rarefaction and mesh-resolution diagnostics:
+#
+#   <time>/mfp, KnD, ...  VOLUME FIELDS beside rhoNMean: open open.foam in
+#                         ParaView. -1 where there is no value; diagValid = 0
+#                         where a value is not to be trusted
+#   diagnostics_summary.yaml   valid fractions, Delta/lambda statistics, the
+#                         worst violations, the refinement levels allowed
+#   centreline_diagnostics.csv, centreline-diagnostics.png
+#
+# They are what to read before editing the refinement in case.yaml. To act on
+# that edit, prepare a FRESH iteration (python -m plumetools.iteration; see the
+# README) rather than re-meshing this case.
+#
+# Steps 1 and 2 need OpenFOAM and serve the centreline and the diagnostics;
+# step 3 does not. Plate-load extraction, when applicable, reads the wall patch.
+#
+# Step 5 is the slow one -- seconds to tens of seconds an image, and ParaView
+# reads every array of the time into memory: several GB on a mesh of millions of
+# cells. Without pvpython it is skipped with a note; ./Allviz redraws later.
+# PVPYTHON_PATH names a pvpython that is not on PATH.
+#
+# Reads the TIME-AVERAGED fields (rhoNMean, ...). Plate-load extraction, when
+# configured, uses fDMean and qMean; a single-step wall tally is shot noise.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+TIME=""
+VIZ=auto           # draw if pvpython is there; --viz insists, --no-viz skips
+DIAGNOSTICS=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --time)     shift; TIME=${1:?"--time needs a value"} ;;
+        --viz)      VIZ=1 ;;
+        --no-viz)   VIZ=0 ;;
+        --no-diagnostics) DIAGNOSTICS=0 ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allpost: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a nozzle-plume case?"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+CASE_NAME=${PWD##*/}
+
+if [ -z "$TIME" ]; then
+    # `sort -g`, not -n: OpenFOAM's general time format writes 2e-05.
+    TIME=$(ls -d [0-9]* 2>/dev/null | grep -v '^0$' | sort -g | tail -1)
+    [ -n "$TIME" ] || die "no time directory past 0; the solver wrote nothing.
+       Run ./Allrun first."
+fi
+[ -d "$TIME" ] || die "no time directory '$TIME'"
+
+if [ ! -f "$TIME/C" ] || [ ! -f "$TIME/V" ]; then
+    if have postProcess; then
+        echo "==> postProcess -func writeCellCentres -time $TIME"
+        postProcess -func writeCellCentres -time "$TIME" > log.writeCellCentres 2>&1 \
+            || die "writeCellCentres failed; see log.writeCellCentres"
+        echo "==> postProcess -func writeCellVolumes -time $TIME"
+        postProcess -func writeCellVolumes -time "$TIME" > log.writeCellVolumes 2>&1 \
+            || die "writeCellVolumes failed; see log.writeCellVolumes"
+    else
+        echo "    'postProcess' is not on PATH and $TIME has no cell centres, so the"
+        echo "    centreline will be skipped. Plate loads, when configured, do not need them."
+    fi
+    echo ""
+fi
+
+$PYTHON -m plumetools.nozzleplume post . --time "$TIME" \
+    || die "post-processing failed (see above)"
+
+# --------------------------------------------------------------------------- #
+# rarefaction and mesh-resolution diagnostics
+# --------------------------------------------------------------------------- #
+
+if [ "$DIAGNOSTICS" -eq 1 ]; then
+    echo ""
+    $PYTHON -m plumetools.nozzleplume diagnostics . --time "$TIME" \
+        || die "the diagnostics failed (see above); the results above are
+       unaffected. ./Allpost --no-diagnostics skips them."
+fi
+
+# --------------------------------------------------------------------------- #
+# slice imagery
+# --------------------------------------------------------------------------- #
+
+PVPYTHON=${PVPYTHON_PATH:-pvpython}
+if [ "$VIZ" = auto ]; then
+    if have "$PVPYTHON"; then
+        VIZ=1
+    else
+        VIZ=0
+        echo ""
+        echo "    no images: '$PVPYTHON' is not an executable. Put ParaView's pvpython"
+        echo "    on PATH, or point PVPYTHON_PATH at one, and run ./Allviz -- or"
+        echo "    ./Allpost --viz to make this an error. See docs/environment.md."
+    fi
+fi
+
+if [ "$VIZ" -eq 1 ]; then
+    echo ""
+    have "$PVPYTHON" || die "'$PVPYTHON' is not an executable. --viz needs
+       ParaView's own interpreter: put pvpython on PATH, or point PVPYTHON_PATH
+       at one. See docs/environment.md."
+
+    # Wherever the plumetools this case runs against lives -- the case may have
+    # been copied out of the repository, so a relative path would not do.
+    RENDERER=$($PYTHON -c "import os, plumetools
+print(os.path.join(os.path.dirname(plumetools.__file__), 'viz', 'render_slices.py'))") \
+        || die "plumetools is not importable"
+
+    SPEC_ARGS=()
+    [ -f viz.yaml ] && SPEC_ARGS=(--spec viz.yaml)
+
+    echo "==> $PVPYTHON render_slices.py . ${SPEC_ARGS[*]+${SPEC_ARGS[*]}} --time $TIME"
+    "$PVPYTHON" --force-offscreen-rendering "$RENDERER" . \
+        "${SPEC_ARGS[@]+"${SPEC_ARGS[@]}"}" --time "$TIME" \
+        || die "rendering failed (see above); the results above are unaffected"
+fi
+
+echo ""
+echo "### $CASE_NAME: results/ holds centreline.csv and applicable plate-load results"
+if [ "$DIAGNOSTICS" -eq 1 ]; then
+    echo "    and diagnostics_summary.yaml; $TIME/ holds the diagnostic fields"
+fi
+if [ "$VIZ" -eq 1 ]; then
+    echo "    results/viz/ holds the images: read mfpResolved_*.png and KnCellMax_*.png"
+    echo "    for the mesh, diagValid_*.png for what can be trusted"
+fi

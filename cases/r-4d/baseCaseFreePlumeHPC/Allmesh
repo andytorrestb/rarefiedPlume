@@ -1,0 +1,204 @@
+#!/bin/bash
+#
+# Generate this case's mesh and OpenFOAM dictionaries from case.yaml.
+#
+#   ./Allmesh                 generate dictionaries, mesh, cut the nozzle, verify
+#   ./Allmesh --describe      print what case.yaml implies and stop. Writes
+#                             NOTHING and needs no OpenFOAM: the exit state, the
+#                             mesh plan, the run cost and the quality checks.
+#   ./Allmesh --dict-only     write the dictionaries and stop (no OpenFOAM needed)
+#   ./Allmesh --force         re-mesh even if the case already has results
+#   ./Allmesh --help
+#
+# Pipeline:
+#
+#   plumetools     -> system/blockMeshDict, snappyHexMeshDict, meshQualityDict,
+#                     topoSetDict, createPatchDict, controlDict,
+#                     dsmcInitialiseDict, decomposeParDict, fvSchemes,
+#                     fvSolution, constant/dsmcProperties
+#   blockMesh      -> a uniform cubic background box; x = 0 is ONE patch
+#   snappyHexMesh  -> refine the plume volumes; carve an optional plate as a wall
+#   topoSet        -> the x = 0 faces inside r <= R0, as a faceSet
+#   createPatch    -> move that set into its own 'nozzle' patch
+#   checkMesh      -> mesh quality
+#   verify         -> that the mesh IS the geometry case.yaml declares
+#
+# Everything is OpenFOAM's own tooling and analytic primitives: no STL, no
+# external mesher. The nozzle cannot come out of blockMesh or snappyHexMesh --
+# a disk on a boundary is neither a block face nor a body -- so it is selected
+# afterwards, and is a STAIRCASE approximation to the circle whose area is
+# measured and checked against the exit area.
+#
+# case.yaml is the authoritative source for every physical input. The generated
+# dictionaries are overwritten each time and are gitignored; do not edit them.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+DESCRIBE=0
+DICT_ONLY=0
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --describe)   DESCRIBE=1 ;;
+        --dict-only)  DICT_ONLY=1 ;;
+        --force)      FORCE=1 ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "Allmesh: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allmesh: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a nozzle-plume case?"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools.nozzleplume" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+if [ "$DESCRIBE" -eq 1 ]; then
+    exec $PYTHON -m plumetools.nozzleplume describe .
+fi
+
+# Numeric time directories, i.e. solver output. `sort -g` rather than -n:
+# OpenFOAM's general time format writes 2e-05, which -n reads as 2.
+result_times() {
+    local entry name
+    for entry in */; do
+        name=${entry%/}
+        case "$name" in
+            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
+        esac
+        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
+            echo "$name"
+        fi
+    done | sort -g
+}
+
+# Refuse to re-mesh a case that already holds results.
+#
+# blockMesh replaces the geometry those results were computed on, and NOTHING
+# downstream would notice: the time directories stay where they are, addressing
+# cells that no longer exist, and the next ./Allpost reads them against the new
+# mesh. That is worse than losing them.
+#
+# --dict-only is allowed, because rewriting controlDict without touching the mesh
+# is how a finished run is carried further (see ./Allrun --help).
+LATEST=$(result_times | tail -1)
+if [ -n "$LATEST" ] && [ "$DICT_ONLY" -eq 0 ] && [ "$FORCE" -eq 0 ]; then
+    echo "Allmesh: this case already holds results (latest time $LATEST)." >&2
+    echo "" >&2
+    echo "Re-meshing would replace the geometry they were computed on while" >&2
+    echo "leaving them in place, addressing cells that no longer exist." >&2
+    echo "" >&2
+    echo "  to CONTINUE the run:            ./Allrun" >&2
+    echo "  to run further than endTime:    ./Allmesh --dict-only && ./Allrun" >&2
+    echo "  to start over:                  ./Allclean --mesh && ./Allmesh" >&2
+    echo "  to re-mesh anyway:              ./Allmesh --force" >&2
+    exit 1
+fi
+
+# Run a command, log it, and surface the FOAM error rather than the tail.
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+# --------------------------------------------------------------------------- #
+# 1. dictionaries
+# --------------------------------------------------------------------------- #
+
+echo "==> generating dictionaries from case.yaml"
+echo ""
+$PYTHON -m plumetools.nozzleplume setup . \
+    || die "dictionary generation failed (see above). case.yaml is the only file
+       to change."
+
+if [ "$DICT_ONLY" -eq 1 ]; then
+    echo ""
+    echo "Dictionaries written; the mesh was not touched. To mesh:  ./Allmesh"
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+# 2. mesh
+# --------------------------------------------------------------------------- #
+
+# snappyHexMeshDict is written only when case.yaml has a plate or a refinement
+# region, and removed otherwise -- so its presence is the plan's answer to
+# whether snappyHexMesh has anything to do.
+SNAPPY=0
+[ -f system/snappyHexMeshDict ] && SNAPPY=1
+
+for cmd in blockMesh topoSet createPatch checkMesh; do
+    have "$cmd" || die "'$cmd' is not on PATH. Source your OpenFOAM environment,
+       or use --dict-only to write the dictionaries without meshing."
+done
+if [ "$SNAPPY" -eq 1 ]; then
+    have snappyHexMesh || die "'snappyHexMesh' is not on PATH. Source your
+       OpenFOAM environment."
+fi
+
+# Clear everything in constant/polyMesh that addresses the OLD mesh by index.
+# blockMesh rewrites points/faces/owner/neighbour/boundary and nothing else, so
+# a stale faceSet and stale octree bookkeeping would survive and refer to a mesh
+# that no longer exists. Every one of these is regenerated by the pipeline.
+if [ -d constant/polyMesh ]; then
+    echo ""
+    echo "==> clearing stale mesh bookkeeping"
+    for stale in sets cellLevel pointLevel level0Edge refinementHistory \
+                 surfaceIndex cellZones faceZones pointZones; do
+        [ -e "constant/polyMesh/$stale" ] && rm -rf "constant/polyMesh/$stale"
+    done
+fi
+
+echo ""
+run blockMesh blockMesh
+[ "$SNAPPY" -eq 1 ] && run snappyHexMesh snappyHexMesh -overwrite
+run topoSet topoSet
+run createPatch createPatch -overwrite
+
+# createPatch moves the nozzle faces to the end of the face list, so anything
+# that addresses faces by label is now wrong: the faceSet it was built from, and
+# snappyHexMesh's per-face surfaceIndex. Neither is needed again.
+rm -rf constant/polyMesh/sets constant/polyMesh/surfaceIndex
+
+run checkMesh checkMesh
+
+echo ""
+echo "    mesh quality (from log.checkMesh):"
+grep -E "^ *cells:|non-orthogonality|Max skewness|Max aspect ratio|Mesh OK|Failed [0-9]+ mesh checks" \
+    log.checkMesh | sed 's/^/      /' || true
+if ! grep -q "Mesh OK" log.checkMesh; then
+    echo ""
+    echo "    WARNING: checkMesh did not report 'Mesh OK'. Read log.checkMesh before"
+    echo "    running. A failed quality check is usually survivable for particle"
+    echo "    tracking; a negative volume or a wrongly oriented face is not."
+fi
+
+# --------------------------------------------------------------------------- #
+# 3. verify the mesh is the mesh that was planned
+# --------------------------------------------------------------------------- #
+
+echo ""
+echo "==> verifying the mesh against case.yaml"
+$PYTHON -m plumetools.nozzleplume verify . \
+    || die "mesh verification failed (see above). checkMesh says the mesh is
+       valid; this says it is not the geometry case.yaml describes."
+
+echo ""
+echo "Done. Next:  ./Allrun"

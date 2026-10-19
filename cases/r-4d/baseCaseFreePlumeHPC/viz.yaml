@@ -1,0 +1,190 @@
+# cases/r-4d/baseCaseFreePlumeHPC/viz.yaml -- flow-field imagery for this case.
+# ./Allviz and ./Allpost --viz draw these fields and diagnostics.
+#
+#   ./Allviz                 the imagery alone; see ./Allviz --help
+#   ./Allpost --viz          the centreline and diagnostics, then the imagery
+#
+# or directly:
+#
+#   pvpython --force-offscreen-rendering \
+#       ../../../plumetools/viz/render_slices.py . --spec viz.yaml
+#
+# `extends: default` inherits plumetools/viz/slices.yaml: the image size, the
+# colour preset, the output layout under results/viz/, and how U and Ttra are
+# derived from the moments dsmcFoam writes. The planes and the fields are this
+# case's own -- a list REPLACES the inherited one wholesale, so what is written
+# here is exactly what gets drawn. See docs/viz-slices.md.
+
+version: 1
+extends: default
+
+# One image per field per plane, at one time. The inherited default would also
+# stitch each field's images into a video -- which, with one time and two
+# different planes, is two unrelated pictures in a row.
+video:
+  enabled: false
+
+planes:
+  # The two centre planes through the plume axis.
+  - name: xz
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+  - name: xy
+    normal: [0, 0, -1]
+    camera_up: [0, 1, 0]
+    origin: [0, 0, 0]
+
+# The five flow fields, each on both centre planes. These are the fields
+# cases/cai2012-health/viz.yaml draws -- same renderer, same time-averaged
+# samples (rhoNMean, momentumMean, ... : sampling.prefer_mean is inherited ON) --
+# plus the mass density, which that study leaves out.
+fields:
+  - name: rhoN             # number density [1/m^3] in the expanding plume
+    log: true
+    log_decades: 8
+
+  - name: rhoM             # mass density [kg/m^3]. One species, so this is
+    log: true              # exactly m * rhoN: the picture is rhoN's, read in
+    log_decades: 8         # kg/m^3 -- 4.442e-4 at the exit plane.
+
+  - name: dsmcRhoN         # PARCELS PER CELL -- dimensionless, not a density.
+    log: true              # For this case it is half the story: one particle
+    log_decades: 6         # weight serves the whole domain, so this is the map
+                           # of where the other pictures are shot noise. Below
+                           # ~5 a cell's fields are not to be read.
+
+  # The two linear scales are PINNED, to what the gas can physically reach.
+  # Left to follow the data they follow the noise instead: a cell outside the
+  # plume that saw a handful of parcels reports 6600 m/s and 8700 K, and the
+  # whole plume is then drawn in the bottom half of the colour bar. Pinned, the
+  # three planes also share one scale and can be compared.
+  #
+  # Both limits come from the exit state in case.yaml (T = 498.04 K,
+  # U = 3187.19 m/s, monatomic) and do NOT follow it: move them with it.
+  #
+  #   stagnation temperature   T0 = T + U^2 / (2 cp)   = 5502 K
+  #   limiting speed           sqrt(2 cp T0)           = 3342 m/s
+  #
+  # Anything drawn at the top of either bar is above what the flow can do, and
+  # is noise.
+  #
+  # 6500 and not 6000 for the legend's sake: ParaView picks the tick interval,
+  # and at 6000 it picks 500 K, thirteen labels printed over one another.
+  - name: U                # speed [m/s]; derived: |momentum| / rhoM
+    range: [0, 3500]
+  - name: Ttra             # translational temperature [K]; derived
+    range: [0, 6500]
+
+  # --- the rarefaction and mesh-resolution diagnostics ----------------------- #
+  # ./Allpost writes them into the time directory (python -m
+  # plumetools.nozzleplume diagnostics), then draws them here. Computed FROM
+  # the averaged fields, so there is no *Mean to prefer. A time without them --
+  # an older run, or ./Allpost --no-diagnostics -- skips them with a message.
+  # On the plume's centre plane; the xy plane would repeat xz.
+  #
+  # Two kinds of cell are not to be trusted. An under-sampled one keeps its
+  # values and has diagValid = 0. One with nothing to compute from holds -1,
+  # which the renderer draws in the BOTTOM colour of its bar -- on a log scale
+  # that looks like a very small value, and it is not: it is no data. (In
+  # ParaView itself, Threshold on diagValid >= 1.)
+
+  # THE MESH CRITERION. A cell resolves the local mean free path when
+  # lambda / Delta_max >= 3 -- diagnostics.cells_per_mean_free_path in
+  # case.yaml. The two below are pinned to that 3: move them with it.
+  - name: mfpResolved      # the criterion as a map: 1 resolved, 0 not, -1 no
+    prefer_mean: false     # data -- the one image where "no data" has its own
+    planes: [xz]           # colour. Trust it where diagValid = 1.
+    range: [-1, 1]
+    legend_title: "mfpResolved: 1 yes, 0 no, -1 no data"
+  - name: KnCellMax        # lambda / Delta_max -- mean free path over the cell
+    prefer_mean: false     # edge: how FAR from the criterion. Diverging, log,
+    planes: [xz]           # centred on 3: red cells resolve lambda/3, blue ones
+    log: true              # do not, white is on the line. Pinned, so that two
+    range: [0.003, 3000]   # iterations can be compared. -1 (no data) is drawn
+    preset: Cool to Warm   # deepest blue: read mfpResolved for that.
+    legend_title: "KnCellMax = mfp / cell edge (3 = criterion)"
+  - name: KnCellV          # lambda / V^(1/3): the same against the volume-
+    prefer_mean: false     # equivalent size. Equal to KnCellMax on the cubic
+    planes: [xz]           # octree cells; these are cubic octree cells.
+    log: true
+    range: [0.003, 3000]
+    preset: Cool to Warm
+    legend_title: "KnCellV = mfp / V^(1/3) (3 = criterion)"
+  - name: cellOverMfpMax   # Delta_max / lambda, the inverse; above 1/3 a cell
+    prefer_mean: false     # is coarser than the lambda/3 target
+    planes: [xz]
+    log: true
+    log_decades: 5
+  - name: cellOverMfpV     # V^(1/3) / lambda
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 5
+
+  # Sizes: what the mesh has, and what lambda/3 asks for.
+  - name: cellSizeTarget   # lambda / 3 [m], never clipped to a minimum
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 6
+  - name: cellSizeMax      # Delta_max [m], the largest bounding-box dimension
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 3
+  - name: cellSizeV        # V^(1/3) [m]
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 3
+
+  # Rarefaction: the flow, not the mesh.
+  - name: mfp              # mean free path lambda [m]
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 6
+  - name: KnD              # lambda / D: on the exit diameter
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 6
+  - name: KnGradN          # lambda |grad n| / n: on the density's own scale
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 4
+  - name: KnGradT          # lambda |grad T| / T: on the temperature's own scale
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 4
+
+  # Statistics and validity.
+  - name: parcelsPerStep   # parcels in the cell per step (dsmcRhoNMean). The
+    prefer_mean: false     # validity rule: MORE than 20
+    planes: [xz]
+    log: true
+    log_decades: 6
+  - name: sampledParcels   # x steps averaged: every parcel sample behind a cell
+    prefer_mean: false
+    planes: [xz]
+    log: true
+    log_decades: 8
+  - name: diagValid        # 1 where the diagnostics above can be trusted
+    prefer_mean: false
+    planes: [xz]
+    range: [0, 1]
+  - name: diagValidGradN   # 1 where grad n was fitted from valid neighbours
+    prefer_mean: false
+    planes: [xz]
+    range: [0, 1]
+  - name: diagValidGradT   # 1 where grad T was
+    prefer_mean: false
+    planes: [xz]
+    range: [0, 1]
+  - name: diagStatus       # why not: a sum of 1 no parcels, 2 too few,
+    prefer_mean: false     # 4 n <= 0, 8 no resolved T
+    planes: [xz]
+    range: [0, 15]
