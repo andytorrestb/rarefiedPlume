@@ -19,6 +19,8 @@ from _nozzleplume import MINIMAL_CASE, R4D_CASE, REPO, load_case, write_case
 from plumetools.nozzleplume import MODEL
 from plumetools.nozzleplume.config import ConfigError, load_case_config
 
+FREE_PLUME_HPC_CASE = REPO / "cases" / "r-4d" / "baseCaseFreePlumeHPC"
+
 
 # --------------------------------------------------------------------------- #
 # the shipped case
@@ -26,6 +28,28 @@ from plumetools.nozzleplume.config import ConfigError, load_case_config
 
 def test_the_shipped_r4d_case_loads():
     assert load_case_config(R4D_CASE).model == MODEL
+
+
+def test_the_hpc_free_plume_case_loads_without_a_plate():
+    cfg = load_case_config(FREE_PLUME_HPC_CASE)
+    assert cfg.model == MODEL
+    assert cfg.execution_profile == "production"
+    assert cfg.plate is None
+    assert cfg.domain.x_max_m == 50.0
+    assert cfg.dsmc.n_subdomains == 12
+
+
+def test_the_hpc_free_plume_viz_spec_has_no_plate_outputs():
+    from plumetools.viz.spec import load_spec
+
+    spec = load_spec(FREE_PLUME_HPC_CASE / "viz.yaml")
+    assert [plane.name for plane in spec.planes] == ["xz", "xy"]
+    assert not {"fD", "q"} & {field.name for field in spec.fields}
+    assert all(
+        plane_name in {plane.name for plane in spec.planes}
+        for field in spec.fields
+        for plane_name in (field.planes or ())
+    )
 
 
 def test_execution_profile_defaults_to_production_and_accepts_smoke(tmp_path):
