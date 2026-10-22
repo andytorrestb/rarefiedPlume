@@ -162,6 +162,9 @@ def record_measurement(path: Path, entry: dict) -> Path:
     -- under this family's header. :func:`load_cost_model` prefers this file as
     soon as it holds a measurement, so the estimates move from the
     collisionless health runs to this family's own.
+
+    Not locked: jobs that can finish together call it through
+    :func:`plumetools.cai2012ext.hpc.record_entry`, which is.
     """
     import yaml
 

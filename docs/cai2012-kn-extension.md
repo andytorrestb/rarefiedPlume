@@ -82,6 +82,7 @@ imports them, and its new code is a separate package, `plumetools/cai2012ext/`.
 | `policy.py` | fixed matrix, exclusions, inheritance check, run gate |
 | `provenance.py` | independent Kn recomputation; ρ0, p0, startup in three units, code version |
 | `feasibility.py` | production verdicts from the nozzle-plume checks, criterion cell count, cost/disk |
+| `hpc.py` | what a case's PBS job does around `./Allrun`: the excluded-Kn guard, the `NON-PRODUCTION` label, the finished test, the wall clock recorded under a file lock |
 | `diagnostics.py` | the adapter that feeds `plumetools.rarefaction` from a cai2012 `case.yaml` and adds the exit-plane check |
 | `generation.py` | the parent generator deletes and re-copies un-run cases; this one never touches a matching case |
 | `verification.py` | recomputes what the extension promises (§10) |

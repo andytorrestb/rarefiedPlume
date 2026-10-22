@@ -39,6 +39,8 @@ What this package adds is what an extension needs and the parent study did not:
 :mod:`.feasibility` whether a case is fit for production, and what it costs --
                     the nozzle-plume family's pre-run resolution checks
 :mod:`.generation`  idempotent generation that never overwrites results
+:mod:`.hpc`         what a case's PBS job does around ``./Allrun``: the Kn
+                    guard, the NON-PRODUCTION label, the locked wall clock
 :mod:`.diagnostics` the nozzle-plume family's post-run rarefaction and
                     mesh-resolution diagnostics (:mod:`plumetools.rarefaction`)
 :mod:`.comparison`  angular, off-axis velocity, temperature and pressure
