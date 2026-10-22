@@ -1,0 +1,103 @@
+# cases/cai2012-kn-extension/viz-diagnostics.yaml -- images of the rarefaction
+# and mesh-resolution diagnostics.
+#
+# The diagnostic entries of cases/r-4d/baseCase/viz.yaml, on this family's
+# centre plane. ./AllpostCases renders it once per case after ./Alldiagnose.py
+# has written the fields; or, for one case:
+#
+#   pvpython --force-offscreen-rendering ../../plumetools/viz/render_slices.py \
+#       Cases/Kn1_np1x --spec viz-diagnostics.yaml
+#
+# The fields exist only in the time directory Alldiagnose.py read -- the latest
+# -- so this spec draws that time and nothing else. They are not averages:
+# prefer_mean is off. -1 is "no value" everywhere; on a log scale it takes the
+# bottom colour, so read mfpResolved and diagValid first.
+#
+# KnCellMax and mfpResolved carry pinned ranges, as in R-4D, so the four Kn and
+# any later iteration are drawn on one scale. The rest auto-range over their
+# top decades -- their absolute values move with the density by five decades
+# across this study, so a pinned range would black out three of the four.
+
+version: 1
+extends: default
+
+output:
+  subdirectory: diagnostics
+  filename: "{field}_{plane}"
+
+video:
+  enabled: false
+
+sampling:
+  time: latest
+  prefer_mean: false       # the diagnostics are computed FROM the means; there
+                           # is no mfpMean to reach for
+
+planes:
+  - name: midplane         # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+
+fields:
+  # --- the mesh criterion, first -------------------------------------------
+  - name: mfpResolved      # 1 resolved (lambda / Delta_max >= 3), 0 not, -1 no
+    range: [-1, 1]         # data -- the one image where "no data" has its own
+    legend_title: "mfpResolved: 1 yes, 0 no, -1 no data"
+  - name: KnCellMax        # lambda / Delta_max, diverging and centred on 3:
+    log: true              # red resolves lambda/3, blue does not. Pinned.
+    range: [0.003, 3000]
+    preset: Cool to Warm
+    legend_title: "KnCellMax = mfp / cell edge (3 = criterion)"
+  - name: KnCellV          # lambda / V^(1/3); equal to KnCellMax on cubic cells,
+    log: true              # different on the graded outer blocks
+    range: [0.003, 3000]
+    preset: Cool to Warm
+    legend_title: "KnCellV = mfp / V^(1/3) (3 = criterion)"
+  - name: cellOverMfpMax   # Delta_max / lambda; above 1/3 coarser than target
+    log: true
+    log_decades: 5
+  - name: cellOverMfpV
+    log: true
+    log_decades: 5
+
+  # --- lengths ---------------------------------------------------------------
+  - name: mfp              # lambda [m], VHS at the local T
+    log: true
+    log_decades: 6
+  - name: cellSizeTarget   # lambda / 3 [m], never clipped
+    log: true
+    log_decades: 6
+  - name: cellSizeMax      # Delta_max [m]
+    log: true
+    log_decades: 3
+  - name: cellSizeV        # V^(1/3) [m]
+    log: true
+    log_decades: 3
+
+  # --- rarefaction -----------------------------------------------------------
+  - name: KnD              # lambda / D -- the length this case's Kn is on, so
+    log: true              # it starts at the case's Kn at the exit
+    log_decades: 6
+  - name: KnGradN          # lambda |grad n| / n
+    log: true
+    log_decades: 4
+  - name: KnGradT          # lambda |grad T| / T
+    log: true
+    log_decades: 4
+
+  # --- statistics behind them ------------------------------------------------
+  - name: parcelsPerStep   # dsmcRhoNMean: parcels in the cell per step; the
+    log: true              # validity rule is MORE than 20
+    log_decades: 6
+  - name: sampledParcels   # x steps averaged
+    log: true
+    log_decades: 8
+  - name: diagValid
+    range: [0, 1]
+  - name: diagValidGradN
+    range: [0, 1]
+  - name: diagValidGradT
+    range: [0, 1]
+  - name: diagStatus       # 1 no parcels, 2 too few, 4 n <= 0, 8 no resolved T
+    range: [0, 15]

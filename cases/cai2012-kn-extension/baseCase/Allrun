@@ -1,0 +1,355 @@
+#!/bin/bash
+#
+# Run this case end to end.
+#
+#   ./Allrun                 decomposition from system/decomposeParDict
+#   ./Allrun --serial        force a single process
+#   ./Allrun -np 8           override the subdomain count
+#   ./Allrun --no-solve      stop after generating 0/ (needs no solver)
+#   ./Allrun --help
+#
+# Order (all of it load-bearing):
+#
+#   1. runInflow.py    writes 0/boundaryU, boundaryT, boundaryNumberDensity_Ar
+#                      and the nine measurement fields
+#   2. dsmcInitialise  CONSTRUCTS a DSMCCloud, whose constructor reads
+#                      0/boundaryT and 0/boundaryU with MUST_READ -- so step 1
+#                      has to come first
+#   3. dsmcFoam        solve
+#
+# This script never re-meshes. Mesh generation is ./Allmesh, kept separate so a
+# solver run cannot silently change the geometry underneath its own results.
+#
+# CONTINUING A RUN
+#
+# Re-running this script CONTINUES the case from its newest time directory; it
+# does not start over. system/controlDict carries `startFrom latestTime`, and the
+# two steps that would destroy the state being resumed from -- dsmcInitialise and
+# `decomposePar -force` -- are skipped or narrowed to the resume time.
+#
+# So an interrupted run is restarted by running this again, and a finished run
+# can be carried further by raising the end time in case.yaml and then:
+#
+#     ./Allmesh --dict-only     rewrite controlDict; does NOT re-mesh
+#     ./Allrun                  continue from the latest time
+#
+# The averaging continues too: fieldAverage keeps its accumulators in each time
+# directory's uniform/, so the mean fields span the whole sampled period rather
+# than only the last leg.
+#
+# On a resume 0/ is NOT regenerated. dsmcFoam reads the boundary fields from the
+# resume time, not from 0/, so rewriting them there would change nothing while
+# looking as though a case.yaml edit had taken hold. To change the physics, start
+# a fresh run with ./Allclean.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+CASE_NAME=${PWD##*/}
+NP=""
+NP_EXPLICIT=0
+SOLVE=1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s|--serial) NP=1; NP_EXPLICIT=1 ;;
+        -np)         shift; NP=${1:?"-np needs a subdomain count"}; NP_EXPLICIT=1 ;;
+        --no-solve)  SOLVE=0 ;;
+        -h|--help)   awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)           echo "Allrun: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Where to build the custom inflow library from, as something that can be pasted.
+# The depth is not fixed: baseCase sits three levels below the repository root, a
+# generated case under Cases/<name> four.
+build_dir_hint() {
+    local dir=$PWD
+    while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+        if [ -d "$dir/applications/dsmcBoundaryModels" ]; then
+            echo "cd $dir/applications/dsmcBoundaryModels && ./Allwmake"
+            return 0
+        fi
+        dir=${dir%/*}
+    done
+    echo "cd <repository root>/applications/dsmcBoundaryModels && ./Allwmake"
+}
+
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+foam_entry() {
+    local key=$1 file=$2 value
+    value=$(sed -n "s/^[[:space:]]*$key[[:space:]]\+\([^;]*\);.*/\1/p" "$file" 2>/dev/null | head -1)
+    echo "${value//[[:space:]]/}"
+}
+
+# Time directories under $1 (default .), numerically ascending, excluding 0.
+# `sort -g` rather than -n: OpenFOAM's general time format writes 2e-05, which
+# -n reads as 2.
+time_dirs() {
+    local dir=${1:-.} entry name
+    for entry in "$dir"/*/; do
+        name=${entry%/}
+        name=${name##*/}
+        case "$name" in
+            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
+        esac
+        # A time directory's name is numeric and nothing else.
+        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
+            echo "$name"
+        fi
+    done | sort -g
+}
+
+latest_time() { time_dirs "${1:-.}" | tail -1; }
+newest_of()   { printf '%s\n' "$@" | grep -v '^$' | sort -g | tail -1; }
+
+# --------------------------------------------------------------------------- #
+# preflight
+# --------------------------------------------------------------------------- #
+
+echo "### $CASE_NAME"
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a cai2012 case?"
+[ -f runInflow.py ] || die "no runInflow.py here"
+[ -d constant/polyMesh ] || die "no constant/polyMesh. Generate it first:
+       ./Allmesh"
+[ -f constant/dsmcProperties ] || die "no constant/dsmcProperties. It is
+       GENERATED from case.yaml, so run ./Allmesh first."
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+if [ "$SOLVE" -eq 1 ]; then
+    have dsmcFoam || die "'dsmcFoam' is not on PATH. Source your OpenFOAM
+       environment, or use --no-solve to stop after generating 0/."
+    have dsmcInitialise || die "'dsmcInitialise' is not on PATH"
+
+    # Fail fast if the custom inflow library is missing. Without this the run
+    # gets several minutes in -- through dsmcInitialise and decomposePar -- and
+    # then dies with an unknown-model error whose cause is not obvious.
+    LIB=libplumeDsmcBoundaryModels.so
+    if grep -q "InflowBoundaryModel *plumeFieldInflow" constant/dsmcProperties; then
+        FOUND=0
+        for dir in "${FOAM_USER_LIBBIN:-}" "${FOAM_SITE_LIBBIN:-}" "${FOAM_LIBBIN:-}"; do
+            [ -n "$dir" ] && [ -f "$dir/$LIB" ] && FOUND=1 && break
+        done
+        [ "$FOUND" -eq 1 ] || die "$LIB is not built.
+       constant/dsmcProperties selects the plumeFieldInflow boundary model, which
+       lives in that library. This is NOT a request for the MNF fork's dsmcFoam+:
+       the model is a peer of OpenFOAM's own FreeStream and is built against the
+       standard distribution. It exists because stock FreeStream injects on every
+       patch-type boundary -- which here would turn all five vacuum boundaries
+       into inlets -- so there is no fallback and the run would abort.
+
+       Build it, with your OpenFOAM environment sourced:
+           $(build_dir_hint)
+
+       Or from the repository root, which also checks the rest of the setup:
+           ./Allsetup
+
+       Searched: \${FOAM_USER_LIBBIN}, \${FOAM_SITE_LIBBIN}, \${FOAM_LIBBIN}"
+    fi
+fi
+
+if [ -z "$NP" ]; then
+    NP=$(foam_entry numberOfSubdomains system/decomposeParDict)
+    NP=${NP:-1}
+fi
+case "$NP" in
+    ''|*[!0-9]*) die "subdomain count must be a positive integer, got '$NP'" ;;
+esac
+
+echo "    subdomains=$NP  solve=$SOLVE"
+
+# --------------------------------------------------------------------------- #
+# continue, or start from scratch?
+# --------------------------------------------------------------------------- #
+#
+# system/controlDict says `startFrom latestTime`, so dsmcFoam resumes from the
+# newest time directory by itself and starts at 0 when there is none. What this
+# block decides is what the SUPPORTING steps must do differently on a resume --
+# and two of them would otherwise destroy exactly the state being resumed from:
+#
+#   dsmcInitialise         rebuilds the initial parcel cloud
+#   decomposePar -force    deletes processor*/, including the newest time in it
+#
+# Neither runs on a resume. Nothing here ever removes a time directory; ./Allclean
+# is the only thing in this case family that does, and it is explicit about it.
+
+CASE_TIME=$(latest_time .)
+PROC_TIME=""
+PROC_COUNT=0
+if [ -d processor0 ]; then
+    PROC_TIME=$(latest_time processor0)
+    PROC_COUNT=$(ls -d processor[0-9]* 2>/dev/null | wc -l | tr -d " ")
+fi
+
+RESUME=$(newest_of "$CASE_TIME" "$PROC_TIME")
+CONTINUING=0
+[ -n "$RESUME" ] && CONTINUING=1
+
+if [ "$CONTINUING" -eq 1 ] && [ "$SOLVE" -eq 1 ]; then
+    END_TIME=$(foam_entry endTime system/controlDict)
+    DELTA_T=$(foam_entry deltaT system/controlDict)
+    # Half a time step of slack, the same test Time::run() applies:
+    # `value() < endTime - 0.5*deltaT`. Without it a finished case looks
+    # unfinished, because controlDict's endTime and the time directory's name are
+    # the same number printed to six significant figures by two different
+    # formatters -- 0.00990534 against 0.00990533.
+    if [ -n "$END_TIME" ] && [ -n "$DELTA_T" ] \
+       && awk -v a="$RESUME" -v b="$END_TIME" -v dt="$DELTA_T" \
+              'BEGIN{exit !(a+0 >= b+0 - 0.5*dt)}'; then
+        echo "### $CASE_NAME has already reached endTime"
+        echo "    latest time  $RESUME"
+        echo "    endTime      $END_TIME"
+        echo ""
+        echo "Nothing to run. To carry it further, raise the end time in case.yaml"
+        echo "and then:"
+        echo "    ./Allmesh --dict-only    # rewrites controlDict; does NOT re-mesh"
+        echo "    ./Allrun                 # continues from $RESUME"
+        echo ""
+        echo "To discard these results and start over:  ./Allclean"
+        exit 0
+    fi
+    echo "    continuing from t = $RESUME"
+fi
+echo ""
+
+# --------------------------------------------------------------------------- #
+# 1. the exit state -- the only step needing no OpenFOAM
+# --------------------------------------------------------------------------- #
+
+
+if [ "$CONTINUING" -eq 1 ] && [ "$SOLVE" -eq 1 ]; then
+    echo "==> continuing from t = $RESUME; 0/ is not regenerated"
+    echo "    dsmcFoam reads the parcels AND the boundary fields from $RESUME,"
+    echo "    not from 0/ -- they are AUTO_WRITE, so every time directory carries"
+    echo "    its own copy. Rewriting 0/ here would change nothing while making it"
+    echo "    look as though a case.yaml edit had taken hold."
+    echo "    To change the physics, start a fresh run:  ./Allclean"
+else
+    echo "==> $PYTHON runInflow.py"
+    $PYTHON runInflow.py || die "runInflow.py failed (see above). It refuses to
+       write a case whose DSMC checks fail."
+fi
+
+if [ "$CONTINUING" -eq 0 ] || [ "$SOLVE" -eq 0 ]; then
+    for f in 0/boundaryU 0/boundaryT; do
+        [ -s "$f" ] || die "$f was not written"
+    done
+    ls 0/boundaryNumberDensity_* >/dev/null 2>&1 \
+        || die "no 0/boundaryNumberDensity_* was written"
+fi
+
+if [ "$SOLVE" -eq 0 ]; then
+    echo ""
+    echo "Stopped after generating 0/ (--no-solve)."
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+# 2. initialise
+# --------------------------------------------------------------------------- #
+
+if [ "$CONTINUING" -eq 1 ]; then
+    # It would rebuild the initial cloud in 0/. Harmless to the resume --
+    # dsmcFoam reads $RESUME -- but pure waste, and one edit away from
+    # being destructive.
+    echo "==> skipping dsmcInitialise (continuing from t = $RESUME)"
+else
+    run dsmcInitialise dsmcInitialise
+fi
+
+# --------------------------------------------------------------------------- #
+# 3. solve
+# --------------------------------------------------------------------------- #
+
+DECOMP_ARGS=""
+if [ "$NP_EXPLICIT" -eq 1 ] && [ "$NP" != "$(foam_entry numberOfSubdomains system/decomposeParDict)" ]; then
+    OVERRIDE=system/decomposeParDict.Allrun
+    cp system/decomposeParDict "$OVERRIDE"
+    have foamDictionary || die "foamDictionary is not on PATH, so -np cannot
+       override system/decomposeParDict. Set dsmc.n_subdomains in case.yaml and
+       re-run ./Allmesh instead."
+    foamDictionary "$OVERRIDE" -entry numberOfSubdomains -set "$NP" >/dev/null 2>&1 \
+        || die "could not set numberOfSubdomains in $OVERRIDE"
+    # The split shape follows plumetools.cai2012.dictionaries.simple_split: an
+    # (n 1 1) split hands the whole graded outer shell -- where most of the
+    # parcels are -- to the last rank.
+    SPLIT=$($PYTHON -c "from plumetools.cai2012.dictionaries import simple_split
+print('(%d %d %d)' % simple_split($NP))") || die "could not factor $NP subdomains"
+    foamDictionary "$OVERRIDE" -entry coeffs/n -set "$SPLIT" >/dev/null 2>&1 \
+        || die "could not set coeffs/n in $OVERRIDE"
+    DECOMP_ARGS="-decomposeParDict $OVERRIDE"
+    echo "    (-np $NP overrides decomposeParDict via $OVERRIDE)"
+fi
+
+if [ "$NP" -gt 1 ]; then
+    have decomposePar || die "'decomposePar' is not on PATH"
+    have mpirun || die "'mpirun' is not on PATH (use --serial for one process)"
+
+    # Whether the processor directories can be reused, and if not, what to
+    # decompose. `decomposePar -force` DELETES processor*/ before it writes, so
+    # running it unconditionally on a resume would throw away the run so far and
+    # then re-decompose 0/ -- a restart wearing a resume's clothes.
+    DECOMPOSE=1
+    if [ "$CONTINUING" -eq 1 ] && [ "$PROC_COUNT" -eq "$NP" ] && [ -n "$PROC_TIME" ]        && [ "$(newest_of "$CASE_TIME" "$PROC_TIME")" = "$PROC_TIME" ]; then
+        # The processor directories are at least as new as the reconstructed
+        # case, which is the normal state after a completed or interrupted
+        # parallel run. Nothing to do: dsmcFoam picks up its own latest time.
+        DECOMPOSE=0
+    fi
+
+    if [ "$DECOMPOSE" -eq 0 ]; then
+        echo "==> processor0..$((NP - 1)) already hold t = $PROC_TIME; not re-decomposing"
+    elif [ "$CONTINUING" -eq 1 ]; then
+        # -latestTime: decompose ONLY the time being resumed from. Without it
+        # decomposePar would also re-decompose 0/, and the solver would find two
+        # candidate start times where the case has one.
+        if [ "$PROC_COUNT" -ne 0 ] && [ "$PROC_COUNT" -ne "$NP" ]; then
+            echo "    processor count changed ($PROC_COUNT -> $NP); re-decomposing t = $RESUME"
+        fi
+        run decomposePar decomposePar -force -latestTime $DECOMP_ARGS
+    else
+        run decomposePar decomposePar -force $DECOMP_ARGS
+    fi
+
+    run dsmcFoam mpirun -np "$NP" dsmcFoam -parallel $DECOMP_ARGS
+    # reconstructPar is NOT optional: without it the post-processing would read
+    # the undecomposed case directory, which holds no results at all.
+    #
+    # -newTimes skips whatever is already reconstructed, so resuming a case does
+    # not re-reconstruct every earlier write. It also means the reconstructed
+    # times accumulate rather than being replaced.
+    have reconstructPar || die "'reconstructPar' is not on PATH"
+    run reconstructPar reconstructPar -newTimes
+else
+    run dsmcFoam dsmcFoam
+fi
+
+echo ""
+echo "### $CASE_NAME finished"
+echo "    log:     log.dsmcFoam"
+echo "    next:    ./Allpost"

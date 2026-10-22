@@ -1,0 +1,244 @@
+#!/bin/bash
+#
+# Post-process every case of the Knudsen extension that has output.
+#
+#   ./AllpostCases                 every case: diagnose, compare, audit, render,
+#                                  analyse
+#   ./AllpostCases --case Kn1_np1x only this case (repeatable), then analyse
+#   ./AllpostCases --no-viz        skip the ParaView imagery
+#   ./AllpostCases --viz-only      imagery only
+#   ./AllpostCases --analyse-only  the study-level table and plots only
+#   ./AllpostCases --no-diagnostics  skip step 2 (and its images)
+#   ./AllpostCases --stride N      read every Nth frame in the per-frame steps
+#   ./AllpostCases --keep-going    do not stop at the first failure
+#   ./AllpostCases --help
+#
+# Per case, in this order:
+#
+#   1. Allpost         the four outputs every Cai family produces: centreline
+#                      n/n0, U sqrt(beta0), T/T0 and the n/n0 contour, scored
+#                      against Cai; and the cell centres and volumes -- the
+#                      cases/cai2012 script, byte-identical
+#   2. Alldiagnose.py  the nozzle-plume family's rarefaction and mesh-
+#                      resolution diagnostics (plumetools.rarefaction): mfp,
+#                      KnD, KnCellMax, mfpResolved, ... as volume fields in the
+#                      latest time, diagnostics_summary.yaml, and the same
+#                      along the centreline
+#   3. Allcompare.py   r/D = 10 angular density and mass flux, off-axis axial
+#                      and radial velocity, temperature and pressure, every
+#                      metric with its exclusion counts
+#   4. Allaudit.py     measured parcels per cell per region, and the
+#                      centreline error at every sampled frame --
+#                      cases/cai2012-health's script, byte-identical
+#   5. Allconverge.py  stationarity of the far field across the frames
+#
+# then the imagery -- the flow fields over the sampling window, one pvpython
+# call per Kn with a spec written from the manifest (viz.yaml); and the
+# diagnostic fields at the diagnosed time (viz-diagnostics.yaml), as R-4D's
+# ./Allpost draws them -- and ./analyse.py.
+#
+# Cases with no solver output are skipped and reported, not failed: the study
+# table still lists them. Cases marked unsuitable for production ARE processed
+# if they have output (they only have it if someone ran them with
+# --allow-unsuitable), and every artefact says NON-PRODUCTION.
+#
+# The numbers are on disk before ParaView is asked for anything, so a machine
+# without it still produces every quantitative result.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+KEEP_GOING=0
+DIAGNOSTICS=1
+VIZ=1
+VIZ_ONLY=0
+ANALYSE_ONLY=0
+STRIDE=1
+SELECT=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)   KEEP_GOING=1 ;;
+        --no-viz)       VIZ=0 ;;
+        --viz-only)     VIZ_ONLY=1 ;;
+        --analyse-only) ANALYSE_ONLY=1 ;;
+        --no-diagnostics) DIAGNOSTICS=0 ;;
+        --stride)       shift; STRIDE=${1:?"--stride needs a number"} ;;
+        --case)         shift; SELECT+=("${1:?"--case needs a case name"}") ;;
+        -h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)              echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
+       ./generate_cases.py"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+LISTING=$($PYTHON -m plumetools.cai2012ext.policy manifest.yaml --all) \
+    || die "manifest.yaml breaks the extension policy (above); nothing processed"
+[ -n "$LISTING" ] || die "manifest.yaml lists no cases"
+mapfile -t CASES <<< "$LISTING"
+
+if [ ${#SELECT[@]} -gt 0 ]; then
+    PICKED=()
+    for want in "${SELECT[@]}"; do
+        FOUND=""
+        for case_path in "${CASES[@]}"; do
+            if [ "$case_path" = "$want" ] || [ "${case_path##*/}" = "$want" ]; then
+                FOUND=$case_path
+            fi
+        done
+        [ -n "$FOUND" ] || die "no case '$want' in manifest.yaml"
+        PICKED+=("$FOUND")
+    done
+    CASES=("${PICKED[@]}")
+fi
+
+has_output() {
+    local dir
+    for dir in "$1"/*/; do
+        dir=${dir%/}; dir=${dir##*/}
+        case "$dir" in 0|constant|system|results|processor*) continue ;; esac
+        [ -n "$dir" ] && [ -z "${dir//[0-9.eE+-]/}" ] && return 0
+    done
+    return 1
+}
+
+render() {
+    local root=../.. renderer pvpython
+    renderer=$root/plumetools/viz/render_slices.py
+    pvpython=${PVPYTHON_PATH:-pvpython}
+    echo "=============================================================="
+    echo "### mid-plane imagery"
+    if [ -n "${PVPYTHON_PATH:-}" ]; then
+        have "$pvpython" || { echo "AllpostCases: PVPYTHON_PATH is not an executable: $pvpython" >&2; return 1; }
+    elif ! have pvpython; then
+        echo "    skipped: 'pvpython' is not on PATH (see docs/environment.md)."
+        echo "             Every physical result is unaffected."
+        return 0
+    fi
+    # One spec per Kn, from the manifest: the averaging start and n0.
+    local listing status=0
+    listing=$($PYTHON - "${CASES[@]}" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+from plumetools.cai2012ext.vizspec import write_group_specs
+
+wanted = set(sys.argv[1:])
+manifest = yaml.safe_load(Path("manifest.yaml").read_text(encoding="utf-8"))
+for name, (path, cases) in write_group_specs(
+        manifest, Path("viz.yaml"), Path("results") / "viz-specs").items():
+    chosen = [c for c in cases if c in wanted]
+    if chosen:
+        print(path, *chosen, sep="\t")
+PY
+) || return 1
+    while IFS=$'\t' read -r spec rest; do
+        [ -n "$spec" ] || continue
+        read -r -a group <<< "$rest"
+        local ready=()
+        for case_path in "${group[@]}"; do
+            has_output "$case_path" && ready+=("$case_path")
+        done
+        [ ${#ready[@]} -gt 0 ] || continue
+        echo "    spec $spec: ${ready[*]}"
+        "$pvpython" --force-offscreen-rendering "$renderer" "${ready[@]}" --spec "$spec" \
+            || status=1
+    done <<< "$listing"
+
+    # The diagnostic fields, where Alldiagnose.py has written them: they exist
+    # in the diagnosed (latest) time only, which is what the spec draws.
+    if [ "$DIAGNOSTICS" -eq 1 ]; then
+        local diagnosed=()
+        for case_path in "${CASES[@]}"; do
+            [ -f "$case_path/results/diagnostics_summary.yaml" ] \
+                && diagnosed+=("$case_path")
+        done
+        if [ ${#diagnosed[@]} -gt 0 ]; then
+            echo "    spec viz-diagnostics.yaml: ${diagnosed[*]}"
+            "$pvpython" --force-offscreen-rendering "$renderer" "${diagnosed[@]}" \
+                --spec viz-diagnostics.yaml || status=1
+        fi
+    fi
+    return $status
+}
+
+if [ "$VIZ_ONLY" -eq 1 ]; then
+    render || die "rendering failed"
+    exit 0
+fi
+if [ "$ANALYSE_ONLY" -eq 1 ]; then
+    exec $PYTHON analyse.py
+fi
+
+# One per-case script, run from inside the case. A missing one means the case
+# was generated before the template gained it.
+step() {
+    local case_path=$1 script=$2; shift 2
+    if [ ! -f "$case_path/$script" ]; then
+        echo "AllpostCases: $case_path has no $script (./generate_cases.py --refresh)" >&2
+        return 1
+    fi
+    case "$script" in
+        *.py) ( cd "$case_path" && $PYTHON "$script" "$@" ) ;;
+        *)    bash "$case_path/$script" "$@" ;;
+    esac
+}
+
+echo "### post-processing ${#CASES[@]} case(s)"
+echo ""
+
+FAILED=()
+SKIPPED=()
+for case_path in "${CASES[@]}"; do
+    if ! has_output "$case_path"; then
+        SKIPPED+=("$case_path")
+        continue
+    fi
+    echo "=============================================================="
+    echo "### $case_path"
+    step "$case_path" Allpost        || FAILED+=("$case_path (Allpost)")
+    if [ "$DIAGNOSTICS" -eq 1 ]; then
+        step "$case_path" Alldiagnose.py || FAILED+=("$case_path (Alldiagnose)")
+    fi
+    step "$case_path" Allcompare.py  || FAILED+=("$case_path (Allcompare)")
+    step "$case_path" Allaudit.py --stride "$STRIDE" \
+        || FAILED+=("$case_path (Allaudit)")
+    step "$case_path" Allconverge.py --stride "$STRIDE" \
+        || FAILED+=("$case_path (Allconverge)")
+    if [ ${#FAILED[@]} -gt 0 ] && [ "$KEEP_GOING" -eq 0 ]; then
+        die "${FAILED[0]} failed. Use --keep-going to continue with the rest."
+    fi
+    echo ""
+done
+
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+    echo "### no solver output yet, skipped (still listed in the study table):"
+    printf '    %s\n' "${SKIPPED[@]}"
+    echo ""
+fi
+
+VIZ_FAILED=0
+if [ "$VIZ" -eq 1 ]; then
+    render || VIZ_FAILED=1
+    echo ""
+fi
+
+echo "=============================================================="
+$PYTHON analyse.py || die "the study-level analysis failed (see above)"
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "AllpostCases: ${#FAILED[@]} step(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
+[ "$VIZ_FAILED" -eq 0 ] || die "the imagery failed; every number is on disk.
+       Re-run just the imagery with ./AllpostCases --viz-only"
+echo "### done"

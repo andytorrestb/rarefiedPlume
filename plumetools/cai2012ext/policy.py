@@ -1,0 +1,429 @@
+r"""What the extension is allowed to be, and what it inherits.
+
+Three things are fixed here rather than in ``study.yaml``, because each is a
+statement about the experiment rather than a setting of it:
+
+**The matrix.** Exactly :data:`~plumetools.cai2012ext.EXTENSION_KNUDSEN` crossed
+at the single baseline level :data:`~plumetools.cai2012ext.PARTICLE_MULTIPLIERS`
+-- four configurations. :func:`check_study` refuses a ``study.yaml`` that enables
+any other combination (a second particle level included), and refuses an entry
+at an excluded Knudsen number **even if
+it is disabled**: a disabled entry is one edit away from being run.
+
+**The exclusions.** Cai's own Kn = 0.01, 0.1 and 100 are refused at generation
+(:func:`check_study`), at template level (:func:`check_template`) and on every
+execution path that reads the manifest (:func:`check_manifest`, which the
+``All*Cases`` scripts call through :func:`main`). Three gates, because the
+manifest can be edited by hand and a job script can be pointed at anything.
+
+**The inheritance.** The numerical and statistical settings come from
+``cases/cai2012-health``'s highest-resolution combination, ``ppc040/s4p5``.
+Rather than restating them here, :func:`inheritance_report` compares the
+extension template with the health template key by key, and the only keys
+allowed to differ are :data:`DELIBERATE_OVERRIDES` -- each with its reason. A
+setting added to the health template next year is therefore inherited by
+default, and diverging from it has to be declared.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import math
+import sys
+from pathlib import Path
+
+import yaml
+
+from plumetools.cai2012.study import StudyError
+from plumetools.cai2012ext import (
+    EXCLUDED_KNUDSEN,
+    EXTENSION_KNUDSEN,
+    PARTICLE_MULTIPLIERS,
+    REFERENCE_KNUDSEN,
+)
+
+
+class ExtensionError(StudyError):
+    """The extension's matrix, template or manifest breaks its policy."""
+
+
+#: ``case.yaml`` sections, in the order :class:`~plumetools.cai2012.config.CaiCaseConfig` declares them.
+SECTIONS = ("nozzle", "exit", "gas", "geometry", "mesh", "dsmc", "resolution",
+            "checks", "output", "post")
+
+#: The keys in which the extension template may differ from
+#: ``cases/cai2012-health/baseCase/case.yaml``, and why.
+#:
+#: Every other key is inherited, and :func:`inheritance_report` fails on any
+#: that is not. ``meta`` is provenance and is never compared.
+DELIBERATE_OVERRIDES = {
+    "exit.knudsen": (
+        "written per case by generate_cases.py. The health family pins 100, "
+        "which is one of the excluded Kn; the template carries 10.0, an "
+        "extension value, so that even ./Allmesh run in baseCase/ cannot "
+        "produce an excluded case."),
+    "resolution.target_particles_per_cell": (
+        "40 -- the health study's highest-resolution weight row, ppc040 "
+        "(cases/cai2012-health/study.yaml). The health TEMPLATE says 20 "
+        "because its generator writes the row value per case. This is the "
+        "baseline, and the only level the extension runs: 40 parcels in the "
+        "exit cell."),
+    "dsmc.sampling_domain_transits": (
+        "4.5 -- the health study's longest averaging column, s4p5 "
+        "(cases/cai2012-health/study.yaml). The template says 1.5 for the same "
+        "reason as above. Averaging begins AFTER the startup below."),
+    "dsmc.transient_basis": (
+        "'cai': Cai's 10^4 reference collision times, the reference being the "
+        "Kn = 0.01 exit state (resolution.reference_knudsen). NOT the health "
+        "family's 2-domain-transit startup, which that family keeps to match "
+        "its historical comparison and documents as limiting the far field "
+        "(docs/cai2012-case.md section 5.1)."),
+}
+
+#: Where the two swept health values were read from, for the record.
+HEALTH_STUDY_ROWS = {
+    "resolution.target_particles_per_cell": ("weights", "ppc040", 40.0),
+    "dsmc.sampling_domain_transits": ("samplings", "s4p5", 4.5),
+}
+
+#: ``case.yaml`` keys a Knudsen case in ``study.yaml`` may override.
+#:
+#: An ALLOW-list, because the invariants the extension promises -- the same D,
+#: S0, T0 and gas everywhere, the same startup policy, the same averaging, the
+#: same estimators -- are exactly the keys a per-Kn override would break. The
+#: mesh budget and the time step are allowed because resolving a dense case is
+#: precisely what a per-Kn mesh override is for.
+ALLOWED_OVERRIDE_SECTIONS = ("mesh",)
+ALLOWED_OVERRIDE_KEYS = ("dsmc.courant_target", "dsmc.delta_t_s",
+                         "dsmc.n_subdomains")
+
+#: Relative tolerance for "the same Knudsen number". Values are typed as
+#: decimals and pass through YAML, so exact float equality would be a trap.
+KNUDSEN_RTOL = 1.0e-9
+
+
+# --------------------------------------------------------------------------- #
+# Knudsen numbers
+# --------------------------------------------------------------------------- #
+
+def same_knudsen(a, b) -> bool:
+    """Whether two Knudsen numbers are the same number."""
+    return math.isclose(float(a), float(b), rel_tol=KNUDSEN_RTOL, abs_tol=0.0)
+
+
+def is_excluded(knudsen) -> bool:
+    """Whether ``knudsen`` is one of Cai's, which this extension never runs."""
+    return any(same_knudsen(knudsen, k) for k in EXCLUDED_KNUDSEN)
+
+
+def is_extension_knudsen(knudsen) -> bool:
+    """Whether ``knudsen`` is one of the four the extension runs."""
+    return any(same_knudsen(knudsen, k) for k in EXTENSION_KNUDSEN)
+
+
+def _excluded_message(knudsen, where: str) -> str:
+    return (f"{where}: Kn = {float(knudsen):g} is one of Cai's own Knudsen "
+            f"numbers {list(EXCLUDED_KNUDSEN)}. Those are the conditions his "
+            f"paper already compares, and this extension never generates, "
+            f"meshes, runs or post-processes them -- whether or not results "
+            f"for them exist elsewhere. They belong to cases/cai2012.")
+
+
+# --------------------------------------------------------------------------- #
+# the study
+# --------------------------------------------------------------------------- #
+
+def check_study(study) -> None:
+    """Refuse a ``study.yaml`` that is not exactly the extension matrix.
+
+    Args:
+        study: a :class:`~plumetools.cai2012.study.StudyConfig`, loaded with
+            the parent family's own loader.
+
+    Raises:
+        ExtensionError: listing **every** problem, not the first.
+    """
+    problems = []
+
+    for case in study.all_cases():
+        if is_excluded(case.knudsen):
+            state = "enabled" if case.enabled else "disabled"
+            problems.append(_excluded_message(
+                case.knudsen, f"kn_cases {case.name!r} ({state})"))
+
+    enabled = [c.knudsen for c in study.enabled_cases()]
+    missing = [k for k in EXTENSION_KNUDSEN
+               if not any(same_knudsen(k, e) for e in enabled)]
+    extra = [e for e in enabled
+             if not is_extension_knudsen(e) and not is_excluded(e)]
+    if missing:
+        problems.append(
+            f"kn_cases does not enable Kn {missing}. The extension is exactly "
+            f"{list(EXTENSION_KNUDSEN)}; a matrix with one missing is not the "
+            f"study the manifest would claim it is.")
+    if extra:
+        problems.append(
+            f"kn_cases enables Kn {extra}, which is not part of the extension "
+            f"{list(EXTENSION_KNUDSEN)}")
+
+    multipliers = [float(p.multiplier) for p in study.enabled_particle_levels()]
+    if sorted(multipliers) != sorted(PARTICLE_MULTIPLIERS):
+        problems.append(
+            f"particle_levels enables multipliers {multipliers}; the extension "
+            f"runs the baseline only, {list(PARTICLE_MULTIPLIERS)}. There is no "
+            f"parcel-population sweep in this study.")
+
+    # The parent study runs 3x longer and writes 4x more often through these.
+    # Inherited by accident they would multiply the 4.5-transit averaging window
+    # and the health write cadence, so they are pinned at one here.
+    for key in ("run_time_multiplier", "output_frequency_multiplier"):
+        value = float(getattr(study, key))
+        if value != 1.0:
+            problems.append(
+                f"{key} is {value:g}. The extension averages for exactly "
+                f"dsmc.sampling_domain_transits after the startup and writes at "
+                f"the health cadence; a study-wide multiplier would silently "
+                f"change both. It must be 1.0.")
+
+    for case in study.all_cases():
+        for section, values in (case.overrides or {}).items():
+            if section in ALLOWED_OVERRIDE_SECTIONS:
+                continue
+            keys = values if isinstance(values, dict) else {None: values}
+            for key in keys:
+                dotted = f"{section}.{key}" if key is not None else section
+                if dotted not in ALLOWED_OVERRIDE_KEYS:
+                    problems.append(
+                        f"kn_cases {case.name!r} overrides {dotted!r}. Only "
+                        f"{list(ALLOWED_OVERRIDE_SECTIONS)} sections and "
+                        f"{list(ALLOWED_OVERRIDE_KEYS)} may be set per Kn: "
+                        f"everything else is held fixed across the whole "
+                        f"extension (D, S0, T0, gas, startup, averaging, "
+                        f"estimators).")
+
+    if problems:
+        raise ExtensionError(
+            "study.yaml is not the extension matrix:\n  - "
+            + "\n  - ".join(problems))
+
+
+def expected_case_count() -> int:
+    """Four: four Knudsen numbers at the baseline particle level."""
+    return len(EXTENSION_KNUDSEN) * len(PARTICLE_MULTIPLIERS)
+
+
+# --------------------------------------------------------------------------- #
+# the template
+# --------------------------------------------------------------------------- #
+
+def check_template(cfg, where: str = "baseCase/case.yaml") -> None:
+    """Refuse a template that would break the extension's fixed policies.
+
+    Args:
+        cfg: the loaded template, a
+            :class:`~plumetools.cai2012.config.CaiCaseConfig`.
+        where: for messages.
+
+    Raises:
+        ExtensionError: listing every problem.
+    """
+    problems = []
+    if is_excluded(cfg.exit.knudsen):
+        problems.append(_excluded_message(cfg.exit.knudsen, "exit.knudsen"))
+    if not same_knudsen(cfg.resolution.reference_knudsen, REFERENCE_KNUDSEN):
+        problems.append(
+            f"resolution.reference_knudsen is "
+            f"{cfg.resolution.reference_knudsen:g}. Cai's reference collision "
+            f"time -- what the 10^4 t0 startup is counted in -- is the "
+            f"Kn = {REFERENCE_KNUDSEN:g} exit state, for every case.")
+    if cfg.dsmc.transient_basis != "cai":
+        problems.append(
+            f"dsmc.transient_basis is {cfg.dsmc.transient_basis!r}; the "
+            f"extension starts sampling after Cai's 10^4 reference collision "
+            f"times ('cai')")
+    for key in ("average_start_s", "end_time_s", "n_equivalent_particles"):
+        if getattr(cfg.dsmc, key) is not None:
+            problems.append(
+                f"dsmc.{key} is pinned at {getattr(cfg.dsmc, key)!r}. It must "
+                f"be derived (null): a pinned value would not follow the case's "
+                f"own density or the fixed Cai startup.")
+    for key in ("numerical_particle_multiplier", "run_time_multiplier",
+                "output_frequency_multiplier"):
+        if float(getattr(cfg.dsmc, key)) != 1.0:
+            problems.append(
+                f"dsmc.{key} is {getattr(cfg.dsmc, key)!r} in the template. "
+                f"The particle level is applied once, by generation, and the "
+                f"run length and write cadence are not scaled at all.")
+    if not cfg.dsmc.collisions_enabled:
+        problems.append("dsmc.collisions_enabled is false; collisions stay on at "
+                        "every Kn")
+    if problems:
+        raise ExtensionError(f"{where} breaks the extension policy:\n  - "
+                             + "\n  - ".join(problems))
+
+
+def flatten_config(cfg) -> dict:
+    """``{"section.key": value}`` for every input key of a loaded config.
+
+    From the loaded dataclasses rather than the raw YAML, so a key one file
+    states and the other leaves to its default still compares like for like.
+    """
+    flat = {}
+    for section in SECTIONS:
+        values = getattr(cfg, section)
+        for item in dataclasses.fields(values):
+            value = getattr(values, item.name)
+            if isinstance(value, tuple):
+                value = list(value)
+            flat[f"{section}.{item.name}"] = value
+    return flat
+
+
+def inheritance_report(extension_cfg, health_cfg) -> dict:
+    """Compare the extension template with the health template, key by key.
+
+    Args:
+        extension_cfg: ``cases/cai2012-kn-extension/baseCase/case.yaml``, loaded.
+        health_cfg: ``cases/cai2012-health/baseCase/case.yaml``, loaded.
+
+    Returns:
+        ``{"inherited": {key: value}, "overridden": {key: {...}},
+        "undeclared": {key: {...}}}``. ``undeclared`` must be empty: it lists
+        keys that differ without being in :data:`DELIBERATE_OVERRIDES`.
+    """
+    ours = flatten_config(extension_cfg)
+    theirs = flatten_config(health_cfg)
+    inherited, overridden, undeclared = {}, {}, {}
+    for key in sorted(set(ours) | set(theirs)):
+        mine, health = ours.get(key), theirs.get(key)
+        if key in DELIBERATE_OVERRIDES:
+            overridden[key] = {"extension": mine, "health": health,
+                               "reason": DELIBERATE_OVERRIDES[key]}
+        elif mine == health:
+            inherited[key] = mine
+        else:
+            undeclared[key] = {"extension": mine, "health": health}
+    return {"inherited": inherited, "overridden": overridden,
+            "undeclared": undeclared}
+
+
+def check_health_study_rows(health_study_path: Path) -> list[str]:
+    """Problems with the claim that 40 and 4.5 are health's ppc040 / s4p5.
+
+    Reads the health ``study.yaml`` directly. Returns an empty list when both
+    rows exist with the values :data:`HEALTH_STUDY_ROWS` records.
+    """
+    raw = yaml.safe_load(Path(health_study_path).read_text(encoding="utf-8")) or {}
+    problems = []
+    value_keys = {"weights": "target_particles_per_cell",
+                  "samplings": "sampling_domain_transits"}
+    for key, (axis, name, value) in HEALTH_STUDY_ROWS.items():
+        rows = {row.get("name"): row for row in raw.get(axis) or []}
+        if name not in rows:
+            problems.append(f"{health_study_path}: no {axis} row {name!r} (the "
+                            f"source of {key})")
+            continue
+        found = float(rows[name][value_keys[axis]])
+        if found != value:
+            problems.append(f"{health_study_path}: {axis}[{name}] is {found:g}, "
+                            f"but the extension inherits {key} = {value:g} from it")
+    return problems
+
+
+# --------------------------------------------------------------------------- #
+# the manifest -- the execution paths
+# --------------------------------------------------------------------------- #
+
+def check_manifest(manifest: dict) -> list[str]:
+    """Policy problems with a manifest that is about to be executed.
+
+    Returns a list of messages; empty means every listed case is one of the
+    extension's. An excluded Kn anywhere in the manifest is reported whatever else
+    is right, because the manifest is what every runner script reads.
+    """
+    problems = []
+    entries = manifest.get("cases") or []
+    for entry in entries:
+        kn = entry.get("Kn")
+        name = entry.get("name", "?")
+        if kn is None:
+            problems.append(f"{name}: no Kn in the manifest row")
+        elif is_excluded(kn):
+            problems.append(_excluded_message(kn, f"manifest case {name!r}"))
+        elif not is_extension_knudsen(kn):
+            problems.append(f"manifest case {name!r} is at Kn = {float(kn):g}, "
+                            f"not one of {list(EXTENSION_KNUDSEN)}")
+    return problems
+
+
+def production_status(entry: dict) -> str:
+    """The feasibility verdict recorded in a manifest row."""
+    return str((entry.get("feasibility") or {}).get("status", "unassessed"))
+
+
+def schedulable(manifest: dict, *, allow_unsuitable: bool = False):
+    """Split the manifest into cases that may run and cases that may not.
+
+    Returns:
+        ``(runnable, refused)`` -- lists of ``(entry, reason)`` for refused.
+
+    Raises:
+        ExtensionError: if the manifest contains an excluded Kn at all. That is
+            not a case to skip; it means the manifest is not this study's.
+    """
+    problems = check_manifest(manifest)
+    if problems:
+        raise ExtensionError("manifest.yaml breaks the extension policy:\n  - "
+                             + "\n  - ".join(problems))
+    runnable, refused = [], []
+    for entry in manifest.get("cases") or []:
+        status = production_status(entry)
+        if status == "production-candidate" or allow_unsuitable:
+            runnable.append(entry)
+        else:
+            reasons = (entry.get("feasibility") or {}).get("unresolved") or [
+                f"feasibility status is {status!r}"]
+            refused.append((entry, reasons))
+    return runnable, refused
+
+
+def main(argv=None) -> int:
+    """List the case paths a runner script may execute, one per line.
+
+    .. code-block:: text
+
+        python -m plumetools.cai2012ext.policy manifest.yaml
+        python -m plumetools.cai2012ext.policy manifest.yaml --allow-unsuitable
+
+    Exit status 2 if the manifest contains an excluded Kn (nothing is listed),
+    otherwise 0. Cases refused for production are reported on stderr.
+    """
+    parser = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
+    parser.add_argument("manifest")
+    parser.add_argument("--allow-unsuitable", action="store_true",
+                        help="also list cases marked unsuitable for production")
+    parser.add_argument("--all", action="store_true",
+                        help="list every case (meshing and post-processing); "
+                             "the Kn policy is still enforced")
+    args = parser.parse_args(argv)
+
+    manifest = yaml.safe_load(Path(args.manifest).read_text(encoding="utf-8")) or {}
+    try:
+        runnable, refused = schedulable(
+            manifest, allow_unsuitable=args.allow_unsuitable or args.all)
+    except ExtensionError as exc:
+        print(f"policy: {exc}", file=sys.stderr)
+        return 2
+    for entry in runnable:
+        print(entry["path"])
+    for entry, reasons in refused:
+        print(f"policy: NOT SCHEDULED {entry['path']} -- unsuitable for "
+              f"production:", file=sys.stderr)
+        for reason in reasons:
+            print(f"            {reason}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

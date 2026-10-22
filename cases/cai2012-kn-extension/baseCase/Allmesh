@@ -1,0 +1,251 @@
+#!/bin/bash
+#
+# Generate this case's mesh and OpenFOAM dictionaries from case.yaml.
+#
+#   ./Allmesh                 generate dictionaries, mesh, carve the nozzle, check
+#   ./Allmesh --dict-only     write the dictionaries and stop (no OpenFOAM needed)
+#   ./Allmesh --force         re-mesh even if the case already has results
+#   ./Allmesh --help
+#
+# Pipeline:
+#
+#   plumetools    -> system/blockMeshDict, topoSetDict, createPatchDict,
+#                    meshQualityDict, controlDict, dsmcInitialiseDict,
+#                    decomposeParDict, fvSchemes, fvSolution,
+#                    constant/dsmcProperties
+#   blockMesh     -> the graded multi-block box; x = 0 is ONE patch
+#   topoSet       -> the x = 0 faces inside r <= R0, as a faceSet
+#   createPatch   -> move that set into its own 'nozzle' patch
+#   checkMesh     -> mesh quality
+#
+# The nozzle cannot come out of blockMesh: a disk is not a block face. It is
+# carved afterwards, and the resulting patch is a STAIRCASE approximation to the
+# circle whose area is measured and checked against pi R0^2.
+#
+# case.yaml is the authoritative source for every physical input. The generated
+# dictionaries are overwritten each time and are gitignored; do not edit them.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+DICT_ONLY=0
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dict-only)  DICT_ONLY=1 ;;
+        --force)      FORCE=1 ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "Allmesh: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allmesh: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Numeric time directories, i.e. solver output. `sort -g` rather than -n:
+# OpenFOAM's general time format writes 2e-05, which -n reads as 2.
+result_times() {
+    local entry name
+    for entry in */; do
+        name=${entry%/}
+        case "$name" in
+            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
+        esac
+        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
+            echo "$name"
+        fi
+    done | sort -g
+}
+
+# Refuse to re-mesh a case that already holds results.
+#
+# blockMesh replaces the geometry those results were computed on, and NOTHING
+# downstream would notice: the time directories stay where they are, addressing
+# cells that no longer exist, and the next ./Allpost reads them against the new
+# mesh. That is worse than losing them.
+#
+# --dict-only is allowed, because rewriting controlDict without touching the mesh
+# is how a finished run is carried further (see ./Allrun --help).
+LATEST=$(result_times | tail -1)
+if [ -n "$LATEST" ] && [ "$DICT_ONLY" -eq 0 ] && [ "$FORCE" -eq 0 ]; then
+    echo "Allmesh: this case already holds results (latest time $LATEST)." >&2
+    echo "" >&2
+    echo "Re-meshing would replace the geometry they were computed on while" >&2
+    echo "leaving them in place, addressing cells that no longer exist." >&2
+    echo "" >&2
+    echo "  to CONTINUE the run:            ./Allrun" >&2
+    echo "  to run further than endTime:    ./Allmesh --dict-only && ./Allrun" >&2
+    echo "  to start over:                  ./Allclean --mesh && ./Allmesh" >&2
+    echo "  to re-mesh anyway:              ./Allmesh --force" >&2
+    exit 1
+fi
+
+# Run a command, log it, and surface the FOAM error rather than the tail: under
+# mpirun the last lines are MPI teardown from every rank and the real cause has
+# scrolled past.
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+# --------------------------------------------------------------------------- #
+# 1. dictionaries
+# --------------------------------------------------------------------------- #
+
+echo "==> generating dictionaries from case.yaml"
+$PYTHON - <<'PY' || die "dictionary generation failed"
+from plumetools.cai2012 import analytical, checks, dictionaries, gas, inflow, mesh
+from plumetools.cai2012.config import load_case_config
+from plumetools.cai2012.geometry import from_config
+
+cfg = load_case_config(".")
+geom = from_config(cfg)
+exit_state = inflow.from_config(cfg)
+
+print()
+print("\n".join(geom.describe()))
+print()
+print("\n".join(gas.describe(cfg.species(), cfg.exit.T0_K)))
+print()
+print("\n".join(exit_state.describe()))
+print()
+
+plan = mesh.plan(cfg, geom, exit_state)
+run = inflow.derive_run_settings(
+    cfg, exit_state, geom,
+    min_cell_size_m=plan.min_cell_size_m,
+    exit_cell_volume_m3=plan.exit_cell_volume_m3)
+
+# The literal Cai grid, computed and printed BEFORE anything is written. This is
+# the number that forces the graded mesh, so it is reported every single time
+# rather than filed away in a document.
+print("\n".join(mesh.uniform_cost(cfg, geom, run.reference_cell_size_m).describe()))
+print()
+print("\n".join(plan.describe()))
+print()
+
+nozzle = mesh.predicted_nozzle_faces(plan, geom)
+print("\n".join(nozzle.describe()))
+print()
+print("\n".join(run.describe()))
+print()
+
+particles = mesh.estimate_particles(
+    plan, geom, exit_state, run.n_equivalent_particles)
+print(f"  estimated parcels        {particles['total_particles']:.4e} at steady "
+      f"state ({particles['mean_particles_per_cell']:.2f}/cell on average)")
+print()
+
+print("\n".join(analytical.describe(geom.radius_m, exit_state.speed_ratio)))
+print()
+
+report = checks.run_checks(cfg, geom, exit_state, plan, run,
+                           nozzle=nozzle, particles=particles)
+print("\n".join(report.report()))
+print()
+report.raise_if_failed()
+
+for path in mesh.write_mesh_setup(".", cfg, geom, plan):
+    print(f"    wrote {path}")
+for path in dictionaries.write_case_dictionaries(".", cfg, exit_state, run):
+    print(f"    wrote {path}")
+PY
+
+if [ "$DICT_ONLY" -eq 1 ]; then
+    echo ""
+    echo "Dictionaries written. To mesh:"
+    echo "    blockMesh && topoSet && createPatch -overwrite"
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+# 2. mesh
+# --------------------------------------------------------------------------- #
+
+for cmd in blockMesh topoSet createPatch checkMesh; do
+    have "$cmd" || die "'$cmd' is not on PATH. Source your OpenFOAM environment,
+       or use --dict-only to write the dictionaries without meshing."
+done
+
+# blockMesh rewrites points/faces/owner/neighbour/boundary and nothing else, so
+# a stale sets/ from an earlier topoSet would survive and address a mesh that no
+# longer exists.
+if [ -d constant/polyMesh ]; then
+    echo "==> clearing stale mesh bookkeeping"
+    rm -rf constant/polyMesh/sets
+fi
+
+run blockMesh blockMesh
+run topoSet topoSet
+run createPatch createPatch -overwrite
+run checkMesh checkMesh
+
+echo ""
+echo "    mesh quality (from log.checkMesh):"
+grep -E "cells:|non-orthogonality|Max skewness|Max aspect ratio|Mesh OK" \
+    log.checkMesh | sed 's/^/      /' || true
+
+# --------------------------------------------------------------------------- #
+# 3. verify the mesh is the mesh that was planned
+# --------------------------------------------------------------------------- #
+
+echo ""
+echo "==> verifying the nozzle patch against case.yaml"
+$PYTHON - <<'PY' || die "mesh verification failed (see above). checkMesh says the
+       mesh is valid; this says it is not the mesh the plan describes."
+import sys
+
+from plumetools.cai2012 import checks, inflow, mesh
+from plumetools.cai2012.config import load_case_config
+from plumetools.cai2012.geometry import from_config
+from plumetools.mesh.boundary import read_boundary
+
+cfg = load_case_config(".")
+geom = from_config(cfg)
+exit_state = inflow.from_config(cfg)
+plan = mesh.plan(cfg, geom, exit_state)
+patches = read_boundary(".")
+
+predicted = mesh.predicted_nozzle_faces(plan, geom)
+name = cfg.mesh.patch_names["nozzle"]
+actual = patches[name].n_faces if name in patches else 0
+
+print(f"  patches                  " + ", ".join(
+    f"{n}({i.type}, {i.n_faces})" for n, i in patches.items()))
+print(f"  nozzle faces             predicted {predicted.n_faces}, "
+      f"meshed {actual}")
+
+if actual != predicted.n_faces:
+    print(f"\n  MISMATCH: topoSet selected {actual} faces where the plan "
+          f"predicted {predicted.n_faces}.\n"
+          f"  The Python rule (face centre inside r <= R0) and topoSet's "
+          f"cylinderToFace\n  are supposed to be the same rule. They are not, "
+          f"so the mesh is not the\n  mesh that was checked.", file=sys.stderr)
+    raise SystemExit(1)
+
+report = checks.run_checks(cfg, geom, exit_state, plan,
+                           patches=patches, nozzle=predicted)
+print("\n".join(report.report()))
+report.raise_if_failed()
+PY
+
+echo ""
+echo "Done. Next:  ./Allrun"
