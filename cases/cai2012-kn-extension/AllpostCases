@@ -7,6 +7,8 @@
 #   ./AllpostCases --case Kn1_np1x only this case (repeatable), then analyse
 #   ./AllpostCases --no-viz        skip the ParaView imagery
 #   ./AllpostCases --viz-only      imagery only
+#   ./AllpostCases --no-analyse    skip ./analyse.py: one case's job
+#                                  (runPost.sh), before every case is done
 #   ./AllpostCases --analyse-only  the study-level table and plots only
 #   ./AllpostCases --no-diagnostics  skip step 2 (and its images)
 #   ./AllpostCases --stride N      read every Nth frame in the per-frame steps
@@ -35,7 +37,7 @@
 # then the imagery -- the flow fields over the sampling window, one pvpython
 # call per Kn with a spec written from the manifest (viz.yaml); and the
 # diagnostic fields at the diagnosed time (viz-diagnostics.yaml), as R-4D's
-# ./Allpost draws them -- and ./analyse.py.
+# ./Allpost draws them -- and ./analyse.py, unless --no-analyse.
 #
 # Cases with no solver output are skipped and reported, not failed: the study
 # table still lists them. Cases marked unsuitable for production ARE processed
@@ -53,6 +55,7 @@ KEEP_GOING=0
 DIAGNOSTICS=1
 VIZ=1
 VIZ_ONLY=0
+ANALYSE=1
 ANALYSE_ONLY=0
 STRIDE=1
 SELECT=()
@@ -61,6 +64,7 @@ while [ $# -gt 0 ]; do
         --keep-going)   KEEP_GOING=1 ;;
         --no-viz)       VIZ=0 ;;
         --viz-only)     VIZ_ONLY=1 ;;
+        --no-analyse)   ANALYSE=0 ;;
         --analyse-only) ANALYSE_ONLY=1 ;;
         --no-diagnostics) DIAGNOSTICS=0 ;;
         --stride)       shift; STRIDE=${1:?"--stride needs a number"} ;;
@@ -74,6 +78,8 @@ done
 die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+[ "$ANALYSE_ONLY" -eq 1 ] && [ "$ANALYSE" -eq 0 ] \
+    && die "--analyse-only and --no-analyse ask for opposite things"
 [ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
        ./generate_cases.py"
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
@@ -231,8 +237,10 @@ if [ "$VIZ" -eq 1 ]; then
     echo ""
 fi
 
-echo "=============================================================="
-$PYTHON analyse.py || die "the study-level analysis failed (see above)"
+if [ "$ANALYSE" -eq 1 ]; then
+    echo "=============================================================="
+    $PYTHON analyse.py || die "the study-level analysis failed (see above)"
+fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "AllpostCases: ${#FAILED[@]} step(s) failed:" >&2
