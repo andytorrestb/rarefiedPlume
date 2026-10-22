@@ -40,10 +40,11 @@ anywhere.
 
 **Excluded:** `Kn = 0.01, 0.1, 100` — the conditions Cai's paper compares. The
 requested scientific range was `1e-4 … 10` by decades; its two members that
-are Cai's (0.01, 0.1) and Cai's 100 are refused at four points: `study.yaml`
-validation (even a *disabled* entry), the template, every runner script's case
-list (a hand-edited manifest naming one stops the script), and the per-case
-post-processing. Reference *quantities* at Kn = 0.01 are computed — Cai's
+are Cai's (0.01, 0.1) and Cai's 100 are refused at five points: `study.yaml`
+validation (even a *disabled* entry), the template, every `All*Cases` script's
+case list (a hand-edited manifest naming one stops the script), each case's own
+PBS job before it meshes or runs (`hpc guard`, on the case's `case.yaml`), and
+the per-case post-processing. Reference *quantities* at Kn = 0.01 are computed — Cai's
 startup is defined by them (§6) — but no case exists there.
 
 **Not in scope:** axisymmetric or planar geometry, impingement plates,
@@ -74,12 +75,12 @@ imports them, and its new code is a separate package, `plumetools/cai2012ext/`.
 | Centreline n, U, T and n contours | `plumetools.cai2012.post` via `postProcess.py` | reused unchanged |
 | Off-axis analytical n, **u (3-D)**, T | `plumetools.cai2012.analytical.moments` | reused — **no new analytical formula was needed** |
 | Occupancy audit, per-frame centreline error | `plumetools.cai2012.audit`, health `Allaudit.py` | reused byte-identical |
-| Cost model, completed-run skipping, cloud pruning | `plumetools.cai2012.health`, health `AllrunCases` | reused |
+| Cost model, completed-run test, wall-clock record | `plumetools.cai2012.health`, health `AllrunCases` | reused, per case, by `hpc.py` from each case's `runCase.sh` |
 | Averaged-field imagery, pinned ranges, sampling window | `plumetools.viz`, health `viz.yaml` | reused; window and n/n0 now from the manifest |
 
 | Added (`plumetools/cai2012ext/`) | Why it was missing |
 |---|---|
-| `policy.py` | fixed matrix, exclusions, inheritance check, run gate |
+| `policy.py` | fixed matrix, exclusions, inheritance check, the manifest's Kn gate |
 | `provenance.py` | independent Kn recomputation; ρ0, p0, startup in three units, code version |
 | `feasibility.py` | production verdicts from the nozzle-plume checks, criterion cell count, cost/disk |
 | `hpc.py` | what a case's PBS job does around `./Allrun`: the excluded-Kn guard, the `NON-PRODUCTION` label, the finished test, the wall clock recorded under a file lock |
@@ -127,7 +128,7 @@ stops generation.
 | `dsmc.sampling_domain_transits` | **4.5** | health `study.yaml`, samplings `s4p5` | override of the template's 1.5, same reason |
 | `dsmc.transient_basis` | **`cai`** | `cases/cai2012` template default | **deliberate override** of health's `transits` (2 transits), which that family documents as far-field-limiting |
 | `exit.knudsen` | per case (template: 10) | — | health pins 100, excluded here |
-| `dsmc.n_subdomains` | **192** | — | override of the health template's 12 (its development machine's cores): one HPC node of 192 cores; `./Allrun` reads it from `system/decomposeParDict`, `simple` `(4 6 8)` |
+| `dsmc.n_subdomains` | **192** | — | override of the health template's 12 (its development machine's cores): one HPC node of 192 cores, each case its own PBS job; `./Allrun` reads it from `system/decomposeParDict`, `simple` `(4 6 8)` |
 | `dsmc.write_interval_s` | 3.536e-4 s | health template | inherited; rounded to whole steps: 258 (3.5420e-4 s) at Kn ≥ 1, 496 (3.5374e-4 s) at Kn = 1e-3, 483 (3.5365e-4 s) at Kn = 1e-4 |
 | `dsmc.courant_target` | 0.2 | health template | inherited; `Δt` recomputed per mesh |
 | `mesh.*` (`target_cell_over_mfp` 1, `max_core_cell_over_D` 0.05, core 2 D × 1.5 D, 40/34 outer cells, expansion cap 40, `max_cells` 4e6) | | health template | inherited; the mesh is re-planned per Kn |
@@ -218,8 +219,7 @@ that is **178 writes per case, 141 of them transient** — no `*Mean` field, rea
 by nothing. `controlDict` has one `writeInterval`, so the cadence cannot differ
 between startup and sampling without changing `plumetools.cai2012.dictionaries`,
 which is frozen. The consequence is the disk estimate in the README (~150 GB
-per candidate, ~300 GB for the two). `AllrunCases --prune-transient` removes the transient
-writes after a case finishes; it does not lower the peak. A two-cadence
+per rarefied case, ~1.7 TB for all four); nothing is pruned. A two-cadence
 `controlDict` would be the real fix (§11).
 
 Old results are not touched: nothing in this family reads or rewrites
@@ -416,7 +416,7 @@ startup produced in the parent study.
 |---|---|---|
 | Exactly 4 configurations, the four Kn at the baseline | generator + `validate_cases.py` | pass |
 | A second particle level is refused | policy test | pass |
-| No excluded Kn generated, listed or schedulable | policy tests; a hand-edited manifest with Kn = 0.01 → `AllrunCases`/`AllmeshCases` refuse | pass |
+| No excluded Kn generated, listed or run | policy tests; a hand-edited manifest with Kn = 0.01 → `AllmeshCases`/`AllpostCases` refuse; a case at Kn = 0.01 → `hpc guard` (`runCase.sh`, `runMesh.sh`) exits 2 | pass |
 | D, S0, T0, gas identical in all 4 | manifest `held_fixed`; `validate_cases.py` | pass |
 | `n0` reproduces Kn (independent VHS formula) | all 4 | < 1e-12 relative |
 | Weight = `n0 V_exit / 40` | recomputed; `verify_tree` on `dsmcProperties` | pass |
@@ -433,7 +433,7 @@ startup produced in the parent study.
 | Resolution diagnostics on a cai2012 case | unit tests: a uniform exit state gives `mfp = Kn D` and `KnD = Kn` exactly; the exit-plane check, the thresholds from `diagnostics.yaml`, this family's centreline tube, 40 vs 10 parcels against the validity rule, excluded Kn refused | pass |
 | The whole per-case chain on a real mesh | **non-scientific** smoke case: `Kn10_np1x` coarsened to 58,080 cells, meshed by OpenFOAM's `blockMesh`/`topoSet`/`createPatch` (`Allmesh`, nozzle faces as predicted), synthetic analytical fields at OpenFOAM's own cell centres; then `Allpost`, `Alldiagnose.py`, `Allcompare.py`, `Allaudit.py`, `Allconverge.py` | all run; 18 diagnostic fields; particle-weight identity holds; exit `KnD` 10.12 vs Kn 10 |
 | Diagnostic imagery | the smoke case through `viz-diagnostics.yaml` with ParaView 6.2 (offscreen) | 18 images |
-| Unit tests | `tests/unit` (WSL, the repository `.venv`) | 1,748 passed, 6 skipped; 105 of them the extension's (`test_cai2012ext_*.py`) |
+| Unit tests | `tests/unit` (WSL, the repository `.venv`) | 1,812 passed, 6 skipped; 169 of them the extension's (`test_cai2012ext_*.py`) |
 
 **Not checked here, because it needs the solver:** `dsmcFoam` accepting the
 dictionaries at these densities (the format is the parent family's, which has
@@ -450,10 +450,12 @@ requires completed HPC runs and the convergence evidence of §9.
 1. **Kn = 1e-4 and 1e-3 cannot be resolved in 3-D Cartesian at any budget this
    project has.** `dx = λ0` needs 1.8e13 and 1.9e10 cells. Even `dx = 10 λ0`
    at Kn = 1e-3 is ~2e7 cells in the core alone, and `Δt ≤ τ0` would then also
-   need halving. Options, none taken here: refinement confined to the
+   need halving. Options: refinement confined to the
    near-exit region where `λ` is smallest (the plume rarefies within a few
-   diameters); accepting under-resolution and labelling the run as such
-   (`--allow-unsuitable`); or an axisymmetric solver, which is out of scope.
+   diameters); accepting under-resolution and labelling the run as such —
+   what is done here: both are run, each with a `NON-PRODUCTION` marker
+   written by its `runCase.sh`; or an axisymmetric solver, which is out of
+   scope.
 2. **Write cadence through the startup** (§6). A controlDict with a coarse
    interval until `average_start_s` and the health cadence after it would cut
    the candidates' disk by ~4×; that is a change to the frozen

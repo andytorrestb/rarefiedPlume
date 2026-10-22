@@ -79,6 +79,10 @@ def test_exactly_four_baseline_cases_and_no_excluded_kn(generated):
         # The diagnostics' settings travel with every case, like the scripts.
         assert (generated / "Cases" / name / "diagnostics.yaml").is_file()
         assert (generated / "Cases" / name / "Alldiagnose.py").is_file()
+        # ... and the PBS job scripts, submitted from the case itself.
+        for job in ("runMesh.sh", "runCase.sh", "runPost.sh", "runViz.sh"):
+            assert (generated / "Cases" / name / job).read_bytes() == (
+                generated / "baseCase" / job).read_bytes()
 
 
 def test_d_s0_t0_and_the_gas_are_held_fixed(generated):

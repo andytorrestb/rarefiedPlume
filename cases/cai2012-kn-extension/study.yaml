@@ -18,8 +18,9 @@
 #     a second particle level included.
 #
 #   * Kn = 0.01, 0.1 and 100 -- Cai's own conditions -- are EXCLUDED. An entry
-#     at one of them is refused EVEN IF IT IS DISABLED, and every runner script
-#     refuses a manifest that lists one. They belong to cases/cai2012.
+#     at one of them is refused EVEN IF IT IS DISABLED, every All*Cases script
+#     refuses a manifest that lists one, and a case's runCase.sh / runMesh.sh
+#     refuse a case at one. They belong to cases/cai2012.
 #
 #   * run_time_multiplier and output_frequency_multiplier must be 1. The parent
 #     study runs at 3 and 4; inherited, they would silently multiply the
@@ -100,9 +101,8 @@ kn_cases:
       lambda0 = 0.2 mm. Resolving it needs ~2e10 cells; within mesh.max_cells
       the core is coarsened to ~5.2 mm, cell/lambda0 ~ 26, and the time step is
       ~1.4 exit collision times. UNSUITABLE FOR PRODUCTION as configured: the
-      manifest says so and ./AllrunCases will not run it without
-      --allow-unsuitable. Its configuration is kept as the record of what was
-      asked for.
+      manifest says so, and its runCase.sh runs it marked NON-PRODUCTION. Its
+      configuration is kept as the record of what was asked for.
 
   - name: Kn0p0001
     Kn: 0.0001

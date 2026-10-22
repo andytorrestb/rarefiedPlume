@@ -189,7 +189,8 @@ dsmc:
   initial_number_density_per_m3: 1.0e+10
   initial_temperature_K: 300.0
 
-  n_subdomains: 192            # [EXTENSION] one HPC node, 192 cores. ./Allmesh
+  n_subdomains: 192            # [EXTENSION] one HPC node, 192 cores: each case
+                               # is its own PBS job (runCase.sh). ./Allmesh
                                # writes it into system/decomposeParDict and
                                # ./Allrun reads it from there. The health
                                # template's 12 is the laptop's physical cores.

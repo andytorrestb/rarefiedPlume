@@ -25,7 +25,8 @@
 #
 # EVERY case is meshed, including those marked unsuitable for production: a
 # mesh is cheap next to a run, and the dense meshes are where the resolution
-# deficit is reported from. Only ./AllrunCases gates on the verdict.
+# deficit is reported from. Nothing gates on the verdict: every case is run, and
+# its runCase.sh marks an unsuitable one NON-PRODUCTION.
 #
 # The case list goes through plumetools.cai2012ext.policy, which REFUSES the
 # whole manifest if it names Kn = 0.01, 0.1 or 100 -- Cai's own cases, which this
@@ -146,4 +147,4 @@ if [ ${#FAILED[@]} -gt 0 ]; then
 fi
 
 echo "### all ${#CASES[@]} case(s) meshed"
-echo "    next:  ./AllrunCases"
+echo "    next:  cd Cases/<case> && qsub runCase.sh   (one PBS job per case)"

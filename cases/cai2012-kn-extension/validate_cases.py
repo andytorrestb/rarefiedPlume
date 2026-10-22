@@ -32,7 +32,8 @@ block against the manifest. That half needs
     ./AllmeshCases --dict-only        writes them; needs no OpenFOAM
 
 Production suitability is NOT a validation failure: it is a recorded verdict.
-This script prints the count, and ./AllrunCases enforces it.
+This script prints the count; each case's runCase.sh marks an unsuitable case
+NON-PRODUCTION when it runs it.
 """
 
 from __future__ import annotations
@@ -95,12 +96,11 @@ def main(argv) -> int:
                       if c.get("production_status") != "production-candidate"]
         if unsuitable:
             print(f"                {len(unsuitable)} are UNSUITABLE FOR "
-                  f"PRODUCTION and will not be run by ./AllrunCases:")
+                  f"PRODUCTION; their runCase.sh marks them NON-PRODUCTION:")
             print("                " + ", ".join(unsuitable))
         print()
-        print("Next:")
-        print("    ./AllrunCases --list         what would run, for a job array")
-        print("    ./AllrunCases                run the production candidates")
+        print("Next, one PBS job per case (README.md):")
+        print("    cd Cases/<case> && qsub runCase.sh")
         return 0
 
     print(f"validate_cases: {len(report.failures)} FAILURE(S).", file=sys.stderr)

@@ -1,15 +1,17 @@
-"""What a case's own PBS job needs from the extension.
+"""The extension's PBS job scripts, and what runCase.sh calls around ./Allrun.
 
-``AllpostCases --no-analyse`` runs one case's post-processing chain without
-the study-level analysis, which waits for every case. It is run here against a
-stand-in ``analyse.py``. :mod:`plumetools.cai2012ext.hpc` -- the Kn guard, the
-NON-PRODUCTION label, the finished test and the locked wall-clock record -- is
-run on real ``case.yaml`` files.
+One job per case: ``baseCase/run*.sh`` are copied into every case and submitted
+from it; ``runMeshAll.sh`` and ``runAnalyse.sh`` run from the family directory;
+all of them source the one ``hpc_env.sh``. The scripts are read as text, parsed
+with ``bash -n``, and runCase.sh is run end to end against a stand-in
+environment and a stand-in ``Allrun``. :mod:`plumetools.cai2012ext.hpc` is run
+on real ``case.yaml`` files.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,10 +21,16 @@ from pathlib import Path
 import pytest
 import yaml
 
+from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012ext import feasibility, hpc
 
 REPO = Path(__file__).resolve().parents[2]
 FAMILY = REPO / "cases" / "cai2012-kn-extension"
+
+CASE_SCRIPTS = [FAMILY / "baseCase" / name for name in
+                ("runMesh.sh", "runCase.sh", "runPost.sh", "runViz.sh")]
+FAMILY_SCRIPTS = [FAMILY / name for name in ("runMeshAll.sh", "runAnalyse.sh")]
+JOB_SCRIPTS = CASE_SCRIPTS + FAMILY_SCRIPTS
 
 needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="no bash")
 needs_flock = pytest.mark.skipif(sys.platform == "win32", reason="no fcntl")
@@ -30,6 +38,12 @@ needs_flock = pytest.mark.skipif(sys.platform == "win32", reason="no fcntl")
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def code_of(path: Path) -> str:
+    """The script without its comment lines."""
+    return "\n".join(line for line in read(path).splitlines()
+                     if not line.lstrip().startswith("#"))
 
 
 def write_case(directory: Path, knudsen: float) -> Path:
@@ -65,6 +79,257 @@ def python_env(tmp_path: Path) -> dict:
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(REPO), env.get("PYTHONPATH")]))
     return env
+
+
+# --------------------------------------------------------------------------- #
+# the job scripts, as text
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("script", JOB_SCRIPTS, ids=lambda p: p.name)
+def test_every_job_starts_in_its_submission_directory(script):
+    body = read(script)
+    assert 'cd "$PBS_O_WORKDIR"' in body
+    assert '[ -z "${PBS_O_WORKDIR:-}" ]' in body
+    # hpc_env.sh: ./, ../ or ../../ from there, and nowhere else.
+    assert "for dir in . .. ../..; do" in body
+    assert '[ -f "$dir/hpc_env.sh" ]' in body
+    assert 'source "$HPC_ENV"' in body
+    assert "set -eo pipefail" in body and "set -u" not in code_of(script)
+    assert re.search(r"^trap .* ERR$", body, re.MULTILINE)
+
+
+@pytest.mark.parametrize("script", JOB_SCRIPTS, ids=lambda p: p.name)
+def test_no_job_names_allviz_a_rank_count_or_allruncases(script):
+    body = read(script)
+    assert "Allviz" not in body
+    assert not re.search(r"(^|\s)-np\b", body)
+    assert "AllrunCases" not in body
+
+
+@pytest.mark.parametrize("script", JOB_SCRIPTS, ids=lambda p: p.name)
+def test_the_environment_lives_in_hpc_env_only(script):
+    code = code_of(script)
+    for setting in ("module ", "spack", "etc/bashrc", "activate", "PVPYTHON_PATH",
+                    "VTK_DEFAULT_OPENGL_WINDOW"):
+        assert setting not in code, setting
+
+
+@pytest.mark.parametrize("script,queue,walltime,nodes,name", [
+    ("baseCase/runMesh.sh", "shortq", "2:00:00", "nodes=1:ppn=1", "knx-mesh"),
+    ("baseCase/runCase.sh", "longq", "120:00:00", "nodes=1:ppn=192", "knx-run"),
+    ("baseCase/runPost.sh", "longq", "120:00:00", "nodes=1:ppn=192", "knx-post"),
+    ("baseCase/runViz.sh", "longq", "120:00:00", "nodes=1:ppn=192", "knx-viz"),
+    ("runMeshAll.sh", "shortq", "4:00:00", "nodes=1:ppn=1", "knx-meshall"),
+    ("runAnalyse.sh", "shortq", "1:00:00", "nodes=1:ppn=1", "knx-analyse"),
+])
+def test_the_requested_resources(script, queue, walltime, nodes, name):
+    directives = [line for line in read(FAMILY / script).splitlines()
+                  if line.startswith("#PBS")]
+    assert directives[0] == "#PBS -S /bin/bash"
+    assert f"#PBS -q {queue}" in directives
+    assert f"#PBS -l walltime={walltime}" in directives
+    assert f"#PBS -l {nodes}" in directives
+    assert f"#PBS -N {name}" in directives
+
+
+def test_the_post_job_runs_the_case_chain_without_imagery_or_analysis():
+    assert 'bash ../../AllpostCases --case "$CASE" --no-viz --no-analyse' in \
+        code_of(FAMILY / "baseCase" / "runPost.sh")
+
+
+def test_the_viz_job_draws_this_cases_images_only():
+    assert 'bash ../../AllpostCases --case "$CASE" --viz-only' in \
+        code_of(FAMILY / "baseCase" / "runViz.sh")
+
+
+def test_the_family_jobs_generate_validate_mesh_and_analyse_in_order():
+    code = code_of(FAMILY / "runMeshAll.sh")
+    steps = ["python generate_cases.py\n",
+             "python validate_cases.py --inputs-only\n",
+             "bash ./AllmeshCases\n",
+             "python validate_cases.py\n"]
+    positions = [code.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert "bash ./AllpostCases --analyse-only" in code_of(FAMILY / "runAnalyse.sh")
+
+
+def test_the_run_job_guards_labels_runs_and_records_in_that_order():
+    code = code_of(FAMILY / "baseCase" / "runCase.sh")
+    steps = ["hpc guard .", "hpc label .", "hpc finished .", "bash ./Allrun ",
+             "hpc record ."]
+    positions = [code.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert "bash ./Allrun >> output.log 2> error.log" in code
+
+
+def test_the_environment_file_uses_paraview_6p2_and_shields_the_bashrc():
+    env = read(FAMILY / "hpc_env.sh")
+    assert ('export PVPYTHON_PATH="${PVPYTHON_PATH:-/home2/torresfa/src/paraview/'
+            'ParaView-6.2.0-MPI-Linux-Python3.12-x86_64/bin/pvpython}"') in env
+    assert "VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow" in env
+    assert "ParaView-5" not in env
+    assert "if source /home2/torresfa/scratch/OpenFOAM/OpenFOAM-v2512/etc/bashrc; then" in env
+    assert env.index("set --\n") < env.index("etc/bashrc; then")
+
+
+def test_the_template_runs_on_192_ranks():
+    assert load_case_config(FAMILY / "baseCase").dsmc.n_subdomains == 192
+
+
+# --------------------------------------------------------------------------- #
+# the shell, parsing and running
+# --------------------------------------------------------------------------- #
+
+def _shell_scripts():
+    found = []
+    for directory in (FAMILY, FAMILY / "baseCase"):
+        for path in sorted(directory.iterdir()):
+            if not path.is_file():
+                continue
+            with open(path, "rb") as handle:
+                first = handle.readline()
+            if path.suffix == ".sh" or first.startswith(b"#!/bin/bash"):
+                found.append(path)
+    return found
+
+
+SHELL_SCRIPTS = _shell_scripts()
+
+
+def test_the_shell_script_list_is_complete():
+    names = {path.name for path in SHELL_SCRIPTS}
+    assert {"hpc_env.sh", "runMeshAll.sh", "runAnalyse.sh", "runCase.sh",
+            "AllmeshCases", "AllpostCases", "Allrun"} <= names
+    assert "AllrunCases" not in {p.name for p in FAMILY.iterdir()}
+
+
+@needs_bash
+@pytest.mark.parametrize("script", SHELL_SCRIPTS,
+                         ids=lambda p: p.relative_to(FAMILY).as_posix())
+def test_every_shell_script_parses(script):
+    result = subprocess.run(["bash", "-n", str(script)], capture_output=True,
+                            text=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture
+def bare_family(tmp_path):
+    """A family with its marker files and one case, but no hpc_env.sh."""
+    family = tmp_path / "fam"
+    case = family / "Cases" / "Kn1_np1x"
+    case.mkdir(parents=True)
+    (case / "case.yaml").write_text("{}\n", encoding="utf-8")
+    for name in ("study.yaml", "generate_cases.py", "AllpostCases"):
+        (family / name).write_text("", encoding="utf-8")
+    return family
+
+
+@needs_bash
+@pytest.mark.parametrize("script", JOB_SCRIPTS, ids=lambda p: p.name)
+def test_a_job_fails_loudly_without_its_directory_or_environment(
+        script, bare_family, tmp_path):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("PBS_")}
+    run = lambda workdir: subprocess.run(  # noqa: E731
+        ["bash", str(script)], capture_output=True, text=True, cwd=tmp_path,
+        env=env if workdir is None else {**env, "PBS_O_WORKDIR": str(workdir)})
+
+    result = run(None)
+    assert result.returncode == 1
+    assert "PBS_O_WORKDIR is not set" in result.stderr
+
+    empty = tmp_path / "elsewhere"
+    empty.mkdir()
+    result = run(empty)
+    assert result.returncode == 1
+    assert ("no case.yaml" in result.stderr
+            or "not a generated case" in result.stderr
+            or "not the family directory" in result.stderr), result.stderr
+
+    workdir = (bare_family if script in FAMILY_SCRIPTS
+               else bare_family / "Cases" / "Kn1_np1x")
+    result = run(workdir)
+    assert result.returncode == 1
+    assert "no hpc_env.sh" in result.stderr
+
+
+@needs_bash
+def test_hpc_env_refuses_set_u(tmp_path):
+    result = subprocess.run(
+        ["bash", "-c", f'set -u; source "{FAMILY / "hpc_env.sh"}" || echo "refused $?"'],
+        capture_output=True, text=True, cwd=tmp_path)
+    assert "set -u" in result.stderr
+    assert result.stdout == "refused 1\n"           # before any module is touched
+
+
+@needs_bash
+def test_hpc_env_hides_the_callers_arguments_from_the_openfoam_bashrc(tmp_path):
+    """The site paths swapped for stubs; the argument handling is the file's own."""
+    stubs = tmp_path / "stubs"
+    (stubs / "lmod" / "lmod" / "init").mkdir(parents=True)
+    (stubs / "lmod" / "lmod" / "init" / "bash").write_text("", encoding="utf-8")
+    for name in ("setup-env.sh", "activate"):
+        (stubs / name).write_text("", encoding="utf-8")
+    seen = tmp_path / "bashrc-saw"
+    (stubs / "bashrc").write_text(f'echo "$#:$*" > "{seen}"\n', encoding="utf-8")
+
+    text = read(FAMILY / "hpc_env.sh")
+    for site, stub in (
+            ("/home2/appman/spack/share/spack/setup-env.sh", "setup-env.sh"),
+            ("/home2/torresfa/scratch/OpenFOAM/OpenFOAM-v2512/etc/bashrc", "bashrc"),
+            ("/home2/torresfa/scratch/OpenFOAM/rarefiedPlume/.venv/bin/activate",
+             "activate")):
+        assert site in text
+        text = text.replace(site, str(stubs / stub))
+    env_file = tmp_path / "hpc_env.sh"
+    env_file.write_text(text, encoding="utf-8")
+
+    script = (f'set -eo pipefail; spack() {{ echo "{stubs}"; }}; module() {{ :; }}; '
+              f'source "{env_file}"; echo "args:$#:$*"; echo "pv:$PVPYTHON_PATH"')
+    result = subprocess.run(["bash", "-c", script, "job", "case.yaml", "other"],
+                            capture_output=True, text=True, cwd=tmp_path,
+                            env={**os.environ, "PVPYTHON_PATH": "/my/pvpython"})
+    assert result.returncode == 0, result.stderr
+    assert read(seen).strip() == "0:"
+    assert "args:2:case.yaml other" in result.stdout
+    assert "pv:/my/pvpython" in result.stdout
+    assert "<<< Completed: load OpenFOAM environment" in result.stdout
+
+
+@needs_bash
+@needs_flock
+def test_run_case_labels_runs_records_and_then_does_not_record_again(tmp_path):
+    family = tmp_path / "fam"
+    case = write_case(family / "Cases" / "Kn0p001_np1x", 1.0e-3)
+    (family / "study.yaml").write_text("", encoding="utf-8")
+    (family / "hpc_env.sh").write_text("printf 'stand-in environment\\n'\n",
+                                       encoding="utf-8")
+    shutil.copy2(FAMILY / "baseCase" / "runCase.sh", case / "runCase.sh")
+    write_control(case, end=0.5, delta=0.001)
+    (case / "Allrun").write_text(
+        "#!/bin/bash\necho \"stand-in Allrun $#\"\nmkdir -p 0.5\n",
+        encoding="utf-8")
+    env = {**python_env(tmp_path), "PBS_O_WORKDIR": str(case)}
+
+    result = subprocess.run(["bash", str(case / "runCase.sh")], capture_output=True,
+                            text=True, cwd=tmp_path, env=env, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "stand-in environment" in result.stdout
+    log = read(case / "output.log")
+    assert log.startswith("This case was run by its runCase.sh job.")
+    assert log.index("UNSUITABLE FOR PRODUCTION") < log.index("stand-in Allrun 0")
+    assert (case / hpc.MARKER).is_file()
+    model = family / "results" / "cost-model.yaml"
+    measurements = yaml.safe_load(read(model))["measurements"]
+    assert [m["case"] for m in measurements] == ["Kn0p001_np1x"]
+    assert measurements[0]["production_status"] == feasibility.STATUS_UNSUITABLE
+
+    model.unlink()
+    result = subprocess.run(["bash", str(case / "runCase.sh")], capture_output=True,
+                            text=True, cwd=tmp_path, env=env, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "had already reached endTime" in result.stdout
+    assert not model.exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -180,6 +445,7 @@ def test_record_replaces_the_cases_previous_entry(tmp_path):
     assert mine["Kn"] == 1.0
     assert mine["cells"] == 1_310_720
     assert mine["production_status"] == feasibility.STATUS_CANDIDATE
+    assert read(model).startswith("# GENERATED by each case's runCase.sh")
 
 
 def test_record_outside_a_family_is_not_timed(tmp_path, capsys):

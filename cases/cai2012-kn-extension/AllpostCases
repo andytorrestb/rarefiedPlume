@@ -40,9 +40,9 @@
 # ./Allpost draws them -- and ./analyse.py, unless --no-analyse.
 #
 # Cases with no solver output are skipped and reported, not failed: the study
-# table still lists them. Cases marked unsuitable for production ARE processed
-# if they have output (they only have it if someone ran them with
-# --allow-unsuitable), and every artefact says NON-PRODUCTION.
+# table still lists them. Cases marked unsuitable for production are run and
+# processed like the others -- each case's runCase.sh writes a NON-PRODUCTION
+# marker into an unsuitable one -- and every artefact from them says so.
 #
 # The numbers are on disk before ParaView is asked for anything, so a machine
 # without it still produces every quantitative result.

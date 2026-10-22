@@ -11,10 +11,12 @@ at an excluded Knudsen number **even if
 it is disabled**: a disabled entry is one edit away from being run.
 
 **The exclusions.** Cai's own Kn = 0.01, 0.1 and 100 are refused at generation
-(:func:`check_study`), at template level (:func:`check_template`) and on every
+(:func:`check_study`), at template level (:func:`check_template`), on every
 execution path that reads the manifest (:func:`check_manifest`, which the
-``All*Cases`` scripts call through :func:`main`). Three gates, because the
-manifest can be edited by hand and a job script can be pointed at anything.
+``All*Cases`` scripts call through :func:`main`), and on the case itself before
+it is meshed or run by its own job (``python -m plumetools.cai2012ext.hpc
+guard``, from ``runMesh.sh`` and ``runCase.sh``). Four gates, because the
+manifest can be edited by hand and a job script can be submitted from anywhere.
 
 **The inheritance.** The numerical and statistical settings come from
 ``cases/cai2012-health``'s highest-resolution combination, ``ppc040/s4p5``.
@@ -80,10 +82,11 @@ DELIBERATE_OVERRIDES = {
         "its historical comparison and documents as limiting the far field "
         "(docs/cai2012-case.md section 5.1)."),
     "dsmc.n_subdomains": (
-        "192 -- one HPC node of 192 cores. ./Allmesh writes it into "
-        "system/decomposeParDict and ./Allrun reads it from there. The health "
-        "template's 12 is its development machine's physical cores. A machine "
-        "setting, not a physical one."),
+        "192 -- one HPC node of 192 cores, on which each case runs as its own "
+        "PBS job (runCase.sh). ./Allmesh writes it into "
+        "system/decomposeParDict and ./Allrun reads it from there, so no job "
+        "passes a rank count. The health template's 12 is its development "
+        "machine's physical cores. A machine setting, not a physical one."),
 }
 
 #: Where the two swept health values were read from, for the record.
@@ -368,10 +371,11 @@ def production_status(entry: dict) -> str:
 
 
 def schedulable(manifest: dict, *, allow_unsuitable: bool = False):
-    """Split the manifest into cases that may run and cases that may not.
+    """Split the manifest into production candidates and the rest.
 
     Returns:
-        ``(runnable, refused)`` -- lists of ``(entry, reason)`` for refused.
+        ``(runnable, refused)`` -- ``runnable`` the candidates, or every case
+        with ``allow_unsuitable``; ``refused`` lists ``(entry, reasons)``.
 
     Raises:
         ExtensionError: if the manifest contains an excluded Kn at all. That is
@@ -394,20 +398,20 @@ def schedulable(manifest: dict, *, allow_unsuitable: bool = False):
 
 
 def main(argv=None) -> int:
-    """List the case paths a runner script may execute, one per line.
+    """List the manifest's case paths for a runner script, one per line.
 
     .. code-block:: text
 
-        python -m plumetools.cai2012ext.policy manifest.yaml
-        python -m plumetools.cai2012ext.policy manifest.yaml --allow-unsuitable
+        python -m plumetools.cai2012ext.policy manifest.yaml          candidates
+        python -m plumetools.cai2012ext.policy manifest.yaml --all    every case
 
-    Exit status 2 if the manifest contains an excluded Kn (nothing is listed),
-    otherwise 0. Cases refused for production are reported on stderr.
+    ``AllmeshCases`` and ``AllpostCases`` use ``--all``. Exit status 2 if the
+    manifest contains an excluded Kn (nothing is listed), otherwise 0. Without
+    ``--all``, the cases that are not production candidates are reported on
+    stderr.
     """
     parser = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
     parser.add_argument("manifest")
-    parser.add_argument("--allow-unsuitable", action="store_true",
-                        help="also list cases marked unsuitable for production")
     parser.add_argument("--all", action="store_true",
                         help="list every case (meshing and post-processing); "
                              "the Kn policy is still enforced")
@@ -415,15 +419,14 @@ def main(argv=None) -> int:
 
     manifest = yaml.safe_load(Path(args.manifest).read_text(encoding="utf-8")) or {}
     try:
-        runnable, refused = schedulable(
-            manifest, allow_unsuitable=args.allow_unsuitable or args.all)
+        runnable, refused = schedulable(manifest, allow_unsuitable=args.all)
     except ExtensionError as exc:
         print(f"policy: {exc}", file=sys.stderr)
         return 2
     for entry in runnable:
         print(entry["path"])
     for entry, reasons in refused:
-        print(f"policy: NOT SCHEDULED {entry['path']} -- unsuitable for "
+        print(f"policy: not listed, {entry['path']} -- unsuitable for "
               f"production:", file=sys.stderr)
         for reason in reasons:
             print(f"            {reason}", file=sys.stderr)

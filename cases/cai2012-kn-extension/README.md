@@ -49,12 +49,14 @@ is how to run it.
 | `generate_cases.py` | idempotent generation, provenance, feasibility → `manifest.yaml` |
 | `validate_cases.py` | independent recomputation + the parent family's dictionary check |
 | `AllmeshCases` | the parent's, with the Kn policy gate |
-| `AllrunCases` | production gate, completed-run skipping, timing, cloud pruning |
 | `AllpostCases` | per case: post, diagnose, compare, audit, stationarity; imagery; `analyse.py` |
 | `AllcleanCases` | the parent's, byte-identical |
 | `analyse.py` | the study table and the four-Kn comparison figure |
 | `viz.yaml` | flow-field imagery; per-Kn specs are written from the manifest |
 | `viz-diagnostics.yaml` | images of the diagnostic fields, R-4D's list on this plane |
+| `hpc_env.sh` | the cluster environment every job sources: modules, OpenFOAM, the venv, ParaView 6.2.0 |
+| `runMeshAll.sh` | PBS job: generate, validate, mesh all four, validate again |
+| `runAnalyse.sh` | PBS job: the study table and figure, once every case is post-processed |
 
 Per case (`baseCase/`, copied into every case):
 
@@ -65,6 +67,7 @@ Per case (`baseCase/`, copied into every case):
 | `Alldiagnose.py` | the nozzle-plume rarefaction and mesh-resolution diagnostics |
 | `Allcompare.py` | r/D = 10 angular density and mass flux, off-axis velocity, temperature, pressure |
 | `Allconverge.py` | far-field stationarity across the sampled frames |
+| `runMesh.sh`, `runCase.sh`, `runPost.sh`, `runViz.sh` | PBS jobs, submitted from the case: re-mesh it; run it; post-process it; draw it |
 
 The Python behind the new parts is `plumetools/cai2012ext/`. It imports
 `plumetools.cai2012`, `plumetools.nozzleplume` and `plumetools.rarefaction`
@@ -130,8 +133,6 @@ cd cases/cai2012-kn-extension
 ./generate_cases.py                # create Cases/ and manifest.yaml
 ./AllmeshCases --dict-only         # every case's OpenFOAM dictionaries, no OpenFOAM
 ./validate_cases.py                # exit 0 = the tree IS the study
-./AllrunCases --list               # the 2 production candidates, numbered
-./AllrunCases --dry-run            # what would run, and every refusal with its reasons
 ```
 
 `generate_cases.py` is safe to run any number of times:
@@ -148,67 +149,114 @@ an excluded Kn also fails `validate_cases.py`.
 
 ---
 
-## Transferring to HPC and running only this extension
+## On the cluster: PBS, one job per case
+
+Every job script `cd`s to `$PBS_O_WORKDIR` (and fails if it is unset or the
+wrong kind of directory), so **submit each from the directory it names**. Each
+sources [`hpc_env.sh`](hpc_env.sh), found by looking in `./`, `../` and
+`../../`: the Spack/Lmod modules, OpenFOAM v2512's `bashrc`, the repository's
+`.venv`, and ParaView 6.2.0 for the images (`PVPYTHON_PATH`, kept if already
+set: `qsub -v PVPYTHON_PATH=…`). The site's paths, modules and mail address
+live there and in the `#PBS` lines.
 
 1. **Commit and push** the repository, including `plumetools/cai2012ext/` and
-   this directory. `Cases/` and `manifest.yaml` are gitignored: regenerate them
-   on the cluster, so the manifest records the cluster's commit.
+   this directory. `Cases/` and `manifest.yaml` are gitignored: they are
+   generated on the cluster, so the manifest records the cluster's commit.
 
-2. **On the cluster**, from a clone, with OpenFOAM v2512 sourced and the
-   custom inflow library built
-   (`applications/dsmcBoundaryModels/Allwmake`, or `./Allsetup`):
+2. **Once, on the cluster**, from a clone at the path `hpc_env.sh` names: build
+   the custom inflow library (`applications/dsmcBoundaryModels/Allwmake`, or
+   `./Allsetup`) and install the repository into the `.venv`:
 
    ```bash
    pip install -e ".[test,plots]"
+   ```
+
+3. **Generate, validate and mesh** all four, one job (`shortq`, 1 core, 4 h):
+
+   ```bash
    cd cases/cai2012-kn-extension
-   python3 generate_cases.py
-   bash ./AllmeshCases --dict-only && python3 validate_cases.py
+   qsub runMeshAll.sh
    ```
 
-   Stop if `validate_cases.py` fails. (The scripts are committed without the
-   executable bit on Windows; `bash ./X` and `python3 X` always work.)
+   It runs `generate_cases.py`, `validate_cases.py --inputs-only`,
+   `AllmeshCases` and `validate_cases.py` (with the dictionaries now written),
+   and any failure fails the job. Read its output before going on. To re-mesh
+   one case: `cd Cases/<case> && qsub runMesh.sh` (`shortq`, 1 core, 2 h).
 
-3. **Mesh** all four (a mesh is cheap, and the dense meshes are where the
-   resolution deficit is reported from):
+4. **Run** each case as its own job (`longq`, one node, 192 cores, 120 h), all
+   four, the dense two included:
 
    ```bash
-   #SBATCH --array=0-3
-   bash ./AllmeshCases --index "$SLURM_ARRAY_TASK_ID"
+   for case in Kn10_np1x Kn1_np1x Kn0p001_np1x Kn0p0001_np1x; do
+       (cd Cases/$case && qsub -N knx-run-$case runCase.sh)
+   done
    ```
 
-4. **Run the production candidates only**:
+   `runCase.sh` refuses a case at Kn = 0.01, 0.1 or 100; re-assesses the case
+   from its own `case.yaml` and, if it is unsuitable for production, writes a
+   `NON-PRODUCTION` marker into it (and the same text at the top of
+   `output.log`); runs `./Allrun` into `output.log` / `error.log`; and records
+   the wall clock in `results/cost-model.yaml`. The 192 ranks are
+   `dsmc.n_subdomains` in `case.yaml`, which `./Allrun` reads from
+   `system/decomposeParDict`; no job passes a rank count.
+
+   **A job that runs out of walltime is resubmitted by hand**, with the same
+   `qsub`: `./Allrun` continues from the newest time directory, `processor*/`
+   included. A case that had already reached `endTime` runs nothing and records
+   nothing. Nothing resubmits itself.
+
+5. **Post-process and draw** each case once its run has finished (`longq`, one
+   node, 192 cores, 120 h each):
 
    ```bash
-   bash ./AllrunCases --list           # 0: Kn10_np1x, 1: Kn1_np1x
-   #SBATCH --array=0-1
-   bash ./AllrunCases --index "$SLURM_ARRAY_TASK_ID" -np "$SLURM_NTASKS"
+   cd Cases/<case> && qsub runPost.sh    # then, when it is done:
+   cd Cases/<case> && qsub runViz.sh
    ```
 
-   `-np` overrides the template's 192 subdomains without touching the case
-   inputs. An interrupted case continues from its newest time directory when
-   re-run; a finished one is skipped. `--prune-transient` deletes, once a case
-   has reached `endTime`, the ~141 time directories written before the
-   averaging start (no `*Mean` field, read by nothing); it does not lower the
-   peak disk.
+   `runPost.sh` is `../../AllpostCases --case <case> --no-viz --no-analyse` —
+   `Allpost`, `Alldiagnose.py`, `Allcompare.py`, `Allaudit.py`,
+   `Allconverge.py` — into `output_post.log` / `error_post.log`. `runViz.sh`
+   is `--viz-only`: the flow-field series over the sampling window and the
+   diagnostic fields `runPost.sh` wrote, into `output_viz.log` /
+   `error_viz.log`.
 
-5. **Post-process** (OpenFOAM only for `writeCellCentres` inside `Allpost`;
-   ParaView optional):
+6. **When every case is post-processed**, the study table and figure (`shortq`,
+   1 core, 1 h):
 
    ```bash
-   bash ./AllpostCases                  # every case with output, then analyse.py
-   bash ./AllpostCases --case Kn1_np1x
-   bash ./AllpostCases --no-diagnostics # skip Alldiagnose.py and its images
-   bash ./AllpostCases --analyse-only   # the study table and figure only
+   cd cases/cai2012-kn-extension && qsub runAnalyse.sh
    ```
 
-   The rarefaction diagnostics read the whole mesh into memory: 450 MB for
-   R-4D's 0.46-million-cell mesh, so roughly 1.3 GB for the 1.3-million-cell
-   Kn ≥ 1 meshes and ~4 GB for the 3.9-million-cell dense ones —
-   comfortable on a node, tight on a laptop's WSL.
+The `#PBS -N` names are generic — `knx-meshall`, `knx-mesh`, `knx-run`,
+`knx-post`, `knx-viz`, `knx-analyse` — so pass `qsub -N <name>` to tell one
+case's jobs from another's. Repository scripts are committed without the
+executable bit on Windows, so the jobs call every one of them with `bash` or
+`python`.
 
-**Do not run the dense cases as production.** `--allow-unsuitable` exists so a
-deliberate, labelled non-production run is possible; such a case gets a
-`NON-PRODUCTION` marker file and every artefact from it says so.
+**Disk.** Nothing is pruned: every time directory and every parcel cloud is
+kept. About **1.7 TB** for all four (below); check the scratch quota before
+submitting.
+
+The same driver, interactively (OpenFOAM only for `writeCellCentres` inside
+`Allpost`; ParaView optional):
+
+```bash
+bash ./AllpostCases                  # every case with output, then analyse.py
+bash ./AllpostCases --case Kn1_np1x
+bash ./AllpostCases --no-diagnostics # skip Alldiagnose.py and its images
+bash ./AllpostCases --no-analyse     # the per-case chain only
+bash ./AllpostCases --analyse-only   # the study table and figure only
+```
+
+The rarefaction diagnostics read the whole mesh into memory: 450 MB for
+R-4D's 0.46-million-cell mesh, so roughly 1.3 GB for the 1.3-million-cell
+Kn ≥ 1 meshes and ~4 GB for the 3.9-million-cell dense ones —
+comfortable on a node, tight on a laptop's WSL.
+
+**The dense cases run, labelled.** Kn = 1e-3 and 1e-4 are unsuitable for
+production. Their `runCase.sh` runs them anyway and writes the
+`NON-PRODUCTION` marker, listing the unresolved criteria; every artefact from
+them says so, and nothing from them is a validated result.
 
 ---
 
@@ -216,16 +264,16 @@ deliberate, labelled non-production run is possible; such a case gets a
 
 Estimated by `generate_cases.py` from `cases/cai2012-health`'s nine measured
 runs (12 MPI ranks on the development machine). Those were collisionless
-(Kn = 100), so for the collisional cases these are **lower bounds**.
-`AllrunCases` records this family's own wall clock in
-`results/cost-model.yaml`, and the estimates switch to it as soon as one case
-has run.
+(Kn = 100), so for the collisional cases these are **lower bounds** at
+12 ranks. Each case's `runCase.sh` records this family's own wall clock in
+`results/cost-model.yaml` (under a file lock: jobs can finish together), and
+the estimates switch to it as soon as one case has run.
 
 | | parcels (est.) | steps | ≥ wall clock @12 ranks | disk, every write kept |
 |---|---|---|---|---|
 | `Kn10_np1x`, `Kn1_np1x` | 2.3e6 each | 45,924 | 26 h each | ~148 GB each |
-| **the 2 candidates** | | | **~53 h** | **~300 GB** |
-| `Kn0p001_np1x`, `Kn0p0001_np1x` (for the record) | 1.6e7, 1.5e7 | 88,288, 85,974 | 289 h, 261 h | ~700 GB, ~660 GB |
+| `Kn0p001_np1x`, `Kn0p0001_np1x` | 1.6e7, 1.5e7 | 88,288, 85,974 | 289 h, 261 h | ~700 GB, ~660 GB |
+| **all four** | | | **~603 h** | **~1.7 TB** |
 
 The disk is dominated by the health family's write cadence (1/8 domain
 transit) running through Cai's 17.7-transit startup: 178 writes per case, of

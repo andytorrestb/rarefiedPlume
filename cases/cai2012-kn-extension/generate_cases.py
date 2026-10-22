@@ -263,8 +263,8 @@ def main(argv) -> int:
         print()
         print(f"{len(unsuitable)} of {len(entries)} cases are UNSUITABLE FOR "
               f"PRODUCTION as configured (see 'unresolved' in the manifest).")
-        print("They are generated and can be meshed; ./AllrunCases will not run "
-              "them without\n--allow-unsuitable, and their outputs are "
+        print("They are generated, meshed and run like the others; each one's "
+              "runCase.sh marks it\nNON-PRODUCTION, and its outputs are "
               "labelled non-production.")
     print()
     print("Next:")
@@ -272,7 +272,8 @@ def main(argv) -> int:
           "(no OpenFOAM)")
     print("    ./validate_cases.py          check the tree against the study")
     print("    ./AllmeshCases               mesh (OpenFOAM)")
-    print("    ./AllrunCases --list         what would run, for a job array")
+    print("    cd Cases/<case> && qsub runCase.sh   one PBS job per case "
+          "(README.md)")
     return 0
 
 
