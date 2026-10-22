@@ -456,7 +456,8 @@ requires completed HPC runs and the convergence evidence of §9.
    diameters); accepting under-resolution and labelling the run as such —
    what is done here: both are run, each with a `NON-PRODUCTION` marker
    written by its `runCase.sh`; or an axisymmetric solver, which is out of
-   scope.
+   scope. A fourth, removing the dense core and injecting at a downstream
+   sphere, is the interface track: [`cai2012-kn-interface.md`](cai2012-kn-interface.md).
 2. **Write cadence through the startup** (§6). A controlDict with a coarse
    interval until `average_start_s` and the health cadence after it would cut
    the candidates' disk by ~4×; that is a change to the frozen

@@ -47,9 +47,24 @@ What this package adds is what an extension needs and the parent study did not:
 :mod:`.convergence` stationarity of sampled quantities across frames
 ==================  =========================================================
 
-``plumetools.cai2012`` is not edited by any of it. That package and its two case
-families are the record of what was run, so this one imports from them and
-leaves them alone.
+and the **interface track** (``docs/cai2012-kn-interface.md``), which removes the
+dense core and injects a continuum continuation of the exit on a downstream
+sphere:
+
+=========================  ==================================================
+:mod:`.interface`          the Markelov-source mapping, the closure, Bird's
+                           B, the sphere, the per-face state (pure)
+:mod:`.interface_mesh`     the parent's lattice with the sphere carved out
+:mod:`.interface_case`     one derivation path for a case: assess, mesh,
+                           inflow, identity, the PBS guard and label
+:mod:`.interface_study`    ``interfaces.yaml`` and the ``Interface/`` tree
+:mod:`.overlap`            truncated run against the full-domain benchmark
+=========================  ==================================================
+
+``plumetools.cai2012`` is not edited by any of it, nor is
+``plumetools.markelov1999``, whose angular law the interface calls. Those
+packages and their case families are the record of what was run, so this one
+imports from them and leaves them alone.
 """
 
 from __future__ import annotations

@@ -282,6 +282,29 @@ held twice, under `processor*/` and reconstructed. See the documentation, §6.
 
 ---
 
+## The interface track (Kn = 1e-3, 1e-4; validation at 0.01)
+
+A parallel tree, `Interface/`, from `interfaces.yaml` and
+`./generate_interfaces.py`: the dense core removed, the exit continued as a
+Markelov source to a sphere downstream (`baseCaseInterface/` replaces
+`Allmesh`, `runInflow.py`, `runPost.sh`, `runViz.sh` and adds `Alloverlap.py`).
+`study.yaml`, `Cases/` and `manifest.yaml` are not touched by it. Method,
+findings — including why the Kn = 0.01 overlap validation is infeasible at the
+declared thresholds — and commands:
+[`docs/cai2012-kn-interface.md`](../../docs/cai2012-kn-interface.md).
+
+```bash
+python generate_interfaces.py --dry-run     # verdicts, writes nothing
+python generate_interfaces.py --report      # Interface/ + interface-manifest.yaml
+```
+
+`Allcompare.py` and `Allconverge.py` now take their run settings through
+`plumetools.cai2012ext.interface_case.post_context`, which is the old
+derivation for a case without `interface.yaml`; existing cases report them as
+stale until `./generate_cases.py --refresh`.
+
+---
+
 ## Known limitations, in one place
 
 * **Kn = 1e-3 and 1e-4 are unresolvable within `mesh.max_cells = 4e6`.** They
