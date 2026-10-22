@@ -140,6 +140,11 @@ cases/cai2012-kn-extension/manifest.yaml.tmp
 cases/cai2012-kn-extension/.staging-*/
 cases/cai2012-kn-extension/results/*
 !cases/cai2012-kn-extension/results/cost-model.yaml
+# ... and its interface track: Interface/ + interface-manifest.yaml from
+# ./generate_interfaces.py (interfaces.yaml and baseCaseInterface/ are tracked).
+cases/cai2012-kn-extension/Interface/
+cases/cai2012-kn-extension/interface-manifest.yaml
+cases/cai2012-kn-extension/interface-manifest.yaml.tmp
 
 # r-4d, the first case of the general nozzle-plume family
 # (plumetools/nozzleplume). Same rule, and here it covers both directories

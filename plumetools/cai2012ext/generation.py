@@ -56,7 +56,14 @@ from plumetools.cai2012ext import (
 )
 
 #: Files whose content is a physical input, compared as parsed YAML.
-INPUT_FILES = ("case.yaml",)
+#: ``interface.yaml`` exists only in interface-mode cases; a direct-exit case
+#: has none, so for those this is the comparison it always was.
+INPUT_FILES = ("case.yaml", "interface.yaml")
+
+#: Keys of those files that are provenance, not inputs: a difference is
+#: ``stale``, never a conflict. The overlap evidence a production interface case
+#: points at is filled in after validation, on a case that may already be meshed.
+AUXILIARY_KEYS = ("meta.", "interface.validation_evidence", "interface.label")
 
 STATUS_NEW = "new"
 STATUS_IDENTICAL = "identical"
@@ -200,7 +207,9 @@ def compare(staged: Path, existing: Path) -> tuple[list[str], list[str]]:
                 if mine.get(key) == theirs.get(key):
                     continue
                 entry = f"{key}: {theirs.get(key)!r} -> {mine.get(key)!r}"
-                (auxiliary if key.startswith("meta.") else inputs).append(entry)
+                if relative.name != "case.yaml":
+                    entry = f"{relative.name}: {entry}"
+                (auxiliary if key.startswith(AUXILIARY_KEYS) else inputs).append(entry)
         elif want.read_bytes() != have.read_bytes():
             auxiliary.append(f"{name}: differs from the template")
     return inputs, auxiliary
