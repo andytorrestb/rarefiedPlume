@@ -202,15 +202,24 @@ def run(case_dir: Path, *, time: str | None = None,
         SettingsError, plumetools.rarefaction.foam.PostError, ValueError: as
             :func:`plumetools.rarefaction.run.diagnose`.
     """
+    from plumetools.cai2012ext import interface, interface_case
+
     case_dir = Path(case_dir)
     cfg = load_case_config(case_dir)
-    if policy.is_excluded(cfg.exit.knudsen):
+    sphere = interface.load_interface(case_dir)
+    if sphere is not None:
+        problem = interface_case.knudsen_problem(cfg, sphere, str(case_dir))
+        if problem:
+            raise policy.ExtensionError(problem)
+    elif policy.is_excluded(cfg.exit.knudsen):
         raise policy.ExtensionError(
             f"{case_dir}: Kn = {cfg.exit.knudsen:g} is one of Cai's own cases; "
             f"the extension never post-processes it")
     geom = from_config(cfg)
     exit_state = inflow.from_config(cfg)
-    plan = mesh.plan(cfg, geom, exit_state)
+    # In interface mode the exit cells are not in the mesh: there is no exit
+    # plane to check and no direct-exit plan to check it against.
+    plan = mesh.plan(cfg, geom, exit_state) if sphere is None else None
     settings = load_settings(case_dir)
     label = cfg.meta.get("case_name") or case_dir.name
 
@@ -226,7 +235,14 @@ def run(case_dir: Path, *, time: str | None = None,
                 "collision_model": cfg.dsmc.binary_collision_model,
                 "mesh_type": cfg.mesh.type})
     document = diagnosis.document
-    document["exit_plane"] = exit_plane(diagnosis, cfg, geom, plan)
+    if plan is not None:
+        document["exit_plane"] = exit_plane(diagnosis, cfg, geom, plan)
+    else:
+        document["exit_plane"] = {
+            "evaluated": False,
+            "reason": "interface mode: the exit cells were removed with the "
+                      "dense core; the inlet is the downstream sphere"}
+        document["interface"] = interface_case.post_context(case_dir).interface
     document.setdefault("notes", []).append(GRADED_MESH_NOTE)
 
     print("\n".join(summary.report(document)))

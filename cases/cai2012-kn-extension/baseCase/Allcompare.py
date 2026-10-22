@@ -40,8 +40,8 @@ try:
     import yaml
 
     from plumetools.cai2012 import post
-    from plumetools.cai2012ext import comparison, convergence, feasibility
-    from plumetools.cai2012ext import figures, generation, policy
+    from plumetools.cai2012ext import comparison, convergence
+    from plumetools.cai2012ext import figures, interface_case
 except ImportError:
     sys.exit("plumetools is not importable. From the repository root:\n"
              '    pip install -e ".[test]"')
@@ -65,13 +65,15 @@ def main(argv) -> int:
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args(argv[1:])
 
-    cfg, geom, exit_state, plan, run, nozzle, particles, report = generation.derive(HERE)
-    if policy.is_excluded(cfg.exit.knudsen):
-        print(f"Allcompare: Kn = {cfg.exit.knudsen:g} is one of Cai's own cases; "
-              f"the extension never post-processes it.", file=sys.stderr)
+    # The direct-exit derivation, or -- with an enabled interface.yaml -- the
+    # interface one; the comparison is with Cai's exit solution either way.
+    context = interface_case.post_context(HERE)
+    if context.refusal:
+        print(f"Allcompare: {context.refusal}", file=sys.stderr)
         return 2
-    verdict = feasibility.assess(cfg, geom, exit_state, plan, run, nozzle,
-                                 particles, report)
+    cfg, geom, exit_state, run = (context.cfg, context.geom, context.exit_state,
+                                  context.run)
+    verdict = context.verdict
     ready = verdict["production_ready"]
     banner = figures.status_banner(ready)
     label = cfg.meta.get("case_name") or HERE.name
@@ -145,7 +147,12 @@ def main(argv) -> int:
           f"{angular['integrals']['F']:.4f}, same cells "
           f"{angular['integrals']['F_analytical']:.4f}, collisionless "
           f"{angular['integrals']['F_exact']:.4f} (of the exit flow)")
-    print(f"  meshed nozzle area / pi R0^2 = {1.0 + nozzle.area_error:.4f}")
+    if context.nozzle_area_error is not None:
+        print(f"  meshed nozzle area / pi R0^2 = "
+              f"{1.0 + context.nozzle_area_error:.4f}")
+    else:
+        print(f"  INTERFACE MODE: R < {context.interface['R_interface_over_D']:.4f} D "
+              f"is not simulated; nothing there is compared")
 
     results = HERE / "results"
     results.mkdir(parents=True, exist_ok=True)
@@ -197,8 +204,11 @@ def main(argv) -> int:
             "averaged_domain_transits": (float(sampled.time) - run.average_start_s)
             / run.domain_transit_s,
             "n_cells": int(sampled.n_cells),
-            "nozzle_area_ratio": 1.0 + float(nozzle.area_error),
+            "nozzle_area_ratio": (None if context.nozzle_area_error is None
+                                  else 1.0 + float(context.nozzle_area_error)),
+            "mode": context.mode,
         },
+        "interface": context.interface,
         "production": {
             "status": verdict["status"],
             "production_ready": bool(ready),

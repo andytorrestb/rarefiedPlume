@@ -35,7 +35,7 @@ try:
     import yaml
 
     from plumetools.cai2012 import post
-    from plumetools.cai2012ext import convergence, feasibility, figures, generation
+    from plumetools.cai2012ext import convergence, figures, interface_case
 except ImportError:
     sys.exit("plumetools is not importable. From the repository root:\n"
              '    pip install -e ".[test]"')
@@ -52,9 +52,11 @@ def main(argv) -> int:
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args(argv[1:])
 
-    cfg, geom, exit_state, plan, run, nozzle, particles, report = generation.derive(HERE)
-    verdict = feasibility.assess(cfg, geom, exit_state, plan, run, nozzle,
-                                 particles, report)
+    # Direct exit or interface mode: the same run settings Allmesh wrote.
+    context = interface_case.post_context(HERE)
+    cfg, geom, exit_state, run = (context.cfg, context.geom, context.exit_state,
+                                  context.run)
+    verdict = context.verdict
     banner = figures.status_banner(verdict["production_ready"])
     label = cfg.meta.get("case_name") or HERE.name
 
