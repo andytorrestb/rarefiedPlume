@@ -234,8 +234,8 @@ executable bit on Windows, so the jobs call every one of them with `bash` or
 `python`.
 
 **Disk.** Nothing is pruned: every time directory and every parcel cloud is
-kept. About **1.7 TB** for all four (below); check the scratch quota before
-submitting.
+kept, decomposed under `processor*/` and again reconstructed. About **2.7 TB**
+for all four (below); check the scratch quota before submitting.
 
 The same driver, interactively (OpenFOAM only for `writeCellCentres` inside
 `Allpost`; ParaView optional):
@@ -269,15 +269,16 @@ runs (12 MPI ranks on the development machine). Those were collisionless
 `results/cost-model.yaml` (under a file lock: jobs can finish together), and
 the estimates switch to it as soon as one case has run.
 
-| | parcels (est.) | steps | ≥ wall clock @12 ranks | disk, every write kept |
+| | parcels (est.) | steps | ≥ wall clock @12 ranks | disk, every write and cloud kept |
 |---|---|---|---|---|
-| `Kn10_np1x`, `Kn1_np1x` | 2.3e6 each | 45,924 | 26 h each | ~148 GB each |
-| `Kn0p001_np1x`, `Kn0p0001_np1x` | 1.6e7, 1.5e7 | 88,288, 85,974 | 289 h, 261 h | ~700 GB, ~660 GB |
-| **all four** | | | **~603 h** | **~1.7 TB** |
+| `Kn10_np1x`, `Kn1_np1x` | 2.3e6 each | 45,924 | 26 h each | ~212 GB each |
+| `Kn0p001_np1x`, `Kn0p0001_np1x` | 1.6e7, 1.5e7 | 88,288, 85,974 | 289 h, 261 h | ~1,160 GB, ~1,070 GB |
+| **all four** | | | **~603 h** | **~2.7 TB** |
 
 The disk is dominated by the health family's write cadence (1/8 domain
 transit) running through Cai's 17.7-transit startup: 178 writes per case, of
-which only the last 37 are sampled. See the documentation, §6.
+which only the last 37 are sampled — each write's fields and parcel cloud
+held twice, under `processor*/` and reconstructed. See the documentation, §6.
 
 ---
 

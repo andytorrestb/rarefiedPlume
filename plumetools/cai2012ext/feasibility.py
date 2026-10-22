@@ -299,13 +299,14 @@ def assess(cfg, geom, exit_state, plan, run, nozzle, particles, report, *,
         "n_transient_writes": writes - int(run.n_sampled_writes),
         "fields_gb_per_write": fields_bytes / 1024.0 ** 3,
         "cloud_gb_per_write": cloud_bytes / 1024.0 ** 3,
-        # processor*/ keeps fields and cloud for every write; reconstructPar
-        # duplicates the fields. The reconstructed clouds are not counted.
-        "disk_gb_estimate": writes * (2.0 * fields_bytes + cloud_bytes)
+        # processor*/ keeps fields and cloud for every write, and
+        # reconstructPar duplicates both: nothing is pruned.
+        "disk_gb_estimate": writes * 2.0 * (fields_bytes + cloud_bytes)
         / 1024.0 ** 3,
         "parcel_memory_gb_order": parcels * PARCEL_MEMORY_BYTES / 1024.0 ** 3,
         "disk_basis": "cases/cai2012-health measured bytes per cell and per "
-                      "parcel; every write kept (purgeWrite 0)",
+                      "parcel; every write kept (purgeWrite 0), decomposed "
+                      "and reconstructed, parcel clouds included",
     }
     if cost_model is not None:
         seconds = cost_model.seconds(parcels=parcels, cells=plan.n_cells,

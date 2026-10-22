@@ -218,9 +218,10 @@ study-wide multiplier touches either.
 that is **178 writes per case, 141 of them transient** — no `*Mean` field, read
 by nothing. `controlDict` has one `writeInterval`, so the cadence cannot differ
 between startup and sampling without changing `plumetools.cai2012.dictionaries`,
-which is frozen. The consequence is the disk estimate in the README (~150 GB
-per rarefied case, ~1.7 TB for all four); nothing is pruned. A two-cadence
-`controlDict` would be the real fix (§11).
+which is frozen. The consequence is the disk estimate in the README (~212 GB
+per rarefied case, ~2.7 TB for all four): nothing is pruned, so every write's
+fields and parcel cloud are kept under `processor*/` and again reconstructed.
+A two-cadence `controlDict` would be the real fix (§11).
 
 Old results are not touched: nothing in this family reads or rewrites
 `cases/cai2012` or `cases/cai2012-health` outputs. If results from those
