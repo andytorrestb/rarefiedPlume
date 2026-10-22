@@ -79,6 +79,11 @@ DELIBERATE_OVERRIDES = {
         "family's 2-domain-transit startup, which that family keeps to match "
         "its historical comparison and documents as limiting the far field "
         "(docs/cai2012-case.md section 5.1)."),
+    "dsmc.n_subdomains": (
+        "192 -- one HPC node of 192 cores. ./Allmesh writes it into "
+        "system/decomposeParDict and ./Allrun reads it from there. The health "
+        "template's 12 is its development machine's physical cores. A machine "
+        "setting, not a physical one."),
 }
 
 #: Where the two swept health values were read from, for the record.

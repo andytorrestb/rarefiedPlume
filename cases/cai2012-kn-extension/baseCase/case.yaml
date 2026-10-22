@@ -18,10 +18,10 @@
 # WHERE THE NUMBERS COME FROM
 #
 # This file is cases/cai2012-health/baseCase/case.yaml -- that family's
-# highest-resolution combination, ppc040/s4p5 -- with exactly four keys
+# highest-resolution combination, ppc040/s4p5 -- with exactly five keys
 # changed, each marked [EXTENSION] below with its reason. Every other value is
 # INHERITED and plumetools.cai2012ext.policy.inheritance_report checks it key by
-# key against the health template; a difference that is not one of the four
+# key against the health template; a difference that is not one of the five
 # fails generation.
 #
 # Tags:
@@ -189,9 +189,10 @@ dsmc:
   initial_number_density_per_m3: 1.0e+10
   initial_temperature_K: 300.0
 
-  n_subdomains: 12             # [HEALTH] the laptop's 12 physical cores. On HPC
-                               # pass -np to ./AllrunCases; it does not change
-                               # the case inputs.
+  n_subdomains: 192            # [EXTENSION] one HPC node, 192 cores. ./Allmesh
+                               # writes it into system/decomposeParDict and
+                               # ./Allrun reads it from there. The health
+                               # template's 12 is the laptop's physical cores.
 
 # --- particle resolution ------------------------------------------------------
 resolution:

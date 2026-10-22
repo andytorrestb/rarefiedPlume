@@ -115,9 +115,9 @@ level; `generate_cases.py` refuses a second level.
 
 ## 4. Settings inherited from `cases/cai2012-health`
 
-The template is `cases/cai2012-health/baseCase/case.yaml` with exactly four keys
+The template is `cases/cai2012-health/baseCase/case.yaml` with exactly five keys
 changed. `policy.inheritance_report` compares the two templates key by key at
-every generation; 63 keys are inherited, and a difference not declared below
+every generation; 62 keys are inherited, and a difference not declared below
 stops generation.
 
 | Setting | Value | Source | Status |
@@ -126,12 +126,12 @@ stops generation.
 | `dsmc.sampling_domain_transits` | **4.5** | health `study.yaml`, samplings `s4p5` | override of the template's 1.5, same reason |
 | `dsmc.transient_basis` | **`cai`** | `cases/cai2012` template default | **deliberate override** of health's `transits` (2 transits), which that family documents as far-field-limiting |
 | `exit.knudsen` | per case (template: 10) | — | health pins 100, excluded here |
+| `dsmc.n_subdomains` | **192** | — | override of the health template's 12 (its development machine's cores): one HPC node of 192 cores; `./Allrun` reads it from `system/decomposeParDict`, `simple` `(4 6 8)` |
 | `dsmc.write_interval_s` | 3.536e-4 s | health template | inherited; rounded to whole steps: 258 (3.5420e-4 s) at Kn ≥ 1, 496 (3.5374e-4 s) at Kn = 1e-3, 483 (3.5365e-4 s) at Kn = 1e-4 |
 | `dsmc.courant_target` | 0.2 | health template | inherited; `Δt` recomputed per mesh |
 | `mesh.*` (`target_cell_over_mfp` 1, `max_core_cell_over_D` 0.05, core 2 D × 1.5 D, 40/34 outer cells, expansion cap 40, `max_cells` 4e6) | | health template | inherited; the mesh is re-planned per Kn |
 | `checks.*` | | health template | inherited; read as production criteria |
 | `post.*` (centreline tube 0.10 D, 200 bins, `xz` plane) | | health template | inherited |
-| `dsmc.n_subdomains` | 12 | health template | inherited; machine-specific, override with `-np` |
 | `run_time_multiplier`, `output_frequency_multiplier` | 1, 1 | — | pinned: the parent study's 3 and 4 would multiply the window and cadence |
 
 The health family's **generated** `ppc040/s4p5/case.yaml` is not available
@@ -421,7 +421,7 @@ startup produced in the parent study.
 | Weight = `n0 V_exit / 40` | recomputed; `verify_tree` on `dsmcProperties` | pass |
 | Startup = 10⁴ Kn = 0.01 collision times, same in all 4 | recomputed from `λ_ref = 0.01 D` | pass |
 | Averaging 4.5 transits after startup | recomputed | 4.53–4.56 (snapped to a write) |
-| Inheritance from the health template | key-by-key | 63 inherited, 4 declared overrides, 0 undeclared |
+| Inheritance from the health template | key-by-key | 62 inherited, 5 declared overrides, 0 undeclared |
 | Pre-run checks are the nozzle-plume checks, with its thresholds | unit test against `plumetools.nozzleplume.config.ChecksConfig` | pass |
 | Idempotent generation | re-run: 4 × "keep (identical)"; a template change shows as `stale` until `--refresh` | pass |
 | Conflicts reported, results never overwritten | unit tests: input edit → refused; with results → refused under `--regenerate`; only `--overwrite` replaces | pass |

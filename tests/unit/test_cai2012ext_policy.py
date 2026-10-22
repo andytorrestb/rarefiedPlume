@@ -3,7 +3,7 @@
 Nothing here meshes or runs anything. What is covered is what decides *which
 sixteen cases exist* and *whether any of them may run*: the exclusion of Cai's
 own Knudsen numbers (even disabled, even in a hand-edited manifest), the exact
-matrix, the settings inherited from cases/cai2012-health and the four that are
+matrix, the settings inherited from cases/cai2012-health and the five that are
 deliberately not, the fixed Kn = 0.01 startup reference, the particle level
 applied once, and the production verdicts for the dense cases.
 """
@@ -192,17 +192,21 @@ def test_a_template_at_an_excluded_kn_is_refused():
         policy.check_template(template_at(100.0))
 
 
-def test_everything_but_four_declared_keys_is_inherited_from_health():
+def test_everything_but_five_declared_keys_is_inherited_from_health():
     report = policy.inheritance_report(load_case_config(FAMILY / "baseCase"),
                                        load_case_config(HEALTH / "baseCase"))
     assert report["undeclared"] == {}
     assert set(report["overridden"]) == set(policy.DELIBERATE_OVERRIDES)
+    assert len(policy.DELIBERATE_OVERRIDES) == 5
     overridden = report["overridden"]
     assert overridden["resolution.target_particles_per_cell"]["extension"] == 40.0
     assert overridden["dsmc.sampling_domain_transits"]["extension"] == 4.5
     assert overridden["dsmc.transient_basis"] == {
         "extension": "cai", "health": "transits",
         "reason": policy.DELIBERATE_OVERRIDES["dsmc.transient_basis"]}
+    assert overridden["dsmc.n_subdomains"] == {
+        "extension": 192, "health": 12,
+        "reason": policy.DELIBERATE_OVERRIDES["dsmc.n_subdomains"]}
     for key in ("dsmc.write_interval_s", "dsmc.courant_target",
                 "mesh.max_cells", "mesh.target_cell_over_mfp",
                 "mesh.max_core_cell_over_D", "checks.max_cell_over_mfp",

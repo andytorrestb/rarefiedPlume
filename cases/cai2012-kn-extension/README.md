@@ -44,7 +44,7 @@ is how to run it.
 | | |
 |---|---|
 | `study.yaml` | the matrix, in `cases/cai2012`'s own study schema |
-| `baseCase/case.yaml` | the template: `cases/cai2012-health`'s, with four declared overrides |
+| `baseCase/case.yaml` | the template: `cases/cai2012-health`'s, with five declared overrides |
 | `baseCase/diagnostics.yaml` | the nozzle-plume `diagnostics:` thresholds, per case |
 | `generate_cases.py` | idempotent generation, provenance, feasibility → `manifest.yaml` |
 | `validate_cases.py` | independent recomputation + the parent family's dictionary check |
@@ -184,7 +184,7 @@ an excluded Kn also fails `validate_cases.py`.
    bash ./AllrunCases --index "$SLURM_ARRAY_TASK_ID" -np "$SLURM_NTASKS"
    ```
 
-   `-np` overrides the template's 12 subdomains without touching the case
+   `-np` overrides the template's 192 subdomains without touching the case
    inputs. An interrupted case continues from its newest time directory when
    re-run; a finished one is skipped. `--prune-transient` deletes, once a case
    has reached `endTime`, the ~141 time directories written before the
