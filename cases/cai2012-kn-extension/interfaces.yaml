@@ -1,0 +1,165 @@
+# The INTERFACE TRACK of the Cai 2012 Knudsen extension.
+#
+# Read by ./generate_interfaces.py (plumetools/cai2012ext/interface_study.py).
+# It generates Interface/<variant>/ -- baseCase/ plus baseCaseInterface/ -- and
+# interface-manifest.yaml. study.yaml, Cases/ and manifest.yaml (the four
+# direct-exit cases) are not touched.
+#
+# In interface mode the dense core around Cai's exit is removed from the DSMC
+# domain and the exit is continued, as a Markelov angular source with a
+# finite-temperature radial-streamtube closure, to a sphere downstream where
+# Bird's B is still small. The equations, which parts are the papers' and
+# which are this project's assumptions, and every limitation are in
+# docs/cai2012-kn-interface.md.
+#
+# Nothing here changes D = 0.2 m, S0 = 2, T0 = 300 K, the gas or Kn -> n0:
+# overrides may not touch exit, gas or nozzle.
+#
+# Three groups, never mixed:
+#   production   the low-Kn pair of the matrix, at ONE selected threshold
+#   validation   truncated Kn = 0.01 runs against the full-domain benchmark
+#   smoke        tiny development cases; never evidence
+#
+# DECISIONS STILL OPEN (the generator reports them; nothing is defaulted):
+#   * core_half_angle_deg  -- no Kn = 0.01 DSMC profile is available locally,
+#     so no angle is proposed for a scientific run (docs §4).
+#   * source_validity_min_radius_over_D -- no paper certifies one (docs §3).
+#   * the overlap thresholds: at Kn = 0.01, B on the axis is already 0.062 at
+#     the equivalent anchor sphere and grows outward, so 0.02 / 0.03 / 0.05
+#     admit NO sphere at any core angle (docs §5). Generated anyway, and
+#     recorded as NO_ADMISSIBLE_INTERFACE.
+
+overlay: baseCaseInterface
+tree: Interface
+manifest_name: interface-manifest.yaml
+
+# Copied into every variant's interface.yaml. Memory per cell and per parcel
+# are NOT known for dsmcFoam at these densities: fill them from a smoke run's
+# log (collect) before trusting a memory verdict. The 1.5 TB is the per-run
+# ceiling stated for the cluster, in bytes (1 TB = 1e12 B). The repository's
+# PBS scripts request no memory (-l nodes=1:ppn=192 only), so no site syntax
+# for a memory request is established here; memory_ceiling_pbs stays null
+# until the site's form is known.
+resources:
+  bytes_per_cell: null
+  bytes_per_parcel: null
+  memory_ceiling_bytes: 1.5e+12
+  memory_ceiling_pbs: null
+
+# --- production: the low-Kn pair, interface mode ------------------------------
+#
+# Same Kn, same exit, same 40-parcel weight rule (at the declared interface
+# reference cell instead of the exit cell). Run as production only after the
+# overlap validation at THIS threshold has passed: set validation_evidence to
+# that case's results/overlap.yaml. Until then runCase.sh refuses them unless
+# run_mode is exploratory (which labels them NON-PRODUCTION for good).
+production:
+  - name: Kn0p001_np1x_sphere
+    kn_case: Kn0p001
+    interface:
+      purpose: production
+      run_mode: production
+      bird_definition: general
+      bird_threshold: 0.05            # initial; selected after the overlap study
+      core_half_angle_deg: null       # REQUIRED -- see above
+      source_validity_min_radius_over_D: null   # REQUIRED -- see above
+      validation_evidence: null
+    overrides: {}
+    note: >-
+      Kn = 1e-3 with the dense core removed. The direct-exit record of this
+      Kn stays Cases/Kn0p001_np1x (unsuitable for production).
+
+  - name: Kn0p0001_np1x_sphere
+    kn_case: Kn0p0001
+    interface:
+      purpose: production
+      run_mode: production
+      bird_definition: general
+      bird_threshold: 0.05
+      core_half_angle_deg: null
+      source_validity_min_radius_over_D: null
+      validation_evidence: null
+    # The B = 0.05 sphere lies near R/D ~ 10 at this Kn -- the domain edge and
+    # Cai's r/D = 10 diagnostic sphere. Enlarging the domain and the diagnostic
+    # radius is an explicit decision (geometry.* here, diagnostic_radius_over_D
+    # above); until it is made the sphere is domain-limited and says so.
+    overrides: {}
+    note: >-
+      Kn = 1e-4 with the dense core removed. The direct-exit record stays
+      Cases/Kn0p0001_np1x (unsuitable for production).
+
+# --- validation: truncated Kn = 0.01 against the full-domain benchmark --------
+#
+# One case per threshold: val_Kn0p01_B0p02, _B0p03, _B0p05. The thresholds are
+# this study's sensitivity choices, not universal breakdown criteria. Kn = 0.01
+# is Cai's, excluded from Cases/; it is allowed here only as interface
+# validation, and never as a production case.
+validation:
+  knudsen: 0.01
+  name_prefix: val_Kn0p01
+  bird_thresholds: [0.02, 0.03, 0.05]
+  interface:
+    run_mode: production              # refuse an unresolved mesh
+    bird_definition: general
+    core_half_angle_deg: null
+    source_validity_min_radius_over_D: null
+  overrides: {}
+  # Declared before any result. The region must lie downstream of every
+  # interface of the set by interface_buffer_over_D, inside the core cone, and
+  # inside both domains; overlap.py refuses one that does not.
+  overlap:
+    # cases/cai2012's generated Kn = 0.01 baseline, relative to the
+    # validation case. NOT in this checkout (its Cases/ tree is on the
+    # cluster); --baseline on Alloverlap.py points elsewhere.
+    baseline_case: ../../../cai2012/Cases/Kn0p01_np1x
+    region:
+      r_min_over_D: 4.0
+      r_max_over_D: 9.5
+      theta_max_deg: 15.0
+      r_bin_over_D: 0.5
+      theta_bin_deg: 2.5
+      interface_buffer_over_D: 1.0
+    targets:                          # project targets, not published ones
+      number_density: 0.05
+      speed: 0.05
+      temperature: 0.10
+    uncertainty:
+      blocks: 6
+      confidence: 0.95
+    low_signal_relative_se: 0.2
+
+# --- smoke: development only --------------------------------------------------
+#
+# A mechanics check of mesh -> inflow -> solver on a laptop: <= 50 000 cells,
+# a few tens of thousands of parcels, a few hundred steps. Provisional angle and
+# radius, a coarse pinned cell, a short transits-based startup: NOTHING here is
+# a resolution or a result. Run it serially, then on 2 ranks (docs §9).
+smoke:
+  - name: smoke_Kn0p001_B0p05
+    knudsen: 0.001
+    interface:
+      purpose: development-smoke
+      run_mode: exploratory
+      bird_threshold: 0.05
+      core_half_angle_deg: 30.0
+      core_angle_provisional: true
+      source_validity_min_radius_over_D: 1.0
+      source_validity_provisional: true
+      label: DEVELOPMENT SMOKE -- not a scientific configuration
+    overrides:
+      geometry: {x_max_over_D: 3.0, y_half_over_D: 3.0, z_half_over_D: 3.0}
+      mesh: {core_cell_size_m: 0.025, outer_x_cells: 4, outer_lateral_cells: 4,
+             max_cells: 50000}
+      dsmc: {n_subdomains: 2, transient_basis: transits,
+             transient_domain_transits: 0.5, sampling_domain_transits: 0.5,
+             write_interval_s: 1.0e-4}
+      resolution: {target_particles_per_cell: 10.0}
+      post: {centerline_x_over_D_max: 3.0, plane_half_over_D: 2.5}
+
+meta:
+  reference: "Cai and Wang 2012; Lumpkin, Stewart and Markelov, AIAA 99-3455;
+    Stewart and Lumpkin 2012"
+  model: cai2012ext_markelov_streamtube
+  note: >-
+    The coupling (CP-1 .. CP-5) is a specified engineering approximation,
+    not a published result that Markelov's source reproduces Cai's exit.

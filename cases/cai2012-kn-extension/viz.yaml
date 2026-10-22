@@ -1,0 +1,82 @@
+# cases/cai2012-kn-extension/viz.yaml -- the flow-field imagery common to all
+# four cases. The diagnostic fields are drawn by viz-diagnostics.yaml.
+#
+# ./AllpostCases does NOT render with this file directly. It writes one spec per
+# Knudsen group into results/viz-specs/ (plumetools/cai2012ext/vizspec.py),
+# each `extends:` this file and adds what depends on the case, FROM THE
+# MANIFEST:
+#
+#   sampling.time: all, time_min = that group's dsmc average_start_s
+#       -- Cai's 10^4 reference collision times, 0.0501 s. NOT the health
+#       family's literal 5.658e-3 s (its 2-transit startup), which would draw
+#       141 transient frames that have no *Mean field and silently fall back to
+#       the instantaneous one.
+#
+#   a derived n_over_n0 = rhoN{mean} / n0 with that group's n0, on ONE fixed
+#       logarithmic range for every Kn. Raw rhoN spans five decades of n0
+#       across this study and cannot share a colour range; the normalised
+#       density can, and so the four cases' images are comparable.
+#
+# Rendered directly, this file draws only the LATEST frame (time: latest
+# below), which always carries the averaged fields -- the safe fallback.
+#
+# From cases/cai2012-health/viz.yaml, unchanged in intent: prefer_mean on (the
+# averaged fields), one folder per field with frames numbered by index, and
+# EXPLICIT colour ranges on every field, so cases are never drawn on their own
+# auto-scaled ranges. The ranges are re-chosen for this study, not copied --
+# health's were measured on its Kn = 100 baseline.
+
+version: 1
+extends: default
+
+output:
+  subdirectory: "{requested}"
+  filename: "{requested}_{index}"
+
+video:
+  enabled: true
+  framerate: 6
+  quality: 18
+
+sampling:
+  time: latest             # the generated per-Kn specs set 'all' + time_min
+  prefer_mean: true        # [HEALTH] the averaged fields; see that file
+
+planes:
+  - name: midplane         # [PAPER] Cai Figs. 6-8 are X/D against Z/D
+    normal: [0, 1, 0]
+    camera_up: [0, 0, 1]
+    origin: [0, 0, 0]
+
+# The default spec's two derivations, restated because a spec that extends
+# another REPLACES its lists, and the generated specs append n_over_n0 to these.
+derived:
+  - name: U
+    expression: "momentum{mean}/rhoM{mean}"
+    component: Magnitude
+    units: m/s
+    log: false
+  - name: Ttra
+    expression: "(2*linearKE{mean}/rhoM{mean} - mag(momentum{mean}/rhoM{mean})^2)/(3*{R})"
+    units: K
+    log: false
+
+fields:
+  # The PARCEL COUNT per cell -- dimensionless, not a density (see
+  # cases/cai2012-health/viz.yaml). The exit cell holds 40 / 80 / 200 / 400
+  # parcels across the four levels; one range covers all of them, so the
+  # levels show as shifts in colour.
+  - name: dsmcRhoN
+    log: true
+    range: [1.0e-02, 5.0e+02]
+
+  # Speed. U0 = 707 m/s; the collisionless centreline rises to ~860 m/s, and a
+  # fully collisional expansion of argon is bounded by sqrt(5 R T0 + U0^2) =
+  # 901 m/s, so 900 covers every Kn here and clips only near-empty cells.
+  - name: U
+    range: [0.0, 900.0]
+
+  # Translational temperature. T0 = 300 K at the exit; a collisional expansion
+  # cools further than the collisionless one, so the floor is 0.
+  - name: Ttra
+    range: [0.0, 320.0]
