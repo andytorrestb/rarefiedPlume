@@ -31,6 +31,13 @@ calls ``./Allrun`` itself, and around it the four steps here, through
 
 ``finished`` and the measurement are ``cases/cai2012-health/AllrunCases``'
 completed-run test and wall-clock bookkeeping, per case.
+
+An **interface-mode** case (an enabled ``interface.yaml``) is handed to
+:mod:`.interface_case` at each step: ``guard`` also refuses an infeasible
+interface and results built on another mesh, and ``label`` exits 3 -- which
+stops ``runCase.sh`` before ``./Allrun`` -- for a production case that is not
+a candidate unless its ``run_mode`` is ``exploratory``. A direct-exit case is
+handled exactly as before.
 """
 
 from __future__ import annotations
@@ -42,9 +49,15 @@ import sys
 from pathlib import Path
 
 from plumetools.cai2012.config import load_case_config
-from plumetools.cai2012ext import feasibility, generation, policy
+from plumetools.cai2012ext import feasibility, generation, interface, policy
+from plumetools.cai2012ext import interface_case
 
 MARKER = "NON-PRODUCTION"
+
+
+def _interface_mode(case_dir: Path) -> bool:
+    """Whether the case injects at a downstream sphere (malformed raises)."""
+    return interface.load_interface(case_dir) is not None
 
 #: Where a case's wall clock is recorded, relative to the family directory.
 COST_MODEL = Path("results") / "cost-model.yaml"
@@ -61,6 +74,12 @@ def guard(case_dir: Path) -> str | None:
     extension never runs them, whatever else is true of the case.
     """
     case_dir = Path(case_dir)
+    try:
+        if _interface_mode(case_dir):
+            return interface_case.guard(case_dir)
+    except (interface.InterfaceConfigError, policy.ExtensionError,
+            ValueError) as exc:
+        return f"interface.yaml: {exc}"
     cfg = load_case_config(case_dir)
     if policy.is_excluded(cfg.exit.knudsen):
         return policy._excluded_message(cfg.exit.knudsen,
@@ -74,6 +93,10 @@ def guard(case_dir: Path) -> str | None:
 
 def assess(case_dir: Path, cost_model=None, cost_origin=None) -> tuple:
     """``(derived, assessment)`` for the case, from its own ``case.yaml``."""
+    if _interface_mode(Path(case_dir)):
+        derived = interface_case.derive(Path(case_dir))
+        return derived, interface_case.assess(derived, cost_model=cost_model,
+                                              cost_origin=cost_origin)
     derived = generation.derive(Path(case_dir))
     return derived, feasibility.assess(*derived, cost_model=cost_model,
                                        cost_origin=cost_origin)
@@ -95,6 +118,11 @@ def label(case_dir: Path) -> str:
     case.
     """
     case_dir = Path(case_dir)
+    if _interface_mode(case_dir):
+        text, runnable = interface_case.label(case_dir, MARKER)
+        if not runnable:
+            raise policy.ExtensionError(text)
+        return text
     _, assessment = assess(case_dir)
     if assessment["status"] == feasibility.STATUS_CANDIDATE:
         return (f"{case_dir.resolve().name}: {feasibility.STATUS_CANDIDATE} -- "
@@ -157,6 +185,20 @@ def family_root(case_dir: Path) -> Path | None:
 def measurement(case_dir: Path, seconds: float, derived, assessment) -> dict:
     """One ``cost-model.yaml`` entry: the fields the health family records."""
     case_dir = Path(case_dir).resolve()
+    if isinstance(derived, interface_case.Derived):
+        return {
+            "case": case_dir.name,
+            "path": case_dir.relative_to(family_root(case_dir)).as_posix(),
+            "Kn": float(derived.cfg.exit.knudsen),
+            "seconds": float(seconds),
+            "parcels": float(derived.parcels),
+            "cells": int(derived.mesh_plan.retained_cells),
+            "steps": int(derived.run.n_steps),
+            "numerical_particle_multiplier": float(
+                derived.cfg.dsmc.numerical_particle_multiplier),
+            "production_status": assessment["status"],
+            "mode": "interface",
+        }
     cfg, _, _, plan, run, _, particles, _ = derived
     return {
         "case": case_dir.name,
@@ -246,7 +288,12 @@ def main(argv=None) -> int:
             return 2
         return 0
     if args.step == "label":
-        print(label(args.case_dir), end="")
+        try:
+            print(label(args.case_dir), end="")
+        except policy.ExtensionError as exc:
+            print(str(exc), end="")
+            print("hpc label: REFUSED -- see above", file=sys.stderr)
+            return 3
         return 0
     if args.step == "finished":
         return 0 if reached_end(args.case_dir) else 1

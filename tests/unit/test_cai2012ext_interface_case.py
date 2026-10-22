@@ -23,6 +23,7 @@ from _helpers import make_case, patch
 from plumetools.cai2012.study import load_study
 from plumetools.cai2012ext import (
     generation,
+    hpc,
     interface,
     interface_case,
     interface_mesh,
@@ -330,12 +331,52 @@ def test_inflow_refuses_a_mesh_built_for_another_configuration(meshed_smoke):
 # the PBS steps
 # --------------------------------------------------------------------------- #
 
+def test_guard_allows_kn_001_only_for_validation(generated, tmp_path):
+    family = clone(generated, tmp_path)
+    case = family / "Interface" / "val_Kn0p01_B0p05"
+    problem = hpc.guard(case)
+    # Not the Kn rule: the interface itself is what is refused.
+    assert problem is not None and "NO_ADMISSIBLE_INTERFACE" in problem
+    raw = yaml.safe_load((case / "interface.yaml").read_text())
+    raw["interface"]["purpose"] = "production"
+    (case / "interface.yaml").write_text(yaml.safe_dump(raw))
+    assert "Kn = 0.01 is one of Cai's" in hpc.guard(case)
 
 
+def test_guard_refuses_an_infeasible_or_incomplete_production_case(generated):
+    problem = hpc.guard(generated / "Interface" / "Kn0p001_np1x_sphere")
+    assert problem and "CONFIGURATION_INCOMPLETE" in problem
 
 
+def test_guard_refuses_results_from_another_mesh(meshed_smoke):
+    case, derived, _ = meshed_smoke
+    assert hpc.guard(case) is None
+    (case / "0.001").mkdir()
+    assert hpc.guard(case) is None
+    (case / interface_case.IDENTITY_FILE).unlink()
+    assert "never resumed" in hpc.guard(case)
 
 
+def test_label_marks_smoke_runs_and_refuses_pending_production(generated, tmp_path):
+    family = clone(generated, tmp_path)
+    smoke = family / "Interface" / SMOKE
+    text = hpc.label(smoke)
+    assert (smoke / hpc.MARKER).is_file() and "development-smoke" in text
+    production = family / "Interface" / "Kn0p001_np1x_sphere"
+    raw = yaml.safe_load((production / "interface.yaml").read_text())
+    raw["interface"].update(core_half_angle_deg=30.0,
+                            source_validity_min_radius_over_D=1.0)
+    (production / "interface.yaml").write_text(yaml.safe_dump(raw))
+    assessment = interface_case.assess(interface_case.derive(production))
+    assert assessment["coupling_validation"]["status"] == "pending"
+    assert not assessment["runnable"]
+    with pytest.raises(policy.ExtensionError, match="REFUSED"):
+        hpc.label(production)
+    assert not (production / hpc.MARKER).exists()
+    raw["interface"]["run_mode"] = "exploratory"
+    (production / "interface.yaml").write_text(yaml.safe_dump(raw))
+    assert "exploratory" in hpc.label(production)
+    assert (production / hpc.MARKER).is_file()
 
 
 def test_production_needs_passed_evidence_at_the_same_threshold(generated, tmp_path):
