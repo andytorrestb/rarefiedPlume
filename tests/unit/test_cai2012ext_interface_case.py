@@ -414,7 +414,7 @@ def test_the_direct_exit_post_context_is_the_parent_derivation(generated, tmp_pa
 def test_overlay_scripts_parse():
     if shutil.which("bash") is None:
         pytest.skip("no bash")
-    for name in ("Allmesh",):
+    for name in ("Allmesh", "runPost.sh", "runViz.sh"):
         result = subprocess.run(["bash", "-n", str(FAMILY / "baseCaseInterface" / name)],
                                 capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
