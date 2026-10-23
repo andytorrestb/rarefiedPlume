@@ -53,6 +53,12 @@ plumetools/          the analytical model and OpenFOAM I/O, as a package
                        its own config/gas/analytical/mesh/study/post, plus
                        health.py (the statistical-quality sweep) and audit.py
                        (measured parcel occupancy, determinism, the sweep table)
+  cai2012ext/          the Cai 2012 KNUDSEN EXTENSION (Kn 1e-4, 1e-3, 1, 10):
+                       policy, provenance, feasibility, idempotent generation,
+                       off-axis/angular comparisons, stationarity, and the
+                       nozzle-plume resolution diagnostics wired to a cai2012
+                       case. Imports cai2012, nozzleplume and rarefaction and
+                       edits none of them
   nozzleplume/         the GENERAL nozzle-exit family: any exit state given
                        directly, any single VHS gas, an optional plate, a
                        snappyHexMesh mesh. cases/r-4d is its first case
@@ -80,7 +86,7 @@ Cases keep the ordinary OpenFOAM layout (`constant/`, `system/`, `0/`).
 
 | Status | Cases |
 |---|---|
-| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `cai2012-health` (statistical health of the above) · `r-4d` (R-4D exit plume onto a plate) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
+| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `cai2012-health` (statistical health of the above) · `cai2012-kn-extension` (Cai's plume at Kn 1e-4…10, not run yet) · `r-4d` (R-4D exit plume onto a plate) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
 | **Archived** | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` · `wake-cylinder` |
 
 Archived cases are one-off studies kept for historical record. They are frozen:
@@ -158,6 +164,14 @@ source-flow sphere and throat radius this case does not have.
 **No result in it has been validated** against Cai's own DSMC numbers; his
 reported errors are carried as reference values, not tolerances. See
 [`docs/cai2012-case.md`](docs/cai2012-case.md).
+
+`cases/cai2012-kn-extension` runs the same plume at four Knudsen numbers Cai did
+not report — 1e-4, 1e-3, 1 and 10, at one baseline parcel weight — with
+`cai2012-health`'s highest-resolution settings and Cai's 10⁴ t0 startup, and
+runs the nozzle-plume family's resolution diagnostics on every case. Cai's own
+0.01, 0.1 and 100 are refused at every step. Kn = 1e-3 and 1e-4 cannot be
+resolved within the cell budget and are marked unsuitable for production. See
+[`docs/cai2012-kn-extension.md`](docs/cai2012-kn-extension.md).
 
 ## The nozzle-plume family and the R-4D case
 
@@ -267,6 +281,11 @@ archived output is not achievable. See
 - [`cases/cai2012-health/README.md`](cases/cai2012-health/README.md) — how much
   statistical noise that family's answer carries: a 3 × 3 sweep over parcels per
   cell and averaging duration, judged through imagery
+- [`docs/cai2012-kn-extension.md`](docs/cai2012-kn-extension.md) and
+  [`cases/cai2012-kn-extension/README.md`](cases/cai2012-kn-extension/README.md)
+  — the Knudsen extension: the four configurations, what is inherited, the
+  production verdicts, the resolution diagnostics, every compared quantity, and
+  how to run only it on HPC
 - [`cases/r-4d/README.md`](cases/r-4d/README.md) — the R-4D plume-on-a-plate
   case: what was given, what was assumed, what it costs to run, and what has and
   has not been checked

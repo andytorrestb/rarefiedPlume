@@ -125,6 +125,27 @@ cases/cai2012-health/rmCases
 cases/cai2012-health/results/*
 !cases/cai2012-health/results/cost-model.yaml
 
+# cai2012-kn-extension, the Knudsen extension. Same rules as cai2012: the
+# dictionaries follow from case.yaml, and Cases/ + manifest.yaml from
+# ./generate_cases.py. results/cost-model.yaml is kept for the same reason as
+# the health family's. .staging-* is the generator's scratch directory, removed
+# on exit; ignored in case a run is killed mid-way.
+cases/cai2012-kn-extension/baseCase/system/
+cases/cai2012-kn-extension/baseCase/constant/
+cases/cai2012-kn-extension/baseCase/results/
+cases/cai2012-kn-extension/baseCase/case-summary.json
+cases/cai2012-kn-extension/Cases/
+cases/cai2012-kn-extension/manifest.yaml
+cases/cai2012-kn-extension/manifest.yaml.tmp
+cases/cai2012-kn-extension/.staging-*/
+cases/cai2012-kn-extension/results/*
+!cases/cai2012-kn-extension/results/cost-model.yaml
+# ... and its interface track: Interface/ + interface-manifest.yaml from
+# ./generate_interfaces.py (interfaces.yaml and baseCaseInterface/ are tracked).
+cases/cai2012-kn-extension/Interface/
+cases/cai2012-kn-extension/interface-manifest.yaml
+cases/cai2012-kn-extension/interface-manifest.yaml.tmp
+
 # r-4d, the first case of the general nozzle-plume family
 # (plumetools/nozzleplume). Same rule, and here it covers both directories
 # whole: NOTHING under system/ or constant/ is hand-written -- the mesh

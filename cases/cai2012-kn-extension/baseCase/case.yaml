@@ -1,0 +1,242 @@
+# cases/cai2012-kn-extension/baseCase -- the Cai 2012 Knudsen extension.
+#
+# Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless
+# Rocket Plume Solutions", Journal of Spacecraft and Rockets, Vol. 49, No. 1,
+# 2012.
+#
+# THE AUTHORITATIVE SOURCE OF PHYSICAL INPUTS FOR THIS FAMILY.
+#
+# The same circular argon nozzle as cases/cai2012, at four Knudsen numbers Cai
+# did NOT report -- 1e-4, 1e-3, 1 and 10 -- each at four numerical-particle
+# levels. Cai's own 0.01, 0.1 and 100 are EXCLUDED: generation, meshing, running
+# and post-processing all refuse them (plumetools/cai2012ext/policy.py).
+#
+# A case here IS a cai2012 case: the same schema, ./Allmesh, ./Allrun,
+# plumetools.cai2012.{config,mesh,inflow,checks,post} and the same generated
+# dictionaries. Nothing physical is forked.
+#
+# WHERE THE NUMBERS COME FROM
+#
+# This file is cases/cai2012-health/baseCase/case.yaml -- that family's
+# highest-resolution combination, ppc040/s4p5 -- with exactly five keys
+# changed, each marked [EXTENSION] below with its reason. Every other value is
+# INHERITED and plumetools.cai2012ext.policy.inheritance_report checks it key by
+# key against the health template; a difference that is not one of the five
+# fails generation.
+#
+# Tags:
+#
+#   [PAPER]       printed in Cai & Wang 2012
+#   [DERIVED]     computed, never a literal
+#   [ASSUMPTION]  not in the paper; an implementation choice
+#   [HEALTH]      inherited from cases/cai2012-health, with its reason there
+#   [EXTENSION]   changed from the health template for THIS study
+#   [SWEPT]       written per case by generate_cases.py
+#
+# generate_cases.py writes exactly two keys per case:
+#
+#   exit.knudsen                          the physical axis
+#   dsmc.numerical_particle_multiplier    always 1: the baseline only
+#
+# See cases/cai2012-kn-extension/README.md and docs/cai2012-kn-extension.md.
+
+model: cai2012_circular_plume
+
+meta:
+  reference: Cai and Wang 2012
+  title: Numerical Validations for a Set of Collisionless Rocket Plume Solutions
+  authors: Cai, Wang
+  journal: Journal of Spacecraft and Rockets
+  volume: 49
+  number: 1
+  year: 2012
+  study: Knudsen extension -- Kn 1e-4, 1e-3, 1, 10; NOT one of Cai's cases
+  # generate_cases.py fills in case_name, the Kn case, the level and provenance.
+
+# --- the circular nozzle exit -------------------------------------------------
+nozzle:
+  diameter_m: 0.2              # [PAPER] D = 0.2 m, fixed for every case
+
+# --- the exit state -----------------------------------------------------------
+exit:
+  speed_ratio: 2.0             # [PAPER] S0 = U0 / sqrt(2 R T0), fixed
+  T0_K: 300.0                  # [ASSUMPTION] as in cases/cai2012, fixed
+  knudsen: 10.0                # [EXTENSION][SWEPT] one of 1e-4, 1e-3, 1, 10,
+                               # written per case. The health family pins 100,
+                               # which is EXCLUDED here; the template carries an
+                               # extension value so that ./Allmesh run in this
+                               # directory cannot produce an excluded case.
+                               #
+                               # n0 follows from it through the existing
+                               # Kn -> lambda0 = Kn D -> n0 chain (VHS
+                               # convention, below). No density is typed in.
+  characteristic_length: diameter   # [PAPER] Cai states the nozzle DIAMETER
+
+# --- the gas ------------------------------------------------------------------
+# [HEALTH] unchanged, and identical in every case of this family.
+gas:
+  species_name: Ar
+  mass_kg: 6.63e-26
+  diameter_m: 4.17e-10
+  omega: 0.74
+  t_ref_K: 273.0
+  internal_degrees_of_freedom: 0
+  mean_free_path_convention: vhs
+
+# --- the domain ---------------------------------------------------------------
+# [HEALTH] unchanged: the same box as both other Cai families, so r/D = 10 lies
+# inside it at every polar angle (it touches x = 10 D on the axis and the
+# lateral faces at 90 degrees).
+geometry:
+  symmetry_mode: none
+  x_max_over_D: 10.0           # [PAPER] Cai plots 0 <= X/D <= 10
+  y_half_over_D: 10.0
+  z_half_over_D: 10.0
+  plume_axis: [1, 0, 0]
+
+# --- the mesh -----------------------------------------------------------------
+# [HEALTH] the health template's planning settings and thresholds, UNCHANGED --
+# but the mesh itself is recalculated per Kn, never copied: the core cell is
+# min(target_cell_over_mfp * lambda0, max_core_cell_over_D * D), coarsened to
+# fit max_cells if it must be.
+#
+#   Kn = 10, 1     lambda0 = 2 m, 0.2 m: the 10 mm geometric cap sets the cell,
+#                  1,310,720 cells, cell/lambda0 = 0.005 / 0.05
+#   Kn = 1e-3      lambda0 = 0.2 mm: needs ~2e10 cells; COARSENED to ~5.2 mm,
+#                  cell/lambda0 ~ 26
+#   Kn = 1e-4      lambda0 = 20 um: needs ~2e13 cells; COARSENED to ~5.4 mm,
+#                  cell/lambda0 ~ 270
+#
+# The two dense cases are therefore NOT resolvable inside this budget, and the
+# generator marks them unsuitable for production. More parcels cannot fix that:
+# occupancy is statistics, the collision cell is discretisation. Raising
+# max_cells per Kn through study.yaml is a configuration change; whether any
+# machine can hold the result is the open question (README).
+mesh:
+  type: graded_cartesian
+  core_cell_size_m: null
+  target_cell_over_mfp: 1.0    # [PAPER] Cai states dx / lambda0 = 1
+  max_core_cell_over_D: 0.05   # [ASSUMPTION] the geometric resolution cap
+  core_x_over_D: 2.0
+  core_half_over_D: 1.5
+  outer_x_cells: 40
+  outer_lateral_cells: 34
+  outer_expansion: 40.0
+  max_cells: 4000000           # [HEALTH] the existing hard budget
+  min_core_cell_size_m: null
+  patch_names:
+    nozzle: nozzle
+    upstream_vacuum: upstreamVacuum
+    outer: vacuum
+    symmetry: symmetry
+
+# --- DSMC ---------------------------------------------------------------------
+dsmc:
+  binary_collision_model: VariableHardSphere   # [PAPER] VHS, NTC by construction
+  collisions_enabled: true     # ON at every Kn
+
+  n_equivalent_particles: null # [DERIVED] n0 * V_exit / target_particles_per_cell
+
+  # The baseline, and the only level this study runs: 1. generate_cases.py
+  # writes it into every case and refuses a study with another level, so
+  #
+  #   nEquivalentParticles = n0 V_exit / 40
+  #
+  # and the exit cell holds 40 parcels. The weight is derived from each case's
+  # own density and exit cell, never copied between Kn.
+  numerical_particle_multiplier: 1.0
+
+  # NOT scaled. cases/cai2012/study.yaml runs 3x longer and writes 4x more
+  # often through these; inherited by accident they would multiply the
+  # averaging window and the write cadence below. The extension's study.yaml
+  # sets both to 1 and the generator refuses anything else.
+  run_time_multiplier: 1.0
+  output_frequency_multiplier: 1.0
+
+  delta_t_s: null              # [DERIVED] from courant_target and the smallest
+  courant_target: 0.2          # [HEALTH] cell, per Kn
+
+  end_time_s: null             # [DERIVED] average_start + sampling below
+  average_start_s: null        # [DERIVED] the Cai startup below
+
+  write_interval_s: 3.536e-4   # [HEALTH] one eighth of a domain transit. Rounded
+                               # to whole steps (writeControl timeStep), so the
+                               # achieved interval is reported per case: 258
+                               # steps at Kn >= 1, ~483-496 on the dense meshes.
+                               #
+                               # COST: the same cadence through a Cai-length
+                               # startup writes ~141 transient frames before the
+                               # 37 sampled ones. They carry no *Mean field and
+                               # dominate the disk estimate the generator
+                               # prints. Kept because the cadence inside the
+                               # averaging window is what the health diagnostics
+                               # need, and controlDict has one writeInterval.
+
+  transient_basis: cai         # [EXTENSION] Cai's 10^4 t0, NOT the health
+  transient_collision_times: 10000.0   # family's 2-transit startup, which that
+  transient_domain_transits: 2.0       # family documents as limiting the far
+                               # field (docs/cai2012-case.md 5.1). t0 is the
+                               # Kn = 0.01 exit collision time -- the paper's
+                               # reference, resolution.reference_knudsen below --
+                               # for EVERY case, not each case's own: 0.0501 s,
+                               # 17.7 domain transits, the same in all four.
+                               # transient_domain_transits is unused under 'cai'
+                               # and kept as the health value for the record.
+
+  sampling_domain_transits: 4.5   # [EXTENSION] health's longest column, s4p5.
+                               # Averaging AFTER the startup: 0.01273 s.
+
+  initial_number_density_per_m3: 1.0e+10
+  initial_temperature_K: 300.0
+
+  n_subdomains: 192            # [EXTENSION] one HPC node, 192 cores: each case
+                               # is its own PBS job (runCase.sh). ./Allmesh
+                               # writes it into system/decomposeParDict and
+                               # ./Allrun reads it from there. The health
+                               # template's 12 is the laptop's physical cores.
+
+# --- particle resolution ------------------------------------------------------
+resolution:
+  target_particles_per_cell: 40.0   # [EXTENSION] health's ppc040 row: the
+                               # baseline, and only, weight. The health TEMPLATE
+                               # says 20 because its generator writes the row
+                               # value per case.
+  reference_knudsen: 0.01      # [PAPER] Cai's dx/lambda0, dt/t0 and 10^4 t0 are
+                               # referred to the Kn = 0.01 exit state for EVERY
+                               # case. Computing it generates no case there.
+  report_only: false
+
+# --- DSMC quality checks ------------------------------------------------------
+# [HEALTH] unchanged. plumetools.cai2012ext.feasibility reads these as the
+# production criteria, with the nozzle-plume family's checks beside them
+# (dt against the exit collision time, the transient length, ...). After a
+# run, ./Alldiagnose.py measures the resolution the mesh actually achieved,
+# cell by cell, with the thresholds in ./diagnostics.yaml.
+checks:
+  enabled: true
+  max_cell_over_mfp: 1.0
+  max_courant: 1.0
+  warn_courant: 0.5
+  min_particles_per_cell: 5.0
+  min_nozzle_faces: 12
+  max_nozzle_area_error: 0.05
+
+# --- generated dictionaries ---------------------------------------------------
+output:
+  dialect: standard            # OpenFOAM's own dsmcFoam, v2512
+  inflow_model: plumeFieldInflow   # applications/dsmcBoundaryModels; no fallback
+
+# --- post-processing ----------------------------------------------------------
+# [HEALTH] unchanged, so the centreline errors are the same estimator as both
+# other Cai families'. The extension's extra comparisons (angular at r/D = 10,
+# off-axis velocity, temperature, pressure) are configured on the command line
+# of Allcompare.py and documented in docs/cai2012-kn-extension.md.
+post:
+  centerline_x_over_D_max: 10.0
+  centerline_points: 200
+  centerline_radius_over_D: 0.10
+  plane: xz
+  plane_half_over_D: 5.0
+  contour_levels: [0.1, 0.01, 0.001]
+  plane_points_x: 240
+  plane_points_lateral: 240

@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+# INTERFACE MODE. Generate this case's mesh and dictionaries from case.yaml and
+# interface.yaml: the Cai box with the dense core removed, the downstream sphere
+# as the inflow patch.
+#
+#   ./Allmesh                 dictionaries, blockMesh, carve the sphere, check
+#   ./Allmesh --dict-only     write the dictionaries and stop (no OpenFOAM)
+#   ./Allmesh --force         re-mesh even if the case already has results
+#   ./Allmesh --help
+#
+# Pipeline:
+#
+#   plumetools    -> system/blockMeshDict, snappyHexMeshDict, meshQualityDict,
+#                    controlDict, dsmcInitialiseDict, decomposeParDict,
+#                    fvSchemes, fvSolution, constant/dsmcProperties,
+#                    interface-identity.yaml, results/interface-report.yaml
+#                    (python -m plumetools.cai2012ext.interface_case mesh-dicts)
+#   blockMesh     -> the parent family's graded box, re-planned around the sphere
+#   snappyHexMesh -> remove r < R_interface, snap the cut to the sphere: patch
+#                    'nozzle', whose role here is the continuum INTERFACE
+#   checkMesh     -> quality, and ONE connected region
+#   plumetools    -> the meshed patch measured against the sphere
+#                    (python -m plumetools.cai2012ext.interface_case verify-mesh)
+#
+# Refuses, writing nothing to mesh, when the interface is infeasible -- e.g.
+# NO_ADMISSIBLE_INTERFACE -- or a scientific decision (core angle, source
+# validity radius) is missing. results/interface-report.yaml says why, with a
+# table of what other choices would give.
+#
+# This file replaces the direct-exit Allmesh in interface cases only; the
+# direct-exit cases keep cases/cai2012's, byte for byte.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+
+DICT_ONLY=0
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dict-only)  DICT_ONLY=1 ;;
+        --force)      FORCE=1 ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)            echo "Allmesh: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allmesh: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+result_times() {
+    local entry name
+    for entry in */; do
+        name=${entry%/}
+        case "$name" in
+            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
+        esac
+        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
+            echo "$name"
+        fi
+    done | sort -g
+}
+
+# Re-meshing under results would leave them addressing cells that no longer
+# exist -- and here would also put old parcels on a different interface.
+LATEST=$(result_times | tail -1)
+if [ -n "$LATEST" ] && [ "$DICT_ONLY" -eq 0 ] && [ "$FORCE" -eq 0 ]; then
+    echo "Allmesh: this case already holds results (latest time $LATEST)." >&2
+    echo "  to start over:  ./Allclean --mesh && ./Allmesh" >&2
+    exit 1
+fi
+
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+
+echo "==> deriving the interface and writing dictionaries"
+$PYTHON -m plumetools.cai2012ext.interface_case mesh-dicts . \
+    || die "no mesh: the interface is infeasible or incomplete as configured.
+       See results/interface-report.yaml (selection, assessment, decision_table)."
+
+if [ "$DICT_ONLY" -eq 1 ]; then
+    echo ""
+    echo "Dictionaries written. To mesh:"
+    echo "    blockMesh && snappyHexMesh -overwrite && checkMesh"
+    exit 0
+fi
+
+for cmd in blockMesh snappyHexMesh checkMesh; do
+    have "$cmd" || die "'$cmd' is not on PATH. Source your OpenFOAM environment,
+       or use --dict-only."
+done
+
+if [ -d constant/polyMesh ]; then
+    echo "==> clearing stale mesh bookkeeping"
+    rm -rf constant/polyMesh/sets
+fi
+
+run blockMesh blockMesh
+run snappyHexMesh snappyHexMesh -overwrite
+run checkMesh checkMesh
+
+echo ""
+echo "    mesh quality (from log.checkMesh):"
+grep -E "cells:|regions|non-orthogonality|Max skewness|Mesh OK|Failed" \
+    log.checkMesh | sed 's/^/      /' || true
+REGIONS=$(sed -n 's/.*Number of regions: *\([0-9]*\).*/\1/p' log.checkMesh | head -1)
+[ -z "$REGIONS" ] || [ "$REGIONS" = "1" ] \
+    || die "the mesh has $REGIONS disconnected regions; the free plume is one"
+
+echo ""
+echo "==> verifying the meshed interface against the sphere"
+$PYTHON -m plumetools.cai2012ext.interface_case verify-mesh . \
+    || die "the meshed patch is not the sphere the model was chosen for (above)."
+
+echo ""
+echo "Done. Next:  ./Allrun   (runInflow.py writes the per-face interface state)"
