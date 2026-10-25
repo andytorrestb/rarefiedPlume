@@ -101,10 +101,14 @@ HEALTH_STUDY_ROWS = {
 #: S0, T0 and gas everywhere, the same startup policy, the same averaging, the
 #: same estimators -- are exactly the keys a per-Kn override would break. The
 #: mesh budget and the time step are allowed because resolving a dense case is
-#: precisely what a per-Kn mesh override is for.
+#: precisely what a per-Kn mesh override is for. The exit-cell parcel target is
+#: allowed because a mesh override changes the exit cell: on a uniform mesh the
+#: weight has to be set by the far field (20 parcels at n/n0 = 1e-2) rather than
+#: the 40 exit-cell parcels the graded mesh's growing outer cells make enough.
 ALLOWED_OVERRIDE_SECTIONS = ("mesh",)
 ALLOWED_OVERRIDE_KEYS = ("dsmc.courant_target", "dsmc.delta_t_s",
-                         "dsmc.n_subdomains")
+                         "dsmc.n_subdomains",
+                         "resolution.target_particles_per_cell")
 
 #: Relative tolerance for "the same Knudsen number". Values are typed as
 #: decimals and pass through YAML, so exact float equality would be a trap.
