@@ -83,16 +83,52 @@ kn_cases:
     enabled: true
     note: >-
       lambda0 = 2 m, ten domain lengths: near-collisionless, between Cai's
-      Kn = 100 and 0.1. The 10 mm geometric cap sets the mesh (1,310,720 cells,
-      the cai2012-health mesh), cell/lambda0 = 0.005.
+      Kn = 100 and 0.1. Uniform 20 mm mesh (below), cell/lambda0 = 0.01:
+      lambda/3 cannot be reached without cells larger than the nozzle, so the
+      mesh is set by geometry and the parcel count. The 2026-10-25 run on the
+      graded health mesh (10 mm core) is kept in ../Cases_run1_graded.
+    overrides:
+      # One refinement level: a uniform 20 mm lattice. The core keeps its
+      # 2 D x 1.5 D extent (the loader refuses a core that fills the domain);
+      # outer_expansion 1 and these counts make the outer cells 20 mm too.
+      # 100 x 200 x 200 = 4.0M cells; 10 cells across the nozzle.
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80           # (10 - 2) D / 20 mm
+        outer_lateral_cells: 85     # (10 - 1.5) D / 20 mm
+        max_cells: 4100000
+      # The weight is set by the far field, not the exit: 2000 parcels in the
+      # 20 mm exit cell gives ppc = 2000 n/n0, so >= 20 down to n/n0 = 1e-2.
+      # The 2026-10-25 graded run had a median of ~3 parcels per cell in the plume.
+      resolution:
+        target_particles_per_cell: 2000.0
 
   - name: Kn1
     Kn: 1.0
     enabled: true
     note: >-
-      lambda0 = 0.2 m = D. Same mesh as Kn10, cell/lambda0 = 0.05. The first
-      case where collisions in the near plume should be visible against the
-      collisionless solution.
+      lambda0 = 0.2 m = D. Same uniform 20 mm mesh and weight as Kn10,
+      cell/lambda0 = 0.1. The first case where collisions in the near plume
+      should be visible against the collisionless solution.
+    overrides:
+      # One refinement level: a uniform 20 mm lattice. The core keeps its
+      # 2 D x 1.5 D extent (the loader refuses a core that fills the domain);
+      # outer_expansion 1 and these counts make the outer cells 20 mm too.
+      # 100 x 200 x 200 = 4.0M cells; 10 cells across the nozzle.
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80           # (10 - 2) D / 20 mm
+        outer_lateral_cells: 85     # (10 - 1.5) D / 20 mm
+        max_cells: 4100000
+      # The weight is set by the far field, not the exit: 2000 parcels in the
+      # 20 mm exit cell gives ppc = 2000 n/n0, so >= 20 down to n/n0 = 1e-2.
+      # The 2026-10-25 graded run had a median of ~3 parcels per cell in the plume.
+      resolution:
+        target_particles_per_cell: 2000.0
 
   - name: Kn0p001
     Kn: 0.001
