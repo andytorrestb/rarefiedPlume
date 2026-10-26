@@ -1,0 +1,162 @@
+[
+  {
+    "path": "cases/cai2012/baseCase",
+    "kn": 100.0,
+    "quality": "unavailable",
+    "reasons": [
+      "template-not-a-run",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases/Kn0p0001_np1x",
+    "kn": 0.0001,
+    "quality": "exploratory",
+    "reasons": [
+      "known-inadequate-direct-exit-resolution-and-timestep",
+      "non-production-reference",
+      "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases/Kn0p001_np1x",
+    "kn": 0.001,
+    "quality": "exploratory",
+    "reasons": [
+      "known-inadequate-direct-exit-resolution-and-timestep",
+      "non-production-reference",
+      "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases/Kn10_np1x",
+    "kn": 10.0,
+    "quality": "unavailable",
+    "reasons": [
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases/Kn1_np1x",
+    "kn": 1.0,
+    "quality": "unavailable",
+    "reasons": [
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn10_np1x",
+    "kn": 10.0,
+    "quality": "exploratory",
+    "reasons": [
+      "stationarity-inconclusive",
+      "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn1_np1x",
+    "kn": 1.0,
+    "quality": "exploratory",
+    "reasons": [
+      "stationarity-inconclusive",
+      "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/Kn0p0001_np1x_sphere",
+    "kn": 0.0001,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/Kn0p001_np1x_sphere",
+    "kn": 0.001,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/smoke_Kn0p001_B0p05",
+    "kn": 0.001,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p02",
+    "kn": 0.01,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p03",
+    "kn": 0.01,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p05",
+    "kn": 0.01,
+    "quality": "unsupported",
+    "reasons": [
+      "interface-source-changes-boundary-value-problem",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": "cases/cai2012-kn-extension/baseCase",
+    "kn": 10.0,
+    "quality": "unavailable",
+    "reasons": [
+      "template-not-a-run",
+      "stationarity-unavailable",
+      "missing-dsmc-results"
+    ]
+  },
+  {
+    "path": null,
+    "kn": 100.0,
+    "quality": "unavailable",
+    "reasons": [
+      "requested-case-not-discovered"
+    ]
+  },
+  {
+    "path": null,
+    "kn": 0.1,
+    "quality": "unavailable",
+    "reasons": [
+      "requested-case-not-discovered"
+    ]
+  },
+  {
+    "path": null,
+    "kn": 0.01,
+    "quality": "unavailable",
+    "reasons": [
+      "requested-case-not-discovered"
+    ]
+  }
+]
