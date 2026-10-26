@@ -100,6 +100,13 @@ exploratory comparisons, not established accuracy claims. New uniform Kn 1/10
 folders without result CSVs are explicitly skipped; archived graded results are
 processed separately.
 
+The [results review and refinement plan](refinement-plan.md) records the mixed
+accuracy results and numerical limitations. For the next implementation session,
+use the [targeted sampling implementation prompt](sampling-implementation-prompt.md).
+It specifies event-measure consistency, direction averaging, location
+stratification and uncertainty fixes while preserving the existing physical
+closure and saved predictions.
+
 Focused checks:
 
 ```bash
