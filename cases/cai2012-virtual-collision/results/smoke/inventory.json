@@ -1,0 +1,3141 @@
+{
+  "source_revision": "ad4cdc636b094b3bf1e0b601e7967b8b927370cc",
+  "repository": "/mnt/c/Users/andy9/Dev/rarefiedPlume",
+  "requested_kn": [
+    100.0,
+    10.0,
+    1.0,
+    0.1,
+    0.01,
+    0.001,
+    0.0001
+  ],
+  "cases": [
+    {
+      "path": "cases/cai2012/baseCase",
+      "family": "cai2012",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 100.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 100.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.6200777443832456e+16,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 100.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012/baseCase/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "template-not-a-run",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "template"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases/Kn0p0001_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 0.0001,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.0001,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [
+        "angular_r10D.csv",
+        "centerline.csv",
+        "centerline_extended.csv",
+        "centreline_diagnostics.csv",
+        "density_plane.csv",
+        "meridional_plane.csv"
+      ],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": "0.0629505",
+      "sampling": {
+        "window": {
+          "start_s": 0.05014278763199595,
+          "end_s": 0.0629505,
+          "duration_s": 0.01280771236800406,
+          "averaged_steps": 17492,
+          "fields": [
+            "dsmcRhoN",
+            "linearKE",
+            "momentum",
+            "rhoM",
+            "rhoN"
+          ]
+        },
+        "fields": {
+          "number_density": "rhoNMean",
+          "mass_density": "rhoMMean",
+          "momentum_density": "momentumMean",
+          "kinetic_energy_density": "linearKEMean",
+          "parcels_per_step": "dsmcRhoNMean"
+        },
+        "temperature": "translational, from the averaged moments: 3 R T = 2 linearKE/rhoM - |momentum/rhoM|^2"
+      },
+      "stationarity": {
+        "verdict": "stable-window-demonstrated",
+        "tolerance": 0.02,
+        "resolution_factor": 2.0,
+        "n_frames": 37,
+        "halfway_time": 0.0565847,
+        "regions": {
+          "centreline X/D 0-1": {
+            "running_mean_final": 0.9263753465281069,
+            "running_mean_halfway": 0.9257464925141153,
+            "running_mean_drift": 0.0006788328471266348,
+            "running_mean_settled": true,
+            "instant_mean": 0.9267813214022717,
+            "instant_relative_change": 0.0006217092022798573,
+            "instant_trend_standard_error": 0.00197161698426442,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 2-3": {
+            "running_mean_final": 0.14839374993760432,
+            "running_mean_halfway": 0.14825354877301553,
+            "running_mean_drift": 0.0009447915740908523,
+            "running_mean_settled": true,
+            "instant_mean": 0.14841833673003652,
+            "instant_relative_change": 0.0025477804785239725,
+            "instant_trend_standard_error": 0.004423666283036351,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 4-6": {
+            "running_mean_final": 0.03388308355454483,
+            "running_mean_halfway": 0.033899785311305115,
+            "running_mean_drift": 0.000492923164251001,
+            "running_mean_settled": true,
+            "instant_mean": 0.033915687472852035,
+            "instant_relative_change": -0.0014240240039841811,
+            "instant_trend_standard_error": 0.00742894271225447,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 7-10": {
+            "running_mean_final": 0.009815523323973792,
+            "running_mean_halfway": 0.00982854526328778,
+            "running_mean_drift": 0.0013266678590822208,
+            "running_mean_settled": true,
+            "instant_mean": 0.009840287337791265,
+            "instant_relative_change": -0.005824104928703661,
+            "instant_trend_standard_error": 0.015018762587987133,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 0-15 deg": {
+            "running_mean_final": 0.006938730119892243,
+            "running_mean_halfway": 0.0069390344841286904,
+            "running_mean_drift": 4.386454454748788e-05,
+            "running_mean_settled": true,
+            "instant_mean": 0.006938608232516225,
+            "instant_relative_change": -0.0007659999135475502,
+            "instant_trend_standard_error": 0.001249840373993967,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 15-45 deg": {
+            "running_mean_final": 0.0030650850478818664,
+            "running_mean_halfway": 0.003064471676418479,
+            "running_mean_drift": 0.0002001156424064864,
+            "running_mean_settled": true,
+            "instant_mean": 0.0030652595895047014,
+            "instant_relative_change": 0.00027596134574764885,
+            "instant_trend_standard_error": 0.0008753754139448,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 45-90 deg": {
+            "running_mean_final": 6.72511385901875e-05,
+            "running_mean_halfway": 6.732724586082569e-05,
+            "running_mean_drift": 0.0011316874663189005,
+            "running_mean_settled": true,
+            "instant_mean": 6.729541995119091e-05,
+            "instant_relative_change": -0.0021892096999295814,
+            "instant_trend_standard_error": 0.0034455573061757216,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "domain total (context only)": {
+            "running_mean_final": 0.0017733024318792245,
+            "running_mean_halfway": 0.0017732724514000619,
+            "running_mean_drift": 1.690657984991705e-05,
+            "running_mean_settled": true,
+            "instant_mean": 0.0017733011514530948,
+            "instant_relative_change": 8.759049495598396e-05,
+            "instant_trend_standard_error": 7.434288607085345e-05,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": false
+          }
+        },
+        "note": "The domain total is context only: a flat parcel count is not evidence that the far field has converged. 'inconclusive' means the instantaneous data are too noisy to resolve a drift of the tolerance -- more parcels or more frames, not a pass."
+      },
+      "occupancy": {
+        "threshold": 20.0,
+        "basis": "per_step",
+        "rule": "valid only with MORE sampled parcels than the threshold",
+        "per_step": {
+          "median_over_occupied_cells": 0.2980219529,
+          "cells_at_or_below_threshold": 3566172,
+          "volume_fraction_at_or_below_threshold": 0.6976437080781671
+        },
+        "accumulated": {
+          "median_over_occupied_cells": 5213.0000001268,
+          "cells_at_or_below_threshold": 262443,
+          "volume_fraction_at_or_below_threshold": 0.030645760102771157
+        }
+      },
+      "diagnostic_validity": {
+        "cells": 3726000,
+        "valid_cells": 159828,
+        "valid_cell_fraction": 0.04289533011272142,
+        "valid_volume_fraction": 0.302356291921833,
+        "invalid_cells": 3566172,
+        "invalid_cell_fraction": 0.9571046698872786,
+        "invalid_volume_fraction": 0.6976437080781671,
+        "invalid_by_reason": {
+          "no_parcels_sampled": {
+            "cells": 174083,
+            "volume_fraction": 0.02503096267675344,
+            "bounds_m": [
+              0.002666666666,
+              0.5266347912,
+              -1.912497316,
+              1.912324448,
+              -1.912497316,
+              1.912324448
+            ]
+          },
+          "too_few_sampled_parcels": {
+            "cells": 3392089,
+            "volume_fraction": 0.6726127454014136,
+            "bounds_m": [
+              0.002666666666,
+              1.934500252,
+              -1.912497316,
+              1.912324448,
+              -1.912497316,
+              1.912324448
+            ]
+          },
+          "nonpositive_number_density": {
+            "cells": 0,
+            "volume_fraction": 0.0,
+            "bounds_m": null
+          },
+          "no_resolved_temperature": {
+            "cells": 326527,
+            "volume_fraction": 0.049440216855450025,
+            "bounds_m": [
+              0.002666666666,
+              0.5428011421,
+              -1.912497316,
+              1.912324448,
+              -1.912497316,
+              1.912324448
+            ]
+          }
+        },
+        "gradient_fitted": {
+          "number_density": {
+            "cells": 159042,
+            "fraction_of_valid_cells": 0.9950822133793829
+          },
+          "temperature": {
+            "cells": 159042,
+            "fraction_of_valid_cells": 0.9950822133793829
+          }
+        }
+      },
+      "resolution": {
+        "target_cell_over_mean_free_path": 0.3333333333333333,
+        "cells_per_mean_free_path": 3.0,
+        "volume_equivalent": {
+          "field": "cellOverMfpV",
+          "cells": 159828,
+          "min": 0.47738269761171603,
+          "median": 20.25383795613145,
+          "p95": 261.1652431989478,
+          "max": 270.92159710953973,
+          "volume_weighted_mean": 9.505170233661033,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 159828,
+            "cell_fraction": 1.0,
+            "volume_fraction": 1.0
+          }
+        },
+        "bounding_box_max": {
+          "field": "cellOverMfpMax",
+          "cells": 159828,
+          "min": 0.5560715291530443,
+          "median": 70.9990488917735,
+          "p95": 261.553305129049,
+          "max": 271.3241559340772,
+          "volume_weighted_mean": 22.38686334419606,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 159828,
+            "cell_fraction": 1.0,
+            "volume_fraction": 1.0
+          }
+        },
+        "worst_cells": [
+          {
+            "at_m": [
+              0.008000000002,
+              0.02410714286,
+              0.04553571429
+            ],
+            "cell_over_mean_free_path": 271.3241559340772,
+            "cell_size_m": 0.005357142859999997,
+            "mean_free_path_m": 1.9744437577100967e-05,
+            "target_cell_size_m": 6.581479192366989e-06
+          },
+          {
+            "at_m": [
+              0.04,
+              0.01339285714,
+              0.002678571429
+            ],
+            "cell_over_mean_free_path": 271.1670513389104,
+            "cell_size_m": 0.0053571428600000005,
+            "mean_free_path_m": 1.9755876805639368e-05,
+            "target_cell_size_m": 6.585292268546456e-06
+          },
+          {
+            "at_m": [
+              0.03466666666,
+              0.03482142857,
+              -0.008035714284
+            ],
+            "cell_over_mean_free_path": 270.98650755222326,
+            "cell_size_m": 0.005357142859999997,
+            "mean_free_path_m": 1.9769039087555285e-05,
+            "target_cell_size_m": 6.5896796958517614e-06
+          },
+          {
+            "at_m": [
+              0.02933333333,
+              -0.04553571428,
+              0.04017857143
+            ],
+            "cell_over_mean_free_path": 270.9510704983177,
+            "cell_size_m": 0.005357142860000004,
+            "mean_free_path_m": 1.9771624633729825e-05,
+            "target_cell_size_m": 6.590541544576608e-06
+          },
+          {
+            "at_m": [
+              0.01866666666,
+              0.002678571428,
+              -0.06696428571
+            ],
+            "cell_over_mean_free_path": 270.8202402213753,
+            "cell_size_m": 0.005357142857,
+            "mean_free_path_m": 1.978117607687275e-05,
+            "target_cell_size_m": 6.593725358957583e-06
+          },
+          {
+            "at_m": [
+              0.04,
+              -0.02410714286,
+              0.02946428571
+            ],
+            "cell_over_mean_free_path": 270.7918729909868,
+            "cell_size_m": 0.005357142859999997,
+            "mean_free_path_m": 1.9783248296296938e-05,
+            "target_cell_size_m": 6.594416098765646e-06
+          },
+          {
+            "at_m": [
+              0.03466666666,
+              0.03482142857,
+              -0.03482142857
+            ],
+            "cell_over_mean_free_path": 270.64594984588655,
+            "cell_size_m": 0.005357142859999997,
+            "mean_free_path_m": 1.979391475486888e-05,
+            "target_cell_size_m": 6.597971584956293e-06
+          },
+          {
+            "at_m": [
+              0.05066666667,
+              -0.02946428571,
+              -0.01875
+            ],
+            "cell_over_mean_free_path": 270.6427453268919,
+            "cell_size_m": 0.0053571428600000005,
+            "mean_free_path_m": 1.9794149122783445e-05,
+            "target_cell_size_m": 6.598049707594482e-06
+          },
+          {
+            "at_m": [
+              0.01866666666,
+              0.008035714284,
+              0.05625
+            ],
+            "cell_over_mean_free_path": 270.56010868654687,
+            "cell_size_m": 0.005357142859999997,
+            "mean_free_path_m": 1.9800194810708147e-05,
+            "target_cell_size_m": 6.600064936902716e-06
+          },
+          {
+            "at_m": [
+              0.008000000001,
+              0.02946428571,
+              -0.002678571428
+            ],
+            "cell_over_mean_free_path": 270.55447316708654,
+            "cell_size_m": 0.005357142857,
+            "mean_free_path_m": 1.9800607228148044e-05,
+            "target_cell_size_m": 6.6002024093826815e-06
+          }
+        ],
+        "by_cell_size": [
+          {
+            "cell_size_m": 0.0053571429,
+            "cells": 987696,
+            "valid_cells": 33934,
+            "exceeding_cells": 33934,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 271.3241559340772,
+            "worst_at_m": [
+              0.008000000002,
+              0.02410714286,
+              0.04553571429
+            ],
+            "exceeding_bounds_m": [
+              0.002666666666,
+              0.2426666667,
+              -0.09910714286,
+              0.09910714287,
+              -0.09910714287,
+              0.09910714287
+            ]
+          },
+          {
+            "cell_size_m": 0.008039676800000006,
+            "cells": 345888,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.01547459280000002,
+            "cells": 489216,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.032312832999999985,
+            "cells": 510704,
+            "valid_cells": 1126,
+            "exceeding_cells": 1126,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 77.6813774555386,
+            "worst_at_m": [
+              0.8437023653,
+              0.4142165065,
+              0.002678571428
+            ],
+            "exceeding_bounds_m": [
+              0.8038237845,
+              0.8437023653,
+              -0.6309741337,
+              0.6299498222,
+              -0.6309741337,
+              0.6299498222
+            ]
+          },
+          {
+            "cell_size_m": 0.060958938399999996,
+            "cells": 697656,
+            "valid_cells": 61657,
+            "exceeding_cells": 61657,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 103.59370542132862,
+            "worst_at_m": [
+              1.313486837,
+              -0.01339285714,
+              0.3832950962
+            ],
+            "exceeding_bounds_m": [
+              0.8869923732,
+              1.396964723,
+              -1.045407236,
+              1.044174748,
+              -1.045407236,
+              1.044174748
+            ]
+          },
+          {
+            "cell_size_m": 0.12754022499999995,
+            "cells": 694840,
+            "valid_cells": 63111,
+            "exceeding_cells": 63111,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 99.50700481917433,
+            "worst_at_m": [
+              1.487583754,
+              -0.3984051205,
+              0.01875
+            ],
+            "exceeding_bounds_m": [
+              1.100490781,
+              1.934500252,
+              -1.912497316,
+              1.912324448,
+              -1.912497316,
+              1.912324448
+            ]
+          }
+        ]
+      },
+      "measured_exit_diagnostics": {
+        "cells": 1092,
+        "valid_cells": 1092,
+        "target_knudsen": 0.0001,
+        "planned_cell_over_mfp": 269.5102335355641,
+        "measured_KnD_median": 0.00010551728419947609,
+        "measured_cell_over_mfp_max_median": 253.8514377363553,
+        "measured_parcels_per_step_median": 37.905985595000004
+      },
+      "production": {
+        "status": "unsuitable-for-production",
+        "production_ready": false,
+        "unresolved": [
+          "mesh_budget: the criterion needs 1.812e+13 cells at a 2.0000e-05 m core; mesh.max_cells = 4,000,000 forced a 5.3902e-03 m core instead (270x coarser)",
+          "cell_over_mean_free_path: the exit cell 5.3902e-03 m is 270 exit mean free paths (lambda0 = 2.0000e-05 m); the criterion is 1",
+          "time_step_collision_time: deltaT 7.3220e-07 s is 14.6 exit mean collision times (tau0 = lambda0/c_bar = 5.0143e-08 s); the criterion is 1"
+        ],
+        "non_production_marker": true,
+        "statement": "UNSUITABLE FOR PRODUCTION: nothing here is a validated result"
+      },
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+22,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 9.999999999999999e-05,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases/Kn0p0001_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "BinaryCollisionModel": "VariableHardSphere",
+        "Tref": "273",
+        "mass": "6.63e-26",
+        "diameter": "4.17e-10",
+        "omega": "0.74",
+        "internalDegreesOfFreedom": "0",
+        "InflowBoundaryModel": "plumeFieldInflow",
+        "typeIdList": [
+          "Ar"
+        ],
+        "inflow_patches": [
+          "nozzle"
+        ]
+      },
+      "quality": "exploratory",
+      "primary_included": false,
+      "reasons": [
+        "known-inadequate-direct-exit-resolution-and-timestep",
+        "non-production-reference",
+        "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases/Kn0p001_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 0.001,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.001,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [
+        "angular_r10D.csv",
+        "centerline.csv",
+        "centerline_extended.csv",
+        "centreline_diagnostics.csv",
+        "density_plane.csv",
+        "meridional_plane.csv"
+      ],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": "0.0629657",
+      "sampling": {
+        "window": {
+          "start_s": 0.05014263369999441,
+          "end_s": 0.0629657,
+          "duration_s": 0.01282306630000559,
+          "averaged_steps": 17980,
+          "fields": [
+            "dsmcRhoN",
+            "linearKE",
+            "momentum",
+            "rhoM",
+            "rhoN"
+          ]
+        },
+        "fields": {
+          "number_density": "rhoNMean",
+          "mass_density": "rhoMMean",
+          "momentum_density": "momentumMean",
+          "kinetic_energy_density": "linearKEMean",
+          "parcels_per_step": "dsmcRhoNMean"
+        },
+        "temperature": "translational, from the averaged moments: 3 R T = 2 linearKE/rhoM - |momentum/rhoM|^2"
+      },
+      "stationarity": {
+        "verdict": "stable-window-demonstrated",
+        "tolerance": 0.02,
+        "resolution_factor": 2.0,
+        "n_frames": 37,
+        "halfway_time": 0.0565984,
+        "regions": {
+          "centreline X/D 0-1": {
+            "running_mean_final": 0.9387450242571189,
+            "running_mean_halfway": 0.9394167032761547,
+            "running_mean_drift": 0.0007155074079538163,
+            "running_mean_settled": true,
+            "instant_mean": 0.9395821799287916,
+            "instant_relative_change": -0.0012421107586752449,
+            "instant_trend_standard_error": 0.0020432737550794694,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 2-3": {
+            "running_mean_final": 0.12521067528513735,
+            "running_mean_halfway": 0.12508388637701065,
+            "running_mean_drift": 0.0010126046188791021,
+            "running_mean_settled": true,
+            "instant_mean": 0.12498778912299713,
+            "instant_relative_change": 0.012943753310386219,
+            "instant_trend_standard_error": 0.005322277775520137,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 4-6": {
+            "running_mean_final": 0.028743936910560652,
+            "running_mean_halfway": 0.028756811988087005,
+            "running_mean_drift": 0.00044792324608888313,
+            "running_mean_settled": true,
+            "instant_mean": 0.0287334016606515,
+            "instant_relative_change": 0.004744180298345697,
+            "instant_trend_standard_error": 0.008089913217509404,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 7-10": {
+            "running_mean_final": 0.009230575690282093,
+            "running_mean_halfway": 0.009267651640879365,
+            "running_mean_drift": 0.004016645531253854,
+            "running_mean_settled": true,
+            "instant_mean": 0.009218916950368014,
+            "instant_relative_change": -0.012544147218875203,
+            "instant_trend_standard_error": 0.01261222789065902,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 0-15 deg": {
+            "running_mean_final": 0.006797733275770766,
+            "running_mean_halfway": 0.006798890435565003,
+            "running_mean_drift": 0.00017022730185093342,
+            "running_mean_settled": true,
+            "instant_mean": 0.006797447427179169,
+            "instant_relative_change": -0.0011780844394259464,
+            "instant_trend_standard_error": 0.001227188995658602,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 15-45 deg": {
+            "running_mean_final": 0.0030982107293726145,
+            "running_mean_halfway": 0.003098343255513789,
+            "running_mean_drift": 4.277505720252011e-05,
+            "running_mean_settled": true,
+            "instant_mean": 0.0030979275135423214,
+            "instant_relative_change": 0.0003401144555853728,
+            "instant_trend_standard_error": 0.0007626674892267035,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 45-90 deg": {
+            "running_mean_final": 6.81579899842445e-05,
+            "running_mean_halfway": 6.818260400140234e-05,
+            "running_mean_drift": 0.00036113179340420697,
+            "running_mean_settled": true,
+            "instant_mean": 6.815203870038686e-05,
+            "instant_relative_change": -0.0023139563401790046,
+            "instant_trend_standard_error": 0.002626919242747611,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "domain total (context only)": {
+            "running_mean_final": 0.0017787139445489884,
+            "running_mean_halfway": 0.0017788099319524721,
+            "running_mean_drift": 5.3964497089527405e-05,
+            "running_mean_settled": true,
+            "instant_mean": 0.001778714947866515,
+            "instant_relative_change": -0.0002272710183678132,
+            "instant_trend_standard_error": 6.624137487073556e-05,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": false
+          }
+        },
+        "note": "The domain total is context only: a flat parcel count is not evidence that the far field has converged. 'inconclusive' means the instantaneous data are too noisy to resolve a drift of the tolerance -- more parcels or more frames, not a pass."
+      },
+      "occupancy": {
+        "threshold": 20.0,
+        "basis": "per_step",
+        "rule": "valid only with MORE sampled parcels than the threshold",
+        "per_step": {
+          "median_over_occupied_cells": 0.3078976641,
+          "cells_at_or_below_threshold": 3745205,
+          "volume_fraction_at_or_below_threshold": 0.680372631880148
+        },
+        "accumulated": {
+          "median_over_occupied_cells": 5536.000000518,
+          "cells_at_or_below_threshold": 241072,
+          "volume_fraction_at_or_below_threshold": 0.02858298840355012
+        }
+      },
+      "diagnostic_validity": {
+        "cells": 3918213,
+        "valid_cells": 173008,
+        "valid_cell_fraction": 0.044154822619393075,
+        "valid_volume_fraction": 0.3196273681198519,
+        "invalid_cells": 3745205,
+        "invalid_cell_fraction": 0.9558451773806069,
+        "invalid_volume_fraction": 0.680372631880148,
+        "invalid_by_reason": {
+          "no_parcels_sampled": {
+            "cells": 166428,
+            "volume_fraction": 0.023643109800985402,
+            "bounds_m": [
+              0.002597402597,
+              0.5095181198,
+              -1.911671103,
+              1.911582337,
+              -1.911671103,
+              1.911582337
+            ]
+          },
+          "too_few_sampled_parcels": {
+            "cells": 3578777,
+            "volume_fraction": 0.6567295220791627,
+            "bounds_m": [
+              0.002597402597,
+              1.933895602,
+              -1.911671103,
+              1.911582337,
+              -1.911671103,
+              1.911582337
+            ]
+          },
+          "nonpositive_number_density": {
+            "cells": 0,
+            "volume_fraction": 0.0,
+            "bounds_m": null
+          },
+          "no_resolved_temperature": {
+            "cells": 315128,
+            "volume_fraction": 0.04748898839774487,
+            "bounds_m": [
+              0.002597402597,
+              0.5574524045,
+              -1.911671103,
+              1.911582337,
+              -1.911671103,
+              1.911582337
+            ]
+          }
+        },
+        "gradient_fitted": {
+          "number_density": {
+            "cells": 172035,
+            "fraction_of_valid_cells": 0.9943759826135208
+          },
+          "temperature": {
+            "cells": 172035,
+            "fraction_of_valid_cells": 0.9943759826135208
+          }
+        }
+      },
+      "resolution": {
+        "target_cell_over_mean_free_path": 0.3333333333333333,
+        "cells_per_mean_free_path": 3.0,
+        "volume_equivalent": {
+          "field": "cellOverMfpV",
+          "cells": 173008,
+          "min": 0.03413300856048067,
+          "median": 2.0739111783941757,
+          "p95": 25.66872656625069,
+          "max": 26.42023295294138,
+          "volume_weighted_mean": 0.9461039872407178,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 169084,
+            "cell_fraction": 0.9773189679089984,
+            "volume_fraction": 0.6533377705563852
+          }
+        },
+        "bounding_box_max": {
+          "field": "cellOverMfpMax",
+          "cells": 173008,
+          "min": 0.0423548999733961,
+          "median": 7.345571726571412,
+          "p95": 25.705873864322566,
+          "max": 26.458467784913363,
+          "volume_weighted_mean": 2.256119158982822,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 170633,
+            "cell_fraction": 0.9862723111070009,
+            "volume_fraction": 0.7297273447153562
+          }
+        },
+        "worst_cells": [
+          {
+            "at_m": [
+              0.01298701298,
+              0.05739130435,
+              -0.04695652174
+            ],
+            "cell_over_mean_free_path": 26.458467784913363,
+            "cell_size_m": 0.005217391299999999,
+            "mean_free_path_m": 0.0001971917399908909,
+            "target_cell_size_m": 6.573057999696363e-05
+          },
+          {
+            "at_m": [
+              0.01298701299,
+              0.01565217391,
+              -0.01043478261
+            ],
+            "cell_over_mean_free_path": 26.451511357937186,
+            "cell_size_m": 0.005217391310000001,
+            "mean_free_path_m": 0.00019724359940720144,
+            "target_cell_size_m": 6.574786646906714e-05
+          },
+          {
+            "at_m": [
+              0.01298701299,
+              0.03130434782,
+              -0.05739130435
+            ],
+            "cell_over_mean_free_path": 26.434219990918375,
+            "cell_size_m": 0.005217391310000003,
+            "mean_free_path_m": 0.00019737262199499237,
+            "target_cell_size_m": 6.579087399833079e-05
+          },
+          {
+            "at_m": [
+              0.007792207792,
+              0.01043478261,
+              -0.06260869565
+            ],
+            "cell_over_mean_free_path": 26.429535336334162,
+            "cell_size_m": 0.005217391303,
+            "mean_free_path_m": 0.00019740760617260495,
+            "target_cell_size_m": 6.580253539086832e-05
+          },
+          {
+            "at_m": [
+              0.05454545454,
+              0.03130434782,
+              -0.02608695652
+            ],
+            "cell_over_mean_free_path": 26.424226917570255,
+            "cell_size_m": 0.005217391310000003,
+            "mean_free_path_m": 0.00019744726406852056,
+            "target_cell_size_m": 6.581575468950686e-05
+          },
+          {
+            "at_m": [
+              0.08051948052,
+              0.01565217392,
+              -0.01043478261
+            ],
+            "cell_over_mean_free_path": 26.408550637346966,
+            "cell_size_m": 0.005217391310000001,
+            "mean_free_path_m": 0.00019756446999486476,
+            "target_cell_size_m": 6.585482333162159e-05
+          },
+          {
+            "at_m": [
+              0.01298701298,
+              -0.005217391304,
+              0.03130434783
+            ],
+            "cell_over_mean_free_path": 26.399124008494486,
+            "cell_size_m": 0.005217391310000003,
+            "mean_free_path_m": 0.00019763501653771525,
+            "target_cell_size_m": 6.587833884590508e-05
+          },
+          {
+            "at_m": [
+              0.07532467533,
+              0.005217391304,
+              0.01043478261
+            ],
+            "cell_over_mean_free_path": 26.396144522618155,
+            "cell_size_m": 0.005217391304999999,
+            "mean_free_path_m": 0.00019765732455849207,
+            "target_cell_size_m": 6.588577485283069e-05
+          },
+          {
+            "at_m": [
+              0.03376623377,
+              -0.04695652174,
+              -0.02608695652
+            ],
+            "cell_over_mean_free_path": 26.389871965625833,
+            "cell_size_m": 0.005217391299999999,
+            "mean_free_path_m": 0.0001977043051514581,
+            "target_cell_size_m": 6.590143505048604e-05
+          },
+          {
+            "at_m": [
+              0.02857142857,
+              -0.03652173913,
+              0.03130434783
+            ],
+            "cell_over_mean_free_path": 26.386288808318774,
+            "cell_size_m": 0.005217391310000003,
+            "mean_free_path_m": 0.00019773115302047033,
+            "target_cell_size_m": 6.591038434015677e-05
+          }
+        ],
+        "by_cell_size": [
+          {
+            "cell_size_m": 0.005217391300000013,
+            "cells": 1067742,
+            "valid_cells": 35922,
+            "exceeding_cells": 35922,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 26.458467784913363,
+            "worst_at_m": [
+              0.01298701298,
+              0.05739130435,
+              -0.04695652174
+            ],
+            "exceeding_bounds_m": [
+              0.002597402597,
+              0.2415584416,
+              -0.09913043477,
+              0.09913043477,
+              -0.09913043477,
+              0.09913043477
+            ]
+          },
+          {
+            "cell_size_m": 0.008018192300000004,
+            "cells": 425265,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.016602608400000052,
+            "cells": 449648,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.03207275030000001,
+            "cells": 596192,
+            "valid_cells": 1906,
+            "exceeding_cells": 1906,
+            "exceeding_volume_fraction": 1.0,
+            "max_cell_over_mean_free_path": 7.654957631020434,
+            "worst_at_m": [
+              0.8386935324,
+              0.0,
+              0.411992978
+            ],
+            "exceeding_bounds_m": [
+              0.7624175951,
+              0.8386935324,
+              -0.6680349442,
+              0.6674863239,
+              -0.6680349441,
+              0.6674863239
+            ]
+          },
+          {
+            "cell_size_m": 0.06264264699999988,
+            "cells": 659985,
+            "valid_cells": 68752,
+            "exceeding_cells": 68548,
+            "exceeding_volume_fraction": 0.9648877818095661,
+            "max_cell_over_mean_free_path": 10.476269422962726,
+            "worst_at_m": [
+              1.231557791,
+              0.0,
+              -0.3817628279
+            ],
+            "exceeding_bounds_m": [
+              0.881850288,
+              1.392539972,
+              -1.039531954,
+              1.038903033,
+              -1.039531954,
+              1.038903033
+            ]
+          },
+          {
+            "cell_size_m": 0.12167938199999995,
+            "cells": 676676,
+            "valid_cells": 66070,
+            "exceeding_cells": 64140,
+            "exceeding_volume_fraction": 0.7144568967235917,
+            "max_cell_over_mean_free_path": 10.22657876483139,
+            "worst_at_m": [
+              1.483623331,
+              0.02608695652,
+              -0.381762828
+            ],
+            "exceeding_bounds_m": [
+              1.095196507,
+              1.933895602,
+              -1.911671103,
+              1.743700406,
+              -1.911671103,
+              1.743700406
+            ]
+          },
+          {
+            "cell_size_m": 0.17683532599999996,
+            "cells": 42705,
+            "valid_cells": 358,
+            "exceeding_cells": 117,
+            "exceeding_volume_fraction": 0.16369412976129832,
+            "max_cell_over_mean_free_path": 0.6163919496724527,
+            "worst_at_m": [
+              1.933895602,
+              0.3569723997,
+              1.911582337
+            ],
+            "exceeding_bounds_m": [
+              1.806951512,
+              1.933895602,
+              -0.9600245301,
+              1.911582337,
+              -0.9600245301,
+              1.911582337
+            ]
+          }
+        ]
+      },
+      "measured_exit_diagnostics": {
+        "cells": 1153,
+        "valid_cells": 1153,
+        "target_knudsen": 0.001,
+        "planned_cell_over_mfp": 26.16961421933157,
+        "measured_KnD_median": 0.00105502763325629,
+        "measured_cell_over_mfp_max_median": 24.726325351767247,
+        "measured_parcels_per_step_median": 37.9105673
+      },
+      "production": {
+        "status": "unsuitable-for-production",
+        "production_ready": false,
+        "unresolved": [
+          "mesh_budget: the criterion needs 1.920e+10 cells at a 2.0000e-04 m core; mesh.max_cells = 4,000,000 forced a 5.2339e-03 m core instead (26.2x coarser)",
+          "cell_over_mean_free_path: the exit cell 5.2339e-03 m is 26.2 exit mean free paths (lambda0 = 2.0000e-04 m); the criterion is 1",
+          "time_step_collision_time: deltaT 7.1319e-07 s is 1.42 exit mean collision times (tau0 = lambda0/c_bar = 5.0143e-07 s); the criterion is 1"
+        ],
+        "non_production_marker": true,
+        "statement": "UNSUITABLE FOR PRODUCTION: nothing here is a validated result"
+      },
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383245e+21,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.001,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases/Kn0p001_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "BinaryCollisionModel": "VariableHardSphere",
+        "Tref": "273",
+        "mass": "6.63e-26",
+        "diameter": "4.17e-10",
+        "omega": "0.74",
+        "internalDegreesOfFreedom": "0",
+        "InflowBoundaryModel": "plumeFieldInflow",
+        "typeIdList": [
+          "Ar"
+        ],
+        "inflow_patches": [
+          "nozzle"
+        ]
+      },
+      "quality": "exploratory",
+      "primary_included": false,
+      "reasons": [
+        "known-inadequate-direct-exit-resolution-and-timestep",
+        "non-production-reference",
+        "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases/Kn10_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 10.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 10.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+17,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 10.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases/Kn10_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases/Kn1_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 1.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 1.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383245e+18,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 1.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases/Kn1_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn10_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 10.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 10.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [
+        "angular_r10D.csv",
+        "centerline.csv",
+        "centerline_extended.csv",
+        "centreline_diagnostics.csv",
+        "density_plane.csv",
+        "meridional_plane.csv"
+      ],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": "0.0630481",
+      "sampling": {
+        "window": {
+          "start_s": 0.05014165512000135,
+          "end_s": 0.0630481,
+          "duration_s": 0.01290644487999865,
+          "averaged_steps": 9401,
+          "fields": [
+            "dsmcRhoN",
+            "linearKE",
+            "momentum",
+            "rhoM",
+            "rhoN"
+          ]
+        },
+        "fields": {
+          "number_density": "rhoNMean",
+          "mass_density": "rhoMMean",
+          "momentum_density": "momentumMean",
+          "kinetic_energy_density": "linearKEMean",
+          "parcels_per_step": "dsmcRhoNMean"
+        },
+        "temperature": "translational, from the averaged moments: 3 R T = 2 linearKE/rhoM - |momentum/rhoM|^2"
+      },
+      "stationarity": {
+        "verdict": "inconclusive",
+        "tolerance": 0.02,
+        "resolution_factor": 2.0,
+        "n_frames": 37,
+        "halfway_time": 0.0566725,
+        "regions": {
+          "centreline X/D 0-1": {
+            "running_mean_final": 0.857120681053945,
+            "running_mean_halfway": 0.8569213940961316,
+            "running_mean_drift": 0.00023250746623965522,
+            "running_mean_settled": true,
+            "instant_mean": 0.8565791661841586,
+            "instant_relative_change": -0.00721140956886261,
+            "instant_trend_standard_error": 0.00459880671621823,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 2-3": {
+            "running_mean_final": 0.16675603026298286,
+            "running_mean_halfway": 0.1673172169939859,
+            "running_mean_drift": 0.0033653159655937753,
+            "running_mean_settled": true,
+            "instant_mean": 0.16693271211600097,
+            "instant_relative_change": -0.017468226611240496,
+            "instant_trend_standard_error": 0.012048396120752501,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 4-6": {
+            "running_mean_final": 0.04449132167365275,
+            "running_mean_halfway": 0.0443371087735632,
+            "running_mean_drift": 0.0034661343895493984,
+            "running_mean_settled": true,
+            "instant_mean": 0.04463835004066603,
+            "instant_relative_change": 0.0027067022970787198,
+            "instant_trend_standard_error": 0.02207483255907581,
+            "instant_trend_resolvable": false,
+            "instant_stationary": true,
+            "status": "inconclusive",
+            "stable": false,
+            "in_verdict": true
+          },
+          "centreline X/D 7-10": {
+            "running_mean_final": 0.015864781279931062,
+            "running_mean_halfway": 0.015610977662715877,
+            "running_mean_drift": 0.015997927279101348,
+            "running_mean_settled": true,
+            "instant_mean": 0.015861358025483715,
+            "instant_relative_change": 0.06354252931696615,
+            "instant_trend_standard_error": 0.02431047152270365,
+            "instant_trend_resolvable": false,
+            "instant_stationary": false,
+            "status": "inconclusive",
+            "stable": false,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 0-15 deg": {
+            "running_mean_final": 0.01029605135375693,
+            "running_mean_halfway": 0.010300221281992766,
+            "running_mean_drift": 0.0004050026648627679,
+            "running_mean_settled": true,
+            "instant_mean": 0.010303380003879852,
+            "instant_relative_change": -0.00035918198551706734,
+            "instant_trend_standard_error": 0.0026064033506146855,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 15-45 deg": {
+            "running_mean_final": 0.0030309182620322206,
+            "running_mean_halfway": 0.0030319089858425676,
+            "running_mean_drift": 0.0003268724936457519,
+            "running_mean_settled": true,
+            "instant_mean": 0.0030309199816611855,
+            "instant_relative_change": -0.0020184364266291077,
+            "instant_trend_standard_error": 0.0011863768631070841,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 45-90 deg": {
+            "running_mean_final": 0.0001034398528553921,
+            "running_mean_halfway": 0.00010314089633952262,
+            "running_mean_drift": 0.0028901483095439217,
+            "running_mean_settled": true,
+            "instant_mean": 0.00010351711055545514,
+            "instant_relative_change": 0.014752128214221952,
+            "instant_trend_standard_error": 0.0045027957284033806,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "domain total (context only)": {
+            "running_mean_final": 0.0019266337599646293,
+            "running_mean_halfway": 0.0019266851885637523,
+            "running_mean_drift": 2.6693500441919763e-05,
+            "running_mean_settled": true,
+            "instant_mean": 0.0019266571992516582,
+            "instant_relative_change": -0.00020234491688505586,
+            "instant_trend_standard_error": 0.00012596481436213114,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": false
+          }
+        },
+        "note": "The domain total is context only: a flat parcel count is not evidence that the far field has converged. 'inconclusive' means the instantaneous data are too noisy to resolve a drift of the tolerance -- more parcels or more frames, not a pass."
+      },
+      "occupancy": {
+        "threshold": 20.0,
+        "basis": "per_step",
+        "rule": "valid only with MORE sampled parcels than the threshold",
+        "per_step": {
+          "median_over_occupied_cells": 0.3978300181,
+          "cells_at_or_below_threshold": 1305325,
+          "volume_fraction_at_or_below_threshold": 0.9977842976827924
+        },
+        "accumulated": {
+          "median_over_occupied_cells": 3740.0000001581,
+          "cells_at_or_below_threshold": 170114,
+          "volume_fraction_at_or_below_threshold": 0.08970127153813219
+        }
+      },
+      "diagnostic_validity": {
+        "cells": 1310720,
+        "valid_cells": 5395,
+        "valid_cell_fraction": 0.004116058349609375,
+        "valid_volume_fraction": 0.0022157023172074642,
+        "invalid_cells": 1305325,
+        "invalid_cell_fraction": 0.9958839416503906,
+        "invalid_volume_fraction": 0.9977842976827924,
+        "invalid_by_reason": {
+          "no_parcels_sampled": {
+            "cells": 139924,
+            "volume_fraction": 0.07803773181446733,
+            "bounds_m": [
+              0.005,
+              0.6992024336,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          },
+          "too_few_sampled_parcels": {
+            "cells": 1165401,
+            "volume_fraction": 0.9197465658683251,
+            "bounds_m": [
+              0.005,
+              1.949065782,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          },
+          "nonpositive_number_density": {
+            "cells": 0,
+            "volume_fraction": 0.0,
+            "bounds_m": null
+          },
+          "no_resolved_temperature": {
+            "cells": 209140,
+            "volume_fraction": 0.11820635144088333,
+            "bounds_m": [
+              0.005,
+              0.7576361596,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          }
+        },
+        "gradient_fitted": {
+          "number_density": {
+            "cells": 5133,
+            "fraction_of_valid_cells": 0.951436515291937
+          },
+          "temperature": {
+            "cells": 5133,
+            "fraction_of_valid_cells": 0.951436515291937
+          }
+        }
+      },
+      "resolution": {
+        "target_cell_over_mean_free_path": 0.3333333333333333,
+        "cells_per_mean_free_path": 3.0,
+        "volume_equivalent": {
+          "field": "cellOverMfpV",
+          "cells": 5395,
+          "min": 6.0211951048154716e-05,
+          "median": 0.0039436981677636535,
+          "p95": 0.004974163246435112,
+          "max": 0.005050347644100708,
+          "volume_weighted_mean": 0.0003759661469734471,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 0,
+            "cell_fraction": 0.0,
+            "volume_fraction": 0.0
+          }
+        },
+        "bounding_box_max": {
+          "field": "cellOverMfpMax",
+          "cells": 5395,
+          "min": 8.087889465097919e-05,
+          "median": 0.003943698167763654,
+          "p95": 0.004974163246435112,
+          "max": 0.005050347644100712,
+          "volume_weighted_mean": 0.0004343673376698481,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 0,
+            "cell_fraction": 0.0,
+            "volume_fraction": 0.0
+          }
+        },
+        "worst_cells": [
+          {
+            "at_m": [
+              0.015,
+              -0.045,
+              0.005
+            ],
+            "cell_over_mean_free_path": 0.005050347644100712,
+            "cell_size_m": 0.010000000000000009,
+            "mean_free_path_m": 1.980061711530089,
+            "target_cell_size_m": 0.6600205705100296
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.005,
+              0.015
+            ],
+            "cell_over_mean_free_path": 0.005048156927450733,
+            "cell_size_m": 0.01,
+            "mean_free_path_m": 1.9809209863548944,
+            "target_cell_size_m": 0.6603069954516315
+          },
+          {
+            "at_m": [
+              0.015,
+              0.035,
+              0.055
+            ],
+            "cell_over_mean_free_path": 0.0050474687109699845,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 1.9811910826245176,
+            "target_cell_size_m": 0.6603970275415059
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.035,
+              0.055
+            ],
+            "cell_over_mean_free_path": 0.005033835826819089,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 1.9865566426942973,
+            "target_cell_size_m": 0.6621855475647658
+          },
+          {
+            "at_m": [
+              0.015,
+              0.045,
+              -0.015
+            ],
+            "cell_over_mean_free_path": 0.00502767433488225,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 1.9889911983000796,
+            "target_cell_size_m": 0.6629970661000265
+          },
+          {
+            "at_m": [
+              0.015,
+              0.065,
+              0.025
+            ],
+            "cell_over_mean_free_path": 0.005018473813336931,
+            "cell_size_m": 0.010000000000000009,
+            "mean_free_path_m": 1.9926376767024945,
+            "target_cell_size_m": 0.6642125589008315
+          },
+          {
+            "at_m": [
+              0.025,
+              -0.035,
+              -0.035
+            ],
+            "cell_over_mean_free_path": 0.005017530685372421,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 1.9930122259447154,
+            "target_cell_size_m": 0.6643374086482384
+          },
+          {
+            "at_m": [
+              0.015,
+              0.015,
+              -0.045
+            ],
+            "cell_over_mean_free_path": 0.005011585222130194,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 1.9953766237161705,
+            "target_cell_size_m": 0.6651255412387235
+          },
+          {
+            "at_m": [
+              0.055,
+              -0.005,
+              0.005
+            ],
+            "cell_over_mean_free_path": 0.004994138150115501,
+            "cell_size_m": 0.01,
+            "mean_free_path_m": 2.0023474920830386,
+            "target_cell_size_m": 0.6674491640276795
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.025,
+              -0.075
+            ],
+            "cell_over_mean_free_path": 0.004975563783179291,
+            "cell_size_m": 0.01,
+            "mean_free_path_m": 2.0098224916353478,
+            "target_cell_size_m": 0.6699408305451159
+          }
+        ],
+        "by_cell_size": [
+          {
+            "cell_size_m": 0.010000000000000009,
+            "cells": 172032,
+            "valid_cells": 5111,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0,
+            "max_cell_over_mean_free_path": 0.005050347644100712,
+            "worst_at_m": [
+              0.015,
+              -0.045,
+              0.005
+            ],
+            "exceeding_bounds_m": null
+          },
+          {
+            "cell_size_m": 0.01615444869999999,
+            "cells": 173568,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.030981057300000003,
+            "cells": 278660,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.06327938899999985,
+            "cells": 411852,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.11001722800000002,
+            "cells": 274608,
+            "valid_cells": 284,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0,
+            "max_cell_over_mean_free_path": 0.0002720337323700271,
+            "worst_at_m": [
+              1.949065781,
+              0.6669730965,
+              0.5950001534
+            ],
+            "exceeding_bounds_m": null
+          }
+        ]
+      },
+      "measured_exit_diagnostics": {
+        "cells": 316,
+        "valid_cells": 316,
+        "target_knudsen": 10.0,
+        "planned_cell_over_mfp": 0.005000000000000001,
+        "measured_KnD_median": 10.543531362453015,
+        "measured_cell_over_mfp_max_median": 0.004742244184049009,
+        "measured_parcels_per_step_median": 37.845973834999995
+      },
+      "production": {
+        "status": "production-candidate",
+        "production_ready": true,
+        "unresolved": [],
+        "non_production_marker": false,
+        "statement": "production candidate: still requires the convergence and occupancy evidence of Allconverge.py and Allaudit.py"
+      },
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+17,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 10.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn10_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "BinaryCollisionModel": "VariableHardSphere",
+        "Tref": "273",
+        "mass": "6.63e-26",
+        "diameter": "4.17e-10",
+        "omega": "0.74",
+        "internalDegreesOfFreedom": "0",
+        "InflowBoundaryModel": "plumeFieldInflow",
+        "typeIdList": [
+          "Ar"
+        ],
+        "inflow_patches": [
+          "nozzle"
+        ]
+      },
+      "quality": "exploratory",
+      "primary_included": false,
+      "reasons": [
+        "stationarity-inconclusive",
+        "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn1_np1x",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 1.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 1.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [
+        "angular_r10D.csv",
+        "centerline.csv",
+        "centerline_extended.csv",
+        "centreline_diagnostics.csv",
+        "density_plane.csv",
+        "meridional_plane.csv"
+      ],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": "0.0630481",
+      "sampling": {
+        "window": {
+          "start_s": 0.05014165512000135,
+          "end_s": 0.0630481,
+          "duration_s": 0.01290644487999865,
+          "averaged_steps": 9401,
+          "fields": [
+            "dsmcRhoN",
+            "linearKE",
+            "momentum",
+            "rhoM",
+            "rhoN"
+          ]
+        },
+        "fields": {
+          "number_density": "rhoNMean",
+          "mass_density": "rhoMMean",
+          "momentum_density": "momentumMean",
+          "kinetic_energy_density": "linearKEMean",
+          "parcels_per_step": "dsmcRhoNMean"
+        },
+        "temperature": "translational, from the averaged moments: 3 R T = 2 linearKE/rhoM - |momentum/rhoM|^2"
+      },
+      "stationarity": {
+        "verdict": "inconclusive",
+        "tolerance": 0.02,
+        "resolution_factor": 2.0,
+        "n_frames": 37,
+        "halfway_time": 0.0566725,
+        "regions": {
+          "centreline X/D 0-1": {
+            "running_mean_final": 0.8578856260735557,
+            "running_mean_halfway": 0.8568996936246447,
+            "running_mean_drift": 0.001149258617869012,
+            "running_mean_settled": true,
+            "instant_mean": 0.8565594589821444,
+            "instant_relative_change": -0.0032736631575086017,
+            "instant_trend_standard_error": 0.004885321292724023,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 2-3": {
+            "running_mean_final": 0.16369943756957953,
+            "running_mean_halfway": 0.1639029314403538,
+            "running_mean_drift": 0.0012430945017009672,
+            "running_mean_settled": true,
+            "instant_mean": 0.16371575808280062,
+            "instant_relative_change": 0.026588854297665776,
+            "instant_trend_standard_error": 0.013546669733857895,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 4-6": {
+            "running_mean_final": 0.04340122107723519,
+            "running_mean_halfway": 0.043851101656243716,
+            "running_mean_drift": 0.010365620317638937,
+            "running_mean_settled": true,
+            "instant_mean": 0.043392732564725756,
+            "instant_relative_change": -0.02941035469311082,
+            "instant_trend_standard_error": 0.01991810866690102,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "centreline X/D 7-10": {
+            "running_mean_final": 0.015390286314707487,
+            "running_mean_halfway": 0.015414389358773503,
+            "running_mean_drift": 0.001566120575871421,
+            "running_mean_settled": true,
+            "instant_mean": 0.015308338214934308,
+            "instant_relative_change": -0.006167776739837753,
+            "instant_trend_standard_error": 0.031448724224222936,
+            "instant_trend_resolvable": false,
+            "instant_stationary": true,
+            "status": "inconclusive",
+            "stable": false,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 0-15 deg": {
+            "running_mean_final": 0.010003324297241066,
+            "running_mean_halfway": 0.010005678425708386,
+            "running_mean_drift": 0.00023533461451099197,
+            "running_mean_settled": true,
+            "instant_mean": 0.01000247814210122,
+            "instant_relative_change": -0.002082745347425363,
+            "instant_trend_standard_error": 0.0025592318780438363,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 15-45 deg": {
+            "running_mean_final": 0.0030176880473006566,
+            "running_mean_halfway": 0.003018534618952613,
+            "running_mean_drift": 0.0002805365030071938,
+            "running_mean_settled": true,
+            "instant_mean": 0.0030182893382608533,
+            "instant_relative_change": -0.0015217440353474335,
+            "instant_trend_standard_error": 0.001312171501949658,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "shell r/D 9-10, theta 45-90 deg": {
+            "running_mean_final": 0.00010641744504801871,
+            "running_mean_halfway": 0.00010647671408540176,
+            "running_mean_drift": 0.0005569485093003895,
+            "running_mean_settled": true,
+            "instant_mean": 0.00010647093213198449,
+            "instant_relative_change": 0.003464000655566126,
+            "instant_trend_standard_error": 0.004982928164061264,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": true
+          },
+          "domain total (context only)": {
+            "running_mean_final": 0.0019153281573235895,
+            "running_mean_halfway": 0.0019155906850363842,
+            "running_mean_drift": 0.00013706670148970102,
+            "running_mean_settled": true,
+            "instant_mean": 0.001915379478405871,
+            "instant_relative_change": -0.00040919285147557484,
+            "instant_trend_standard_error": 0.00010976705515868999,
+            "instant_trend_resolvable": true,
+            "instant_stationary": true,
+            "status": "stable",
+            "stable": true,
+            "in_verdict": false
+          }
+        },
+        "note": "The domain total is context only: a flat parcel count is not evidence that the far field has converged. 'inconclusive' means the instantaneous data are too noisy to resolve a drift of the tolerance -- more parcels or more frames, not a pass."
+      },
+      "occupancy": {
+        "threshold": 20.0,
+        "basis": "per_step",
+        "rule": "valid only with MORE sampled parcels than the threshold",
+        "per_step": {
+          "median_over_occupied_cells": 0.3588979896,
+          "cells_at_or_below_threshold": 1305327,
+          "volume_fraction_at_or_below_threshold": 0.9977168234315112
+        },
+        "accumulated": {
+          "median_over_occupied_cells": 3374.0000002296,
+          "cells_at_or_below_threshold": 140785,
+          "volume_fraction_at_or_below_threshold": 0.07137943457422484
+        }
+      },
+      "diagnostic_validity": {
+        "cells": 1310720,
+        "valid_cells": 5393,
+        "valid_cell_fraction": 0.004114532470703125,
+        "valid_volume_fraction": 0.0022831765684887513,
+        "invalid_cells": 1305327,
+        "invalid_cell_fraction": 0.9958854675292969,
+        "invalid_volume_fraction": 0.9977168234315112,
+        "invalid_by_reason": {
+          "no_parcels_sampled": {
+            "cells": 112444,
+            "volume_fraction": 0.06066616960948816,
+            "bounds_m": [
+              0.005,
+              0.6724926377,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          },
+          "too_few_sampled_parcels": {
+            "cells": 1192883,
+            "volume_fraction": 0.937050653822023,
+            "bounds_m": [
+              0.005,
+              1.949065782,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          },
+          "nonpositive_number_density": {
+            "cells": 0,
+            "volume_fraction": 0.0,
+            "bounds_m": null
+          },
+          "no_resolved_temperature": {
+            "cells": 186197,
+            "volume_fraction": 0.10275617332534004,
+            "bounds_m": [
+              0.005,
+              0.7576361595,
+              -1.930083968,
+              1.930083968,
+              -1.930083968,
+              1.930083968
+            ]
+          }
+        },
+        "gradient_fitted": {
+          "number_density": {
+            "cells": 5120,
+            "fraction_of_valid_cells": 0.9493788244020026
+          },
+          "temperature": {
+            "cells": 5120,
+            "fraction_of_valid_cells": 0.9493788244020026
+          }
+        }
+      },
+      "resolution": {
+        "target_cell_over_mean_free_path": 0.3333333333333333,
+        "cells_per_mean_free_path": 3.0,
+        "volume_equivalent": {
+          "field": "cellOverMfpV",
+          "cells": 5393,
+          "min": 0.0006115699150757335,
+          "median": 0.03951687767072009,
+          "p95": 0.049756765220432306,
+          "max": 0.05055871692231168,
+          "volume_weighted_mean": 0.00367932003532125,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 0,
+            "cell_fraction": 0.0,
+            "volume_fraction": 0.0
+          }
+        },
+        "bounding_box_max": {
+          "field": "cellOverMfpMax",
+          "cells": 5393,
+          "min": 0.000821483075570168,
+          "median": 0.039516877670720096,
+          "p95": 0.04975676522043231,
+          "max": 0.050558716922311696,
+          "volume_weighted_mean": 0.004253822002399584,
+          "exceeding_target": {
+            "threshold": 0.3333333333333333,
+            "cells": 0,
+            "cell_fraction": 0.0,
+            "volume_fraction": 0.0
+          }
+        },
+        "worst_cells": [
+          {
+            "at_m": [
+              0.015,
+              0.035,
+              -0.005
+            ],
+            "cell_over_mean_free_path": 0.050558716922311696,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.19778982950390056,
+            "target_cell_size_m": 0.06592994316796685
+          },
+          {
+            "at_m": [
+              0.035,
+              -0.035,
+              0.015
+            ],
+            "cell_over_mean_free_path": 0.05042039050546791,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.1983324583516571,
+            "target_cell_size_m": 0.06611081945055237
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.005,
+              0.065
+            ],
+            "cell_over_mean_free_path": 0.05037039208376404,
+            "cell_size_m": 0.010000000000000009,
+            "mean_free_path_m": 0.19852932618373093,
+            "target_cell_size_m": 0.06617644206124364
+          },
+          {
+            "at_m": [
+              0.035,
+              -0.025,
+              -0.035
+            ],
+            "cell_over_mean_free_path": 0.050231027880464824,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.19908013875003874,
+            "target_cell_size_m": 0.06636004625001292
+          },
+          {
+            "at_m": [
+              0.015,
+              0.025,
+              -0.075
+            ],
+            "cell_over_mean_free_path": 0.050183755619023426,
+            "cell_size_m": 0.01,
+            "mean_free_path_m": 0.1992676689229143,
+            "target_cell_size_m": 0.0664225563076381
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.045,
+              0.055
+            ],
+            "cell_over_mean_free_path": 0.050175674289405156,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.19929976311472414,
+            "target_cell_size_m": 0.06643325437157471
+          },
+          {
+            "at_m": [
+              0.015,
+              -0.065,
+              -0.005
+            ],
+            "cell_over_mean_free_path": 0.0501754078827178,
+            "cell_size_m": 0.010000000000000009,
+            "mean_free_path_m": 0.1993008212982433,
+            "target_cell_size_m": 0.06643360709941444
+          },
+          {
+            "at_m": [
+              0.015,
+              0.045,
+              0.045
+            ],
+            "cell_over_mean_free_path": 0.05015108851815959,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.19939746664479727,
+            "target_cell_size_m": 0.06646582221493243
+          },
+          {
+            "at_m": [
+              0.035,
+              0.005,
+              0.025
+            ],
+            "cell_over_mean_free_path": 0.04990319134969394,
+            "cell_size_m": 0.010000000000000002,
+            "mean_free_path_m": 0.20038798580887418,
+            "target_cell_size_m": 0.06679599526962472
+          },
+          {
+            "at_m": [
+              0.015,
+              0.065,
+              -0.035
+            ],
+            "cell_over_mean_free_path": 0.049868301896933434,
+            "cell_size_m": 0.010000000000000009,
+            "mean_free_path_m": 0.20052818362790376,
+            "target_cell_size_m": 0.06684272787596791
+          }
+        ],
+        "by_cell_size": [
+          {
+            "cell_size_m": 0.010000000000000009,
+            "cells": 172032,
+            "valid_cells": 5107,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0,
+            "max_cell_over_mean_free_path": 0.050558716922311696,
+            "worst_at_m": [
+              0.015,
+              0.035,
+              -0.005
+            ],
+            "exceeding_bounds_m": null
+          },
+          {
+            "cell_size_m": 0.01615444869999999,
+            "cells": 173568,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.030981057300000003,
+            "cells": 278660,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.06327938899999985,
+            "cells": 411852,
+            "valid_cells": 0,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0
+          },
+          {
+            "cell_size_m": 0.11001722800000002,
+            "cells": 274608,
+            "valid_cells": 286,
+            "exceeding_cells": 0,
+            "exceeding_volume_fraction": 0.0,
+            "max_cell_over_mean_free_path": 0.0027290064480073495,
+            "worst_at_m": [
+              1.949065781,
+              0.6669730965,
+              0.5950001534
+            ],
+            "exceeding_bounds_m": null
+          }
+        ]
+      },
+      "measured_exit_diagnostics": {
+        "cells": 316,
+        "valid_cells": 316,
+        "target_knudsen": 1.0,
+        "planned_cell_over_mfp": 0.05000000000000001,
+        "measured_KnD_median": 1.0539865336000962,
+        "measured_cell_over_mfp_max_median": 0.04743893661439662,
+        "measured_parcels_per_step_median": 37.878842675
+      },
+      "production": {
+        "status": "production-candidate",
+        "production_ready": true,
+        "unresolved": [],
+        "non_production_marker": false,
+        "statement": "production candidate: still requires the convergence and occupancy evidence of Allconverge.py and Allaudit.py"
+      },
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383245e+18,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 1.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn1_np1x/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "BinaryCollisionModel": "VariableHardSphere",
+        "Tref": "273",
+        "mass": "6.63e-26",
+        "diameter": "4.17e-10",
+        "omega": "0.74",
+        "internalDegreesOfFreedom": "0",
+        "InflowBoundaryModel": "plumeFieldInflow",
+        "typeIdList": [
+          "Ar"
+        ],
+        "inflow_patches": [
+          "nozzle"
+        ]
+      },
+      "quality": "exploratory",
+      "primary_included": false,
+      "reasons": [
+        "stationarity-inconclusive",
+        "compact-exports-missing-cell-volumes-and-unaggregated-moments"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/Kn0p0001_np1x_sphere",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.0001,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.0001,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+22,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 9.999999999999999e-05,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/Kn0p0001_np1x_sphere/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/Kn0p001_np1x_sphere",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.001,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.001,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383245e+21,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.001,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/Kn0p001_np1x_sphere/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/smoke_Kn0p001_B0p05",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.001,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.001,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 3.0,
+        "y_half_over_D": 3.0,
+        "z_half_over_D": 3.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383245e+21,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.001,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/smoke_Kn0p001_B0p05/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p02",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.01,
+      "original_six_point_inventory": false,
+      "additional_cai_family_comparison": true,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.01,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+20,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.01,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p02/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p03",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.01,
+      "original_six_point_inventory": false,
+      "additional_cai_family_comparison": true,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.01,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+20,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.01,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p03/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p05",
+      "family": "cai2012-kn-extension",
+      "source_type": "interface",
+      "nominal_kn": 0.01,
+      "original_six_point_inventory": false,
+      "additional_cai_family_comparison": true,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 0.01,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+20,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 0.01,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/Interface/val_Kn0p01_B0p05/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unsupported",
+      "primary_included": false,
+      "reasons": [
+        "interface-source-changes-boundary-value-problem",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "case"
+    },
+    {
+      "path": "cases/cai2012-kn-extension/baseCase",
+      "family": "cai2012-kn-extension",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 10.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "kn_length_convention": "diameter",
+      "mean_free_path_convention": "vhs",
+      "source_distribution": "uniform drifting Maxwellian; outward one-way flux",
+      "gas": {
+        "species_name": "Ar",
+        "mass_kg": 6.63e-26,
+        "diameter_m": 4.17e-10,
+        "omega": 0.74,
+        "t_ref_K": 273.0,
+        "internal_degrees_of_freedom": 0,
+        "mean_free_path_convention": "vhs"
+      },
+      "collision_law": "VariableHardSphere",
+      "collisions_enabled": true,
+      "exit": {
+        "speed_ratio": 2.0,
+        "T0_K": 300.0,
+        "knudsen": 10.0,
+        "characteristic_length": "diameter"
+      },
+      "geometry": {
+        "symmetry_mode": "none",
+        "x_max_over_D": 10.0,
+        "y_half_over_D": 10.0,
+        "z_half_over_D": 10.0,
+        "plume_axis": [
+          1,
+          0,
+          0
+        ],
+        "diameter_m": 0.2
+      },
+      "available_csv": [],
+      "available_field_times": [],
+      "available_geometry_times": [],
+      "exported_time": null,
+      "sampling": null,
+      "stationarity": {
+        "verdict": "unavailable"
+      },
+      "occupancy": null,
+      "diagnostic_validity": null,
+      "resolution": null,
+      "measured_exit_diagnostics": null,
+      "production": {},
+      "non_production_marker": false,
+      "dsmc_uncertainty": {
+        "status": "unavailable",
+        "reason": "averaged exports and running-average frame metrics are not independent instantaneous blocks"
+      },
+      "dsmc_tensor": "unavailable unless tensor raw fields are explicitly supplied",
+      "dsmc_production_cost": null,
+      "solver_runtime_provenance": {
+        "status": "unavailable",
+        "reason": "configured law and dictionary headers do not identify the historic executable"
+      },
+      "exit_density_m3": 6.620077744383246e+17,
+      "exit_speed_m_s": 706.9529287292854,
+      "verified_kn_from_configured_density": 10.0,
+      "kn_verification": "configuration inverse check; independent injected density unavailable",
+      "verified_kn_from_injected_density": null,
+      "injected_source_fields": {
+        "status": "unavailable",
+        "path": "cases/cai2012-kn-extension/baseCase/0/boundaryNumberDensity_Ar"
+      },
+      "collision_dictionary": {
+        "status": "unavailable"
+      },
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "template-not-a-run",
+        "stationarity-unavailable",
+        "missing-dsmc-results"
+      ],
+      "kind": "template"
+    },
+    {
+      "path": null,
+      "family": "cai2012",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 100.0,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "requested-case-not-discovered"
+      ],
+      "kind": "missing"
+    },
+    {
+      "path": null,
+      "family": "cai2012",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 0.1,
+      "original_six_point_inventory": true,
+      "additional_cai_family_comparison": false,
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "requested-case-not-discovered"
+      ],
+      "kind": "missing"
+    },
+    {
+      "path": null,
+      "family": "cai2012",
+      "source_type": "direct-nozzle",
+      "nominal_kn": 0.01,
+      "original_six_point_inventory": false,
+      "additional_cai_family_comparison": true,
+      "quality": "unavailable",
+      "primary_included": false,
+      "reasons": [
+        "requested-case-not-discovered"
+      ],
+      "kind": "missing"
+    }
+  ],
+  "host": {
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  },
+  "policy": "read-only aggregation across families; legacy generation/run gates unchanged"
+}
