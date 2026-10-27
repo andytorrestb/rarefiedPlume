@@ -6,13 +6,13 @@
 #PBS -m abe
 #PBS -N knx-meshall
 #
-# Generate, validate and mesh all four cases, in one job. Submit from here:
+# Generate, validate and mesh all seven active cases, in one job. Submit from here:
 #
 #     cd cases/cai2012-kn-extension && qsub runMeshAll.sh
 #
-#   1. python generate_cases.py               Cases/ and manifest.yaml
+#   1. python generate_cases.py               Cases_full_suite/ and manifest-full-suite.yaml
 #   2. python validate_cases.py --inputs-only the tree against the study
-#   3. bash ./AllmeshCases                    mesh all four
+#   3. bash ./AllmeshCases                    mesh all seven
 #   4. python validate_cases.py               again, with the dictionaries
 #
 # Any failure fails the job. Then one job per case: cd Cases/<case> && qsub
@@ -53,9 +53,9 @@ printf '>>> Starting: validate the inputs\n'
 python validate_cases.py --inputs-only
 printf '<<< Completed: validate the inputs\n'
 
-printf '>>> Starting: mesh all four cases\n'
+printf '>>> Starting: mesh all seven cases\n'
 bash ./AllmeshCases
-printf '<<< Completed: mesh all four cases\n'
+printf '<<< Completed: mesh all seven cases\n'
 
 printf '>>> Starting: validate the tree, dictionaries included\n'
 python validate_cases.py

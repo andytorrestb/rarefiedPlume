@@ -1,30 +1,19 @@
-r"""What the extension is allowed to be, and what it inherits.
+r"""Matrix profiles, compatible overrides and inherited numerical settings.
 
-Three things are fixed here rather than in ``study.yaml``, because each is a
-statement about the experiment rather than a setting of it:
+With no declaration, the legacy profile retains exactly Kn 1e-4, 1e-3, 1, 10
+and refuses Cai's paper Kn even when disabled. The explicit
+``meta.knudsen_suite: full_decades`` profile requires all seven decade cases
+100, 10, 1, .1, .01, .001, .0001. Both use one baseline particle level.
 
-**The matrix.** Exactly :data:`~plumetools.cai2012ext.EXTENSION_KNUDSEN` crossed
-at the single baseline level :data:`~plumetools.cai2012ext.PARTICLE_MULTIPLIERS`
--- four configurations. :func:`check_study` refuses a ``study.yaml`` that enables
-any other combination (a second particle level included), and refuses an entry
-at an excluded Knudsen number **even if
-it is disabled**: a disabled entry is one edit away from being run.
+The profile is carried from study to manifest and generated case metadata.
+Generation, template checks, manifest runners, HPC guards and direct-exit
+post-processing share it. Unknown profiles are refused. Matrix membership
+does not waive numerical feasibility or resolve the known very-low-Kn source
+surface limitation.
 
-**The exclusions.** Cai's own Kn = 0.01, 0.1 and 100 are refused at generation
-(:func:`check_study`), at template level (:func:`check_template`), on every
-execution path that reads the manifest (:func:`check_manifest`, which the
-``All*Cases`` scripts call through :func:`main`), and on the case itself before
-it is meshed or run by its own job (``python -m plumetools.cai2012ext.hpc
-guard``, from ``runMesh.sh`` and ``runCase.sh``). Four gates, because the
-manifest can be edited by hand and a job script can be submitted from anywhere.
-
-**The inheritance.** The numerical and statistical settings come from
-``cases/cai2012-health``'s highest-resolution combination, ``ppc040/s4p5``.
-Rather than restating them here, :func:`inheritance_report` compares the
-extension template with the health template key by key, and the only keys
-allowed to differ are :data:`DELIBERATE_OVERRIDES` -- each with its reason. A
-setting added to the health template next year is therefore inherited by
-default, and diverging from it has to be declared.
+The template inherits the health study's ppc040/s4p5 settings, with the declared
+overrides below. Per-Kn mesh, time-step and parcel-target changes are allowed;
+gas, geometry, speed ratio, startup and averaging remain fixed.
 """
 
 from __future__ import annotations
@@ -41,6 +30,7 @@ from plumetools.cai2012.study import StudyError
 from plumetools.cai2012ext import (
     EXCLUDED_KNUDSEN,
     EXTENSION_KNUDSEN,
+    FULL_SUITE_KNUDSEN,
     PARTICLE_MULTIPLIERS,
     REFERENCE_KNUDSEN,
 )
@@ -113,6 +103,8 @@ ALLOWED_OVERRIDE_KEYS = ("dsmc.courant_target", "dsmc.delta_t_s",
 #: Relative tolerance for "the same Knudsen number". Values are typed as
 #: decimals and pass through YAML, so exact float equality would be a trap.
 KNUDSEN_RTOL = 1.0e-9
+LEGACY_SUITE = "legacy_extension"
+FULL_SUITE = "full_decades"
 
 
 # --------------------------------------------------------------------------- #
@@ -125,19 +117,73 @@ def same_knudsen(a, b) -> bool:
 
 
 def is_excluded(knudsen) -> bool:
-    """Whether ``knudsen`` is one of Cai's, which this extension never runs."""
+    """Whether Kn is on the legacy paper-Kn exclusion list."""
     return any(same_knudsen(knudsen, k) for k in EXCLUDED_KNUDSEN)
 
 
 def is_extension_knudsen(knudsen) -> bool:
-    """Whether ``knudsen`` is one of the four the extension runs."""
+    """Whether Kn belongs to the legacy four-case extension."""
     return any(same_knudsen(knudsen, k) for k in EXTENSION_KNUDSEN)
+
+
+def suite_name(source=None) -> str:
+    """Resolve the explicit matrix profile from a study, manifest or case.
+
+    A missing declaration preserves the historical four-case policy. A string
+    may be supplied by internal callers, but arbitrary profiles never default
+    to the permissive seven-decade matrix.
+    """
+    if source is None:
+        value = LEGACY_SUITE
+    elif isinstance(source, str):
+        value = source
+    elif isinstance(source, dict):
+        value = (source.get("meta") or source).get("knudsen_suite", LEGACY_SUITE)
+    else:
+        value = (getattr(source, "meta", None) or {}).get("knudsen_suite", LEGACY_SUITE)
+    if value not in (LEGACY_SUITE, FULL_SUITE):
+        raise ExtensionError(f"Unknown knudsen_suite {value!r}; expected {LEGACY_SUITE!r} or {FULL_SUITE!r}")
+    return value
+
+
+def suite_knudsen(source=None) -> tuple:
+    """The allowed Kn values for the selected explicit matrix profile."""
+    return FULL_SUITE_KNUDSEN if suite_name(source) == FULL_SUITE else EXTENSION_KNUDSEN
+
+
+def is_suite_knudsen(knudsen, source=None) -> bool:
+    return any(same_knudsen(knudsen, k) for k in suite_knudsen(source))
+
+
+def source_limitations(cfg) -> list[str]:
+    """Known direct-exit source issue, independent of mesh/time-step checks.
+
+    The very-low-Kn inflow-surface correction is deliberately deferred by the
+    user. This warning records that choice; it does not validate the source.
+    """
+    if suite_name(cfg) == FULL_SUITE and float(cfg.exit.knudsen) <= 0.001:
+        return ["known_low_kn_inflow_surface: direct nozzle-exit inflow is retained; "
+                "the correct inflow surface for very low Kn_e is deferred to future work"]
+    return []
+
+
+def direct_exit_problem(cfg, where="case.yaml") -> str | None:
+    """Common per-case gate for direct-exit run and post-processing paths."""
+    try:
+        profile = suite_name(cfg)
+    except ExtensionError as exc:
+        return str(exc)
+    if is_excluded(cfg.exit.knudsen) and profile != FULL_SUITE:
+        return _excluded_message(cfg.exit.knudsen, where)
+    if profile == FULL_SUITE and not is_suite_knudsen(cfg.exit.knudsen, cfg):
+        return f"{where}: Kn = {cfg.exit.knudsen:g} is outside the explicit full-decade suite"
+    return None
 
 
 def _excluded_message(knudsen, where: str) -> str:
     return (f"{where}: Kn = {float(knudsen):g} is one of Cai's own Knudsen "
             f"numbers {list(EXCLUDED_KNUDSEN)}. Those are the conditions his "
-            f"paper already compares, and this extension never generates, "
+            f"paper already compares, and the legacy extension profile never generates, "
             f"meshes, runs or post-processes them -- whether or not results "
             f"for them exist elsewhere. They belong to cases/cai2012.")
 
@@ -147,7 +193,7 @@ def _excluded_message(knudsen, where: str) -> str:
 # --------------------------------------------------------------------------- #
 
 def check_study(study) -> None:
-    """Refuse a ``study.yaml`` that is not exactly the extension matrix.
+    """Refuse a study that is not exactly its declared matrix profile.
 
     Args:
         study: a :class:`~plumetools.cai2012.study.StudyConfig`, loaded with
@@ -158,26 +204,31 @@ def check_study(study) -> None:
     """
     problems = []
 
+    wanted = suite_knudsen(study)
+    full_suite = suite_name(study) == FULL_SUITE
+
     for case in study.all_cases():
-        if is_excluded(case.knudsen):
+        if is_excluded(case.knudsen) and not full_suite:
             state = "enabled" if case.enabled else "disabled"
             problems.append(_excluded_message(
                 case.knudsen, f"kn_cases {case.name!r} ({state})"))
 
     enabled = [c.knudsen for c in study.enabled_cases()]
-    missing = [k for k in EXTENSION_KNUDSEN
+    missing = [k for k in wanted
                if not any(same_knudsen(k, e) for e in enabled)]
-    extra = [e for e in enabled
-             if not is_extension_knudsen(e) and not is_excluded(e)]
+    extra = [e for e in enabled if not is_suite_knudsen(e, study)
+             and (full_suite or not is_excluded(e))]
+    if len(enabled) != len(set(float(k) for k in enabled)):
+        problems.append("kn_cases enables duplicate Kn values")
     if missing:
         problems.append(
             f"kn_cases does not enable Kn {missing}. The extension is exactly "
-            f"{list(EXTENSION_KNUDSEN)}; a matrix with one missing is not the "
+            f"{list(wanted)}; a matrix with one missing is not the "
             f"study the manifest would claim it is.")
     if extra:
         problems.append(
             f"kn_cases enables Kn {extra}, which is not part of the extension "
-            f"{list(EXTENSION_KNUDSEN)}")
+            f"{list(wanted)}")
 
     multipliers = [float(p.multiplier) for p in study.enabled_particle_levels()]
     if sorted(multipliers) != sorted(PARTICLE_MULTIPLIERS):
@@ -220,16 +271,16 @@ def check_study(study) -> None:
             + "\n  - ".join(problems))
 
 
-def expected_case_count() -> int:
-    """Four: four Knudsen numbers at the baseline particle level."""
-    return len(EXTENSION_KNUDSEN) * len(PARTICLE_MULTIPLIERS)
+def expected_case_count(source=None) -> int:
+    """Case count for the matrix profile (legacy four, explicit full seven)."""
+    return len(suite_knudsen(source)) * len(PARTICLE_MULTIPLIERS)
 
 
 # --------------------------------------------------------------------------- #
 # the template
 # --------------------------------------------------------------------------- #
 
-def check_template(cfg, where: str = "baseCase/case.yaml") -> None:
+def check_template(cfg, where: str = "baseCase/case.yaml", *, suite=None) -> None:
     """Refuse a template that would break the extension's fixed policies.
 
     Args:
@@ -241,8 +292,12 @@ def check_template(cfg, where: str = "baseCase/case.yaml") -> None:
         ExtensionError: listing every problem.
     """
     problems = []
-    if is_excluded(cfg.exit.knudsen):
+    profile = cfg if suite is None else suite
+    profile_name = suite_name(profile)
+    if is_excluded(cfg.exit.knudsen) and profile_name != FULL_SUITE:
         problems.append(_excluded_message(cfg.exit.knudsen, "exit.knudsen"))
+    elif profile_name == FULL_SUITE and not is_suite_knudsen(cfg.exit.knudsen, profile):
+        problems.append(f"exit.knudsen = {cfg.exit.knudsen:g} is outside the explicit full-decade suite")
     if not same_knudsen(cfg.resolution.reference_knudsen, REFERENCE_KNUDSEN):
         problems.append(
             f"resolution.reference_knudsen is "
@@ -355,17 +410,22 @@ def check_manifest(manifest: dict) -> list[str]:
     is right, because the manifest is what every runner script reads.
     """
     problems = []
+    try:
+        wanted = suite_knudsen(manifest)
+        full_suite = suite_name(manifest) == FULL_SUITE
+    except ExtensionError as exc:
+        return [str(exc)]
     entries = manifest.get("cases") or []
     for entry in entries:
         kn = entry.get("Kn")
         name = entry.get("name", "?")
         if kn is None:
             problems.append(f"{name}: no Kn in the manifest row")
-        elif is_excluded(kn):
+        elif is_excluded(kn) and not full_suite:
             problems.append(_excluded_message(kn, f"manifest case {name!r}"))
-        elif not is_extension_knudsen(kn):
+        elif not any(same_knudsen(kn, value) for value in wanted):
             problems.append(f"manifest case {name!r} is at Kn = {float(kn):g}, "
-                            f"not one of {list(EXTENSION_KNUDSEN)}")
+                            f"not one of {list(wanted)}")
     return problems
 
 
@@ -415,16 +475,31 @@ def main(argv=None) -> int:
     stderr.
     """
     parser = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
-    parser.add_argument("manifest")
+    parser.add_argument("manifest", nargs="?",
+                        help="manifest path; otherwise resolve manifest_name from --study")
+    parser.add_argument("--study", type=Path,
+                        help="study YAML whose manifest_name identifies the active suite")
     parser.add_argument("--all", action="store_true",
                         help="list every case (meshing and post-processing); "
                              "the Kn policy is still enforced")
     args = parser.parse_args(argv)
-
-    manifest = yaml.safe_load(Path(args.manifest).read_text(encoding="utf-8")) or {}
+    if args.manifest is None and args.study is None:
+        parser.error("provide a manifest or --study PATH")
+    manifest_path = Path(args.manifest) if args.manifest is not None else None
     try:
+        study = None
+        if args.study is not None:
+            from plumetools.cai2012.study import load_study
+            study_path = args.study.resolve()
+            study = load_study(study_path)
+            check_study(study)
+            if manifest_path is None:
+                manifest_path = study_path.parent / study.manifest_name
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if study is not None and suite_name(manifest) != suite_name(study):
+            raise ExtensionError("manifest suite differs from the selected study; regenerate it")
         runnable, refused = schedulable(manifest, allow_unsuitable=args.all)
-    except ExtensionError as exc:
+    except (StudyError, OSError, yaml.YAMLError) as exc:
         print(f"policy: {exc}", file=sys.stderr)
         return 2
     for entry in runnable:

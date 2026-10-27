@@ -1,4 +1,4 @@
-r"""The Cai & Wang 2012 Knudsen extension: four new Kn at one baseline weight.
+r"""The Cai & Wang 2012 Knudsen extension and explicit seven-decade suite.
 
 Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless Rocket
 Plume Solutions", *J. Spacecraft and Rockets*, Vol. 49, No. 1, 2012.
@@ -13,14 +13,17 @@ drifting Maxwellian into vacuum, collisions on -- at four Knudsen numbers Cai di
     Kn          1e-4   1e-3   1   10          (EXTENSION_KNUDSEN)
     parcels     1x -- 40 in the exit cell     (PARTICLE_MULTIPLIERS)
 
-Four configurations, and no others. There is no parcel-population sweep: the
+These four configurations remain the legacy profile. There is no parcel-population sweep: the
 baseline is cases/cai2012-health's highest-resolution weight, and the statistical
 health of each run is judged from its own sampled output (occupancy audit,
 stationarity, the rarefaction diagnostics) rather than from sibling runs at other
 weights. Cai's three -- 0.01, 0.1 and 100 -- are
 :data:`EXCLUDED_KNUDSEN`: they are the conditions his paper already compares,
-and nothing in this package will generate, mesh, schedule or post-process a case
-at one of them, whether or not its results exist somewhere.
+and the legacy profile does not generate, mesh, schedule or post-process a case
+at one of them. The explicit ``meta.knudsen_suite: full_decades`` profile adds
+all seven decade cases, including those paper Kn values, using study-local
+generated cases. It does not import other studies' results or relax numerical
+feasibility requirements.
 
 Nothing physical lives here
 ---------------------------
@@ -71,8 +74,7 @@ from __future__ import annotations
 
 from plumetools.cai2012 import CAI_REPORTED_MAX_DENSITY_ERROR_PERCENT
 
-#: Cai's own Knudsen numbers. **Never** generated, scheduled or post-processed
-#: by this extension.
+#: Cai's own Knudsen numbers, excluded by the legacy extension profile.
 #:
 #: Taken from the table of his reported centreline errors rather than typed out
 #: again, so the list the extension refuses and the list the parent study
@@ -84,6 +86,9 @@ EXCLUDED_KNUDSEN = tuple(sorted(float(k)
 #: diameter. The requested scientific range is 1e-4 .. 10 by decades; the two
 #: members of it Cai already reports (0.01 and 0.1) are excluded above.
 EXTENSION_KNUDSEN = (1.0e-4, 1.0e-3, 1.0, 10.0)
+
+#: Explicit full-decade profile, ordered most rarefied first.
+FULL_SUITE_KNUDSEN = (100.0, 10.0, 1.0, 0.1, 0.01, 0.001, 0.0001)
 
 #: The numerical-particle levels, as multipliers on the baseline parcel
 #: population. ``nEquivalentParticles = baseline / multiplier``.
@@ -106,6 +111,7 @@ GENERATOR = f"{FAMILY_DIRECTORY}/generate_cases.py"
 __all__ = [
     "EXCLUDED_KNUDSEN",
     "EXTENSION_KNUDSEN",
+    "FULL_SUITE_KNUDSEN",
     "FAMILY_DIRECTORY",
     "GENERATOR",
     "PARTICLE_MULTIPLIERS",

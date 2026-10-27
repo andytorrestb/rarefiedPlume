@@ -36,16 +36,17 @@ try:
     import yaml
 
     from plumetools.cai2012ext import policy, summary
+    from plumetools.cai2012.study import load_study
 except ImportError:
     sys.exit("plumetools is not importable. From the repository root:\n"
              '    pip install -e ".[test]"')
 
 
 def main(argv) -> int:
-    path = HERE / "manifest.yaml"
+    study = load_study(HERE / "study.yaml")
+    path = HERE / study.manifest_name
     if not path.is_file():
-        sys.exit("analyse: no manifest.yaml. Generate the cases first:\n"
-                 "    ./generate_cases.py")
+        sys.exit(f"analyse: no {study.manifest_name}. Generate the cases first:\n    ./generate_cases.py")
     manifest = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     problems = policy.check_manifest(manifest)
     if problems:
@@ -57,7 +58,7 @@ def main(argv) -> int:
 
     entries = manifest.get("cases") or []
     rows = [summary.study_row(HERE, entry) for entry in entries]
-    results = HERE / "results"
+    results = HERE / "results" / ("full-suite" if policy.suite_name(study) == "full_decades" else "")
     written = [summary.write_table(results / "study-table.csv", rows),
                summary.write_markdown(results / "study-table.md", rows)]
     written += summary.plot_knudsen(HERE, entries, results)
@@ -73,7 +74,7 @@ def main(argv) -> int:
               f"{row['stationarity'] or ''}")
     print()
     print("Reference for every row: Cai's collisionless analytical solution. "
-          "No published DSMC\nexists at these Knudsen numbers.")
+          "No external-study result fields are imported.")
     print()
     for item in written:
         print(f"    wrote {item}")
