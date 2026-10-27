@@ -11,7 +11,9 @@ calls ``./Allrun`` itself, and around it the four steps here, through
     python -m plumetools.cai2012ext.hpc record   <case_dir> <seconds>
 
 ``guard``
-    exit 2 if the case is at one of Cai's own Knudsen numbers. Nothing on the
+    enforce the matrix profile recorded in case metadata. Legacy cases refuse
+    Cai's own Kn values; the explicit full_decades profile permits all seven.
+    Nothing on the
     run path reads the manifest any more, so this is where the exclusion is
     enforced for a run -- on the case's own ``case.yaml``.
 ``label``
@@ -70,8 +72,9 @@ COST_MODEL = Path("results") / "cost-model.yaml"
 def guard(case_dir: Path) -> str | None:
     """Why the case must not run, or ``None`` if it may.
 
-    Only the exclusion is checked: Kn = 0.01, 0.1 and 100 are Cai's, and the
-    extension never runs them, whatever else is true of the case.
+    A case without an explicit suite declaration retains the legacy paper-Kn
+    exclusions. Full-decade cases must carry the recognized profile themselves;
+    editing only a manifest cannot bypass the case guard.
     """
     case_dir = Path(case_dir)
     try:
@@ -81,10 +84,7 @@ def guard(case_dir: Path) -> str | None:
             ValueError) as exc:
         return f"interface.yaml: {exc}"
     cfg = load_case_config(case_dir)
-    if policy.is_excluded(cfg.exit.knudsen):
-        return policy._excluded_message(cfg.exit.knudsen,
-                                        f"{case_dir.resolve().name}/case.yaml")
-    return None
+    return policy.direct_exit_problem(cfg, f"{case_dir.resolve().name}/case.yaml")
 
 
 # --------------------------------------------------------------------------- #
@@ -123,11 +123,16 @@ def label(case_dir: Path) -> str:
         if not runnable:
             raise policy.ExtensionError(text)
         return text
-    _, assessment = assess(case_dir)
+    derived, assessment = assess(case_dir)
+    limitations = policy.source_limitations(derived[0])
+    source_text = ("Known source limitations (not resolved by numerical feasibility):\n"
+                   + "".join(f"  - {line}\n" for line in limitations)) if limitations else ""
+    if limitations:
+        (case_dir / "KNOWN-LIMITATIONS").write_text(source_text, encoding="utf-8", newline="\n")
     if assessment["status"] == feasibility.STATUS_CANDIDATE:
         return (f"{case_dir.resolve().name}: {feasibility.STATUS_CANDIDATE} -- "
-                f"every pre-run criterion is met; not yet a validated result\n")
-    text = marker_text(assessment)
+                f"every pre-run criterion is met; not yet a validated result\n" + source_text)
+    text = marker_text(assessment) + source_text
     marker = case_dir / MARKER
     marker.write_text(text, encoding="utf-8", newline="\n")
     return text + f"\nmarked {MARKER}: {marker.resolve()}\n"

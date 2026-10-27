@@ -1,4 +1,4 @@
-"""Generating the extension: sixteen cases, idempotently, never over results.
+"""Generate the selected Kn suite idempotently, never over existing results.
 
 The generator script runs once per module, into a scratch copy of the shipped
 family, exactly as it runs in ``cases/cai2012-kn-extension``. Everything after
@@ -18,6 +18,8 @@ import pytest
 import yaml
 
 from plumetools.cai2012.study import load_study
+from plumetools.cai2012 import dictionaries, mesh
+from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012ext import generation, policy, summary, vizspec
 from plumetools.cai2012ext.verification import verify_extension
 from plumetools.viz.spec import load_spec
@@ -53,7 +55,12 @@ def generated(tmp_path_factory):
 
 
 def manifest_of(family: Path) -> dict:
-    return yaml.safe_load((family / "manifest.yaml").read_text(encoding="utf-8"))
+    study = load_study(family / "study.yaml")
+    return yaml.safe_load((family / study.manifest_name).read_text(encoding="utf-8"))
+
+
+def cases_root(family: Path) -> Path:
+    return family / load_study(family / "study.yaml").cases_dir
 
 
 def clone(generated: Path, tmp_path: Path) -> Path:
@@ -66,22 +73,26 @@ def clone(generated: Path, tmp_path: Path) -> Path:
 # what is generated
 # --------------------------------------------------------------------------- #
 
-def test_exactly_four_baseline_cases_and_no_excluded_kn(generated):
+def test_exactly_seven_baseline_cases_with_explicit_full_suite(generated):
     manifest = manifest_of(generated)
-    assert manifest["n_generated"] == 4
+    assert manifest["n_generated"] == 7
+    assert manifest["meta"]["knudsen_suite"] == "full_decades"
     pairs = sorted((c["Kn"], c["numerical_particle_multiplier"])
                    for c in manifest["cases"])
-    assert pairs == [(1e-4, 1.0), (1e-3, 1.0), (1.0, 1.0), (10.0, 1.0)]
-    assert not any(policy.is_excluded(c["Kn"]) for c in manifest["cases"])
-    on_disk = sorted(p.name for p in (generated / "Cases").iterdir())
-    assert on_disk == ["Kn0p0001_np1x", "Kn0p001_np1x", "Kn10_np1x", "Kn1_np1x"]
+    assert pairs == [(1e-4, 1.0), (1e-3, 1.0), (1e-2, 1.0), (.1, 1.0),
+                     (1.0, 1.0), (10.0, 1.0), (100.0, 1.0)]
+    on_disk = sorted(p.name for p in cases_root(generated).iterdir())
+    assert on_disk == ["Kn0p0001_np1x", "Kn0p001_np1x", "Kn0p01_np1x", "Kn0p1_np1x",
+                       "Kn100_np1x", "Kn10_np1x", "Kn1_np1x"]
     for name in on_disk:
         # The diagnostics' settings travel with every case, like the scripts.
-        assert (generated / "Cases" / name / "diagnostics.yaml").is_file()
-        assert (generated / "Cases" / name / "Alldiagnose.py").is_file()
+        assert (cases_root(generated) / name / "diagnostics.yaml").is_file()
+        assert (cases_root(generated) / name / "Alldiagnose.py").is_file()
+        cfg = load_case_config(cases_root(generated) / name)
+        assert cfg.meta["knudsen_suite"] == "full_decades"
         # ... and the PBS job scripts, submitted from the case itself.
         for job in ("runMesh.sh", "runCase.sh", "runPost.sh", "runViz.sh"):
-            assert (generated / "Cases" / name / job).read_bytes() == (
+            assert (cases_root(generated) / name / job).read_bytes() == (
                 generated / "baseCase" / job).read_bytes()
 
 
@@ -99,7 +110,7 @@ def test_d_s0_t0_and_the_gas_are_held_fixed(generated):
 
 def test_within_a_kn_only_the_weight_moves(generated):
     per_kn = manifest_of(generated)["per_knudsen"]
-    assert set(per_kn) == {"Kn10", "Kn1", "Kn0p001", "Kn0p0001"}
+    assert set(per_kn) == {"Kn100", "Kn10", "Kn1", "Kn0p1", "Kn0p01", "Kn0p001", "Kn0p0001"}
     for group in per_kn.values():
         for key in ("mesh_id", "deltaT_s", "average_start_s", "end_time_s",
                     "write_interval_steps"):
@@ -126,7 +137,7 @@ def test_every_row_records_the_promised_provenance(generated):
         assert entry["production_status"] == entry["feasibility"]["status"]
 
 
-def test_the_startup_is_the_same_instant_in_all_sixteen(generated):
+def test_the_startup_is_the_same_instant_in_all_seven(generated):
     starts = {c["average_start_s"] for c in manifest_of(generated)["cases"]}
     assert len(starts) == 1
 
@@ -135,7 +146,7 @@ def test_the_verdicts_split_on_kn(generated):
     status = {c["name"]: c["production_status"]
               for c in manifest_of(generated)["cases"]}
     for name, verdict in status.items():
-        dense = name.startswith(("Kn0p001_", "Kn0p0001_"))
+        dense = name.startswith(("Kn0p01_", "Kn0p001_", "Kn0p0001_"))
         assert verdict == ("unsuitable-for-production" if dense
                            else "production-candidate"), name
 
@@ -146,20 +157,115 @@ def test_the_inputs_verify_independently(generated):
     assert report.passed, report.failures
 
 
+def test_all_seven_generated_dictionary_sets_match_the_manifest_without_meshing(generated, tmp_path):
+    """Exercise Allmesh's Python writers without any OpenFOAM executable."""
+    family = clone(generated, tmp_path)
+    manifest = manifest_of(family)
+    for entry in manifest["cases"]:
+        case_dir = family / entry["path"]
+        cfg, geom, state, plan, run, _, _, checks = generation.derive(case_dir)
+        checks.raise_if_failed()
+        paths = mesh.write_mesh_setup(case_dir, cfg, geom, plan)
+        paths += dictionaries.write_case_dictionaries(case_dir, cfg, state, run)
+        assert len(paths) == 10
+        assert all(path.is_file() for path in paths)
+        assert not (case_dir / "constant" / "polyMesh").exists()
+        assert not generation.has_solver_output(case_dir)
+        assert "nozzle" in (case_dir / "system" / "createPatchDict").read_text(encoding="utf-8")
+    report = verify_extension(family, manifest, with_dictionaries=True)
+    assert report.passed, report.failures
+
+
+def test_very_low_kn_source_limitation_is_retained_without_changing_the_source(generated):
+    manifest = manifest_of(generated)
+    for entry in manifest["cases"]:
+        case_dir = generated / entry["path"]
+        cfg = load_case_config(case_dir)
+        expected = policy.source_limitations(cfg)
+        assert entry["known_source_limitations"] == expected
+        assert cfg.meta["known_source_limitations"] == expected
+        assert not (case_dir / "interface.yaml").exists()
+        if entry["Kn"] <= .001:
+            assert expected and "inflow surface" in expected[0]
+            assert entry["feasibility"]["production_ready"] is False
+        else:
+            assert expected == []
+
+
+def test_declared_per_kn_occupancy_targets_are_checked_per_case(generated):
+    manifest = manifest_of(generated)
+    targets = {entry["Kn"]: entry["weight"]["baseline_exit_particles_per_cell"]
+               for entry in manifest["cases"]}
+    assert targets[10.] == 2000
+    assert targets[1.] == 2000
+    assert targets[.001] == 40
+    report = verify_extension(generated, manifest, with_dictionaries=False)
+    assert report.passed, report.failures
+    altered = yaml.safe_load(yaml.safe_dump(manifest))
+    altered["cases"][0]["weight"]["baseline_exit_particles_per_cell"] *= 2
+    report = verify_extension(generated, altered, with_dictionaries=False)
+    assert any("configured target" in line for line in report.failures)
+
+
+def test_an_unmarked_historical_study_still_generates_four_cases(tmp_path):
+    family = make_family(tmp_path / "legacy-family")
+    document = yaml.safe_load((family / "study.yaml").read_text(encoding="utf-8"))
+    document["meta"].pop("knudsen_suite", None)
+    document["kn_cases"] = [row for row in document["kn_cases"]
+                            if policy.is_extension_knudsen(row["Kn"])]
+    document.update(cases_dir="LegacyCases", manifest_name="manifest-legacy.yaml")
+    (family / "study.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
+    result = run_generator(family)
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = manifest_of(family)
+    assert manifest["n_generated"] == 4
+    assert not any(policy.is_excluded(row["Kn"]) for row in manifest["cases"])
+    report = verify_extension(family, manifest, with_dictionaries=False)
+    assert report.passed, report.failures
+
+
+def test_full_suite_generation_preserves_prior_case_results_and_manifest(tmp_path):
+    family = make_family(tmp_path / "family")
+    original_case = family / "Cases" / "Kn0p001_np1x" / "0.06"
+    original_case.mkdir(parents=True)
+    field = original_case / "rhoNMean"
+    field.write_bytes(b"existing DSMC result; must not be copied or overwritten\n")
+    prior_manifest = family / "manifest.yaml"
+    prior_manifest.write_bytes(b"historical manifest\n")
+    result = run_generator(family)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert field.read_bytes() == b"existing DSMC result; must not be copied or overwritten\n"
+    assert prior_manifest.read_bytes() == b"historical manifest\n"
+    assert manifest_of(family)["n_generated"] == 7
+    assert not any((family / row["path"] / "0.06").exists()
+                   for row in manifest_of(family)["cases"])
+
+
+def test_losing_the_explicit_case_profile_fails_full_suite_validation(generated, tmp_path):
+    family = clone(generated, tmp_path)
+    entry = next(row for row in manifest_of(family)["cases"] if row["Kn"] == 100)
+    path = family / entry["path"] / "case.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["meta"].pop("knudsen_suite")
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    report = verify_extension(family, manifest_of(family), with_dictionaries=False)
+    assert any("different Knudsen suites" in line for line in report.failures)
+
+
 # --------------------------------------------------------------------------- #
 # idempotency and conflicts
 # --------------------------------------------------------------------------- #
 
 def test_regenerating_keeps_every_case_untouched(generated, tmp_path):
     family = clone(generated, tmp_path)
-    case_yaml = family / "Cases" / "Kn1_np1x" / "case.yaml"
-    (family / "Cases" / "Kn1_np1x" / "constant").mkdir()
-    marker = family / "Cases" / "Kn1_np1x" / "constant" / "mesh-marker"
+    case_yaml = cases_root(family) / "Kn1_np1x" / "case.yaml"
+    (cases_root(family) / "Kn1_np1x" / "constant").mkdir()
+    marker = cases_root(family) / "Kn1_np1x" / "constant" / "mesh-marker"
     marker.write_text("a mesh would be here", encoding="utf-8")
     before = case_yaml.stat().st_mtime_ns
     result = run_generator(family)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("keep (identical)") == 4
+    assert result.stdout.count("keep (identical)") == 7
     assert case_yaml.stat().st_mtime_ns == before
     assert marker.is_file()
 
@@ -173,14 +279,14 @@ def _states(family: Path, tmp_path: Path, names, **flags):
 
 
 def _edit_input(family: Path, name: str):
-    path = family / "Cases" / name / "case.yaml"
+    path = cases_root(family) / name / "case.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     data["mesh"]["max_cells"] = 123456789
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 def _add_results(family: Path, name: str):
-    (family / "Cases" / name / "0.06").mkdir()
+    (cases_root(family) / name / "0.06").mkdir()
 
 
 def test_an_input_conflict_is_refused_not_overwritten(generated, tmp_path):
@@ -211,9 +317,9 @@ def test_regenerate_replaces_a_conflict_only_without_results(generated, tmp_path
 
 def test_results_under_processor_directories_count_as_results(generated, tmp_path):
     family = clone(generated, tmp_path)
-    (family / "Cases" / "Kn1_np1x" / "processor0" / "0.01").mkdir(parents=True)
-    assert generation.has_solver_output(family / "Cases" / "Kn1_np1x")
-    assert not generation.has_solver_output(family / "Cases" / "Kn10_np1x")
+    (cases_root(family) / "Kn1_np1x" / "processor0" / "0.01").mkdir(parents=True)
+    assert generation.has_solver_output(cases_root(family) / "Kn1_np1x")
+    assert not generation.has_solver_output(cases_root(family) / "Kn10_np1x")
 
 
 def test_only_overwrite_replaces_a_case_with_results(generated, tmp_path):
@@ -224,16 +330,18 @@ def test_only_overwrite_replaces_a_case_with_results(generated, tmp_path):
     assert states[0].action == "replace"
     generation.apply(states)
     restored = yaml.safe_load(
-        (family / "Cases" / "Kn1_np1x" / "case.yaml").read_text(encoding="utf-8"))
-    assert restored["mesh"]["max_cells"] == 4000000
-    assert not (family / "Cases" / "Kn1_np1x" / "0.06").exists()
+        (cases_root(family) / "Kn1_np1x" / "case.yaml").read_text(encoding="utf-8"))
+    expected = load_study(family / "study.yaml")
+    target_case = next(c for c in expected.expand() if c.name == "Kn1_np1x")
+    assert restored["mesh"]["max_cells"] == target_case.overrides["mesh"]["max_cells"]
+    assert not (cases_root(family) / "Kn1_np1x" / "0.06").exists()
 
 
 def test_a_changed_runner_script_is_stale_not_a_conflict(generated, tmp_path):
     family = clone(generated, tmp_path)
-    (family / "Cases" / "Kn0p001_np1x" / "Allpost").write_text(
+    (cases_root(family) / "Kn0p001_np1x" / "Allpost").write_text(
         "#!/bin/bash\n", encoding="utf-8")
-    (family / "Cases" / "Kn0p001_np1x" / "diagnostics.yaml").unlink()
+    (cases_root(family) / "Kn0p001_np1x" / "diagnostics.yaml").unlink()
     _add_results(family, "Kn0p001_np1x")
     _, states = _states(family, tmp_path, {"Kn0p001_np1x"})
     assert states[0].status == generation.STATUS_STALE
@@ -242,7 +350,7 @@ def test_a_changed_runner_script_is_stale_not_a_conflict(generated, tmp_path):
     _, states = _states(family, tmp_path, {"Kn0p001_np1x"}, refresh=True)
     assert states[0].action == "refresh"
     generation.apply(states)
-    case = family / "Cases" / "Kn0p001_np1x"
+    case = cases_root(family) / "Kn0p001_np1x"
     assert (case / "Allpost").read_bytes() == (
         family / "baseCase" / "Allpost").read_bytes()
     assert (case / "diagnostics.yaml").is_file()
@@ -253,22 +361,22 @@ def test_a_changed_runner_script_is_stale_not_a_conflict(generated, tmp_path):
 # strays and tampering
 # --------------------------------------------------------------------------- #
 
-def test_a_stray_case_at_an_excluded_kn_fails_validation(generated, tmp_path):
+def test_a_stray_case_outside_the_full_suite_fails_validation(generated, tmp_path):
     family = clone(generated, tmp_path)
-    stray = family / "Cases" / "Kn0p01_np1x"
-    shutil.copytree(family / "Cases" / "Kn1_np1x", stray)
+    stray = cases_root(family) / "Kn0p02_np1x"
+    shutil.copytree(cases_root(family) / "Kn1_np1x", stray)
     data = yaml.safe_load((stray / "case.yaml").read_text(encoding="utf-8"))
-    data["exit"]["knudsen"] = 0.01
+    data["exit"]["knudsen"] = 0.02
     (stray / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
     study = load_study(family / "study.yaml")
     strays = generation.stray_directories(family, study, study.expand())
-    assert strays == [{"path": "Cases/Kn0p01_np1x", "Kn": 0.01, "excluded": True}]
+    assert strays == [{"path": f"{study.cases_dir}/Kn0p02_np1x", "Kn": 0.02, "excluded": True}]
     report = verify_extension(family, manifest_of(family), with_dictionaries=False)
-    assert any("excluded Kn = 0.01" in f for f in report.failures)
+    assert any("excluded Kn = 0.02" in f for f in report.failures)
     # ... and it is never scheduled, because nothing reads the directory.
     runnable, _ = policy.schedulable(manifest_of(family), allow_unsuitable=True)
-    assert "Cases/Kn0p01_np1x" not in [e["path"] for e in runnable]
+    assert f"{study.cases_dir}/Kn0p02_np1x" not in [e["path"] for e in runnable]
 
 
 def test_a_hand_edited_case_fails_validation(generated, tmp_path):
@@ -287,7 +395,7 @@ def test_the_viz_specs_carry_the_new_averaging_start_and_n0(generated, tmp_path)
     manifest = manifest_of(generated)
     written = vizspec.write_group_specs(manifest, generated / "viz.yaml",
                                         tmp_path / "specs")
-    assert set(written) == {"Kn10", "Kn1", "Kn0p001", "Kn0p0001"}
+    assert set(written) == {"Kn100", "Kn10", "Kn1", "Kn0p1", "Kn0p01", "Kn0p001", "Kn0p0001"}
     start = manifest["cases"][0]["average_start_s"]
     assert start > 0.05      # Cai's 10^4 t0, not the health family's 5.658e-3
     for name, (path, cases) in written.items():
@@ -317,7 +425,7 @@ def test_the_diagnostics_spec_draws_the_latest_time_with_pinned_criteria():
 def test_the_study_table_lists_cases_that_have_not_run(generated, tmp_path):
     manifest = manifest_of(generated)
     rows = [summary.study_row(generated, entry) for entry in manifest["cases"]]
-    assert len(rows) == 4
+    assert len(rows) == 7
     assert {row["state"] for row in rows} == {"not run"}
     assert all(row["reference"] == summary.REFERENCE for row in rows)
     path = summary.write_table(tmp_path / "table.csv", rows)

@@ -1,41 +1,17 @@
-# The Cai & Wang 2012 KNUDSEN EXTENSION: four new Kn at the baseline weight.
+# Seven-decade direct-exit suite for the empirical Cai scaling experiment.
+# Generate inputs: python generate_cases.py
+# Bounded dictionaries-only verification: python smoke_cases.py
+# Neither command generates a mesh, runs DSMC, or submits a scheduler job.
 #
-# Cai, C., and Wang, L., "Numerical Validations for a Set of Collisionless Rocket
-# Plume Solutions", Journal of Spacecraft and Rockets, Vol. 49, No. 1, 2012.
-#
-# Generate with:
-#     ./generate_cases.py              all four, idempotently
-#     ./generate_cases.py --dry-run    what it would do, and the feasibility
-#
-# THIS FILE IS IN cases/cai2012's OWN study.yaml SCHEMA and is read by that
-# family's loader, plumetools.cai2012.study.load_study -- the same kn_cases,
-# particle_levels and multipliers, with the same meaning. What this family adds
-# is enforced in code (plumetools/cai2012ext/policy.py) rather than written as
-# new keys here, because the parent loader rejects unknown keys:
-#
-#   * EXACTLY Kn = 1e-4, 1e-3, 1, 10, each at the baseline parcel level only:
-#     four configurations. Generation refuses any other enabled combination,
-#     a second particle level included.
-#
-#   * Kn = 0.01, 0.1 and 100 -- Cai's own conditions -- are EXCLUDED. An entry
-#     at one of them is refused EVEN IF IT IS DISABLED, every All*Cases script
-#     refuses a manifest that lists one, and a case's runCase.sh / runMesh.sh
-#     refuse a case at one. They belong to cases/cai2012.
-#
-#   * run_time_multiplier and output_frequency_multiplier must be 1. The parent
-#     study runs at 3 and 4; inherited, they would silently multiply the
-#     averaging window and the write cadence.
-#
-#   * per-Kn `overrides` may touch only the mesh section and dsmc.courant_target
-#     / delta_t_s / n_subdomains. D, S0, T0, the gas, the startup, the
-#     averaging and the estimators are held fixed across all four.
-#
-# Separate output: Cases/ and manifest.yaml beside this file, nothing shared
-# with cases/cai2012 or cases/cai2012-health.
+# meta.knudsen_suite explicitly enables paper Kn values in this study. An
+# unmarked historical study/manifest/case keeps the legacy four-Kn policy.
+# Numerical suitability checks are unchanged. The direct-exit inflow surface
+# is a known limitation at Kn <= .001; its replacement is future work.
+# Outputs are separate from existing Cases/ and archived results.
 
 base_case: baseCase
-cases_dir: Cases
-manifest_name: manifest.yaml
+cases_dir: Cases_full_suite
+manifest_name: manifest-full-suite.yaml
 
 # --- the particle level: the baseline only -----------------------------------
 #
@@ -71,13 +47,31 @@ output_frequency_multiplier: 1.0
 
 # --- the physical matrix -----------------------------------------------------
 #
-# [EXTENSION] four Knudsen numbers on the nozzle DIAMETER, none of them Cai's.
+# [EXTENSION] seven decades on the nozzle DIAMETER, each generated locally.
 # Generated most rarefied first, as in the parent study.
 #
 # Startup is Cai's 10^4 reference collision times (baseCase/case.yaml,
 # dsmc.transient_basis: cai), the reference being the Kn = 0.01 exit state for
 # every case: 0.0501 s, 17.7 domain transits. No override below changes it.
 kn_cases:
+  - name: Kn100
+    Kn: 100.0
+    enabled: true
+    note: >-
+      Collisionless-end benchmark. Uses the same uniform 20 mm mesh and
+      2000-parcel exit-cell target as Kn10/Kn1; no external-study results
+      are imported. Ten cells span the nozzle diameter.
+    overrides:
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80
+        outer_lateral_cells: 85
+        max_cells: 4100000
+      resolution:
+        target_particles_per_cell: 2000.0
+
   - name: Kn10
     Kn: 10.0
     enabled: true
@@ -130,6 +124,23 @@ kn_cases:
       resolution:
         target_particles_per_cell: 2000.0
 
+  - name: Kn0p1
+    Kn: 0.1
+    enabled: true
+    note: >-
+      Additional decade registered in this study. Uses the inherited graded
+      mesh planner and 40-parcel exit-cell target; actual feasibility and
+      measured quality are reported separately, never inferred from Kn.
+
+  - name: Kn0p01
+    Kn: 0.01
+    enabled: true
+    note: >-
+      Additional decade registered in this study. The inherited mesh budget
+      cannot meet the requested exit mean-free-path resolution. Generate and
+      retain its non-production verdict; do not relax the mesh/time-step
+      criteria to make it appear resolved.
+
   - name: Kn0p001
     Kn: 0.001
     enabled: true
@@ -138,7 +149,8 @@ kn_cases:
       the core is coarsened to ~5.2 mm, cell/lambda0 ~ 26, and the time step is
       ~1.4 exit collision times. UNSUITABLE FOR PRODUCTION as configured: the
       manifest says so, and its runCase.sh runs it marked NON-PRODUCTION. Its
-      configuration is kept as the record of what was asked for.
+      configuration is kept as the record of what was asked for. The
+      direct-exit inflow surface is also a known limitation, deferred.
 
   - name: Kn0p0001
     Kn: 0.0001
@@ -147,11 +159,13 @@ kn_cases:
       lambda0 = 20 um, essentially continuum at the exit. Resolving it needs
       ~2e13 cells; within mesh.max_cells the core is ~5.4 mm, cell/lambda0 ~ 270
       and deltaT ~ 15 exit collision times. UNSUITABLE FOR PRODUCTION as
-      configured, for the same reasons, by a wider margin.
+      configured, for the same reasons, by a wider margin. The direct-exit
+      inflow surface is a known limitation to be addressed in a future effort.
 
 meta:
+  knudsen_suite: full_decades
   reference: Cai and Wang 2012
-  study: Knudsen extension -- NOT one of Cai's cases
+  study: Seven-decade Knudsen suite for empirical whole-field scaling
   gas: Ar
   nozzle_diameter_m: 0.2
   speed_ratio: 2.0
@@ -165,8 +179,7 @@ meta:
     Courant 0.2, the same mesh planning and checks), with Cai's 10^4 t0
     startup in place of health's 2 transits.
   note: >-
-    There are no published DSMC results at these Knudsen numbers. Every
-    comparison this family makes is against Cai's collisionless ANALYTICAL
-    solution (plumetools.cai2012.analytical); Cai's reported centreline errors
-    at 100 / 0.1 / 0.01 are not tolerances for these cases and are never
-    applied to them.
+    All seven cases are generated in this study; external-study results are
+    provenance only. Comparison is against Cai's collisionless analytical
+    solution. Published error values are not acceptance tolerances. Very-low
+    Kn direct-exit source geometry and numerical resolution remain limitations.

@@ -15,11 +15,11 @@ What it checks
 The extension's own promises, each RECOMPUTED rather than read back
 (plumetools/cai2012ext/verification.py):
 
-    exactly Kn 1e-4, 1e-3, 1, 10 at the baseline parcel level -- four cases
-    no Kn = 0.01, 0.1 or 100, in the manifest or anywhere under Cases/
+    exactly the selected profile: seven decades, or four for legacy inputs
+    case metadata agrees with the manifest's explicit suite declaration
     n0 reproduces the target Kn (VHS lambda written out again)
-    D, S0, T0, the gas, the baseline occupancy, startup and averaging identical
-    nEquivalentParticles x 40 = n0 V_exit
+    D, S0, T0, the gas, startup and averaging identical
+    nEquivalentParticles x the configured per-case target = n0 V_exit
     sampling starts at 10^4 Kn = 0.01 collision times in every case
     averaging lasts 4.5 domain transits (to within the snapped last write)
     every case.yaml is still the one the manifest describes
@@ -47,6 +47,7 @@ HERE = Path(__file__).resolve().parent
 try:
     from plumetools.cai2012.verify import VerificationError, load_manifest
     from plumetools.cai2012ext.verification import verify_extension
+    from plumetools.cai2012.study import load_study
 except ImportError:
     sys.exit("plumetools is not importable. From the repository root:\n"
              '    pip install -e ".[test]"')
@@ -60,12 +61,11 @@ def main(argv) -> int:
                         help="print every check, not only the failures")
     parser.add_argument("--inputs-only", action="store_true",
                         help="skip the checks that read generated dictionaries")
-    parser.add_argument("--manifest", default=str(HERE / "manifest.yaml"),
-                        help="path to manifest.yaml (default: alongside this "
-                             "script)")
+    parser.add_argument("--manifest", default=None,
+                        help="manifest path (default: the active study's manifest_name)")
     args = parser.parse_args(argv[1:])
 
-    manifest_path = Path(args.manifest)
+    manifest_path = Path(args.manifest) if args.manifest else HERE / load_study(HERE / "study.yaml").manifest_name
     try:
         manifest = load_manifest(manifest_path)
     except VerificationError as exc:
@@ -100,7 +100,7 @@ def main(argv) -> int:
             print("                " + ", ".join(unsuitable))
         print()
         print("Next, one PBS job per case (README.md):")
-        print("    cd Cases/<case> && qsub runCase.sh")
+        print(f"    cd {manifest.get('cases_dir', 'Cases')}/<case> && qsub runCase.sh")
         return 0
 
     print(f"validate_cases: {len(report.failures)} FAILURE(S).", file=sys.stderr)
