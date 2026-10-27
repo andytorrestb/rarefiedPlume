@@ -211,10 +211,10 @@ def run(case_dir: Path, *, time: str | None = None,
         problem = interface_case.knudsen_problem(cfg, sphere, str(case_dir))
         if problem:
             raise policy.ExtensionError(problem)
-    elif policy.is_excluded(cfg.exit.knudsen):
-        raise policy.ExtensionError(
-            f"{case_dir}: Kn = {cfg.exit.knudsen:g} is one of Cai's own cases; "
-            f"the extension never post-processes it")
+    else:
+        problem = policy.direct_exit_problem(cfg, str(case_dir))
+        if problem:
+            raise policy.ExtensionError(problem)
     geom = from_config(cfg)
     exit_state = inflow.from_config(cfg)
     # In interface mode the exit cells are not in the mesh: there is no exit

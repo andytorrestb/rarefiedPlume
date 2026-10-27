@@ -61,8 +61,10 @@ production:
       run_mode: production
       bird_definition: general
       bird_threshold: 0.05            # initial; selected after the overlap study
-      core_half_angle_deg: null       # REQUIRED -- see above
-      source_validity_min_radius_over_D: null   # REQUIRED -- see above
+      # 2026-10-25: the widest admissible core at Kn 1e-3 (60 deg has no
+      # surface). R = 1.32 D, 76% of the exit mass flow inside the core.
+      core_half_angle_deg: 45.0
+      source_validity_min_radius_over_D: 0.7173   # the closure's r_a / D
       validation_evidence: null
     overrides: {}
     note: >-
@@ -76,8 +78,11 @@ production:
       run_mode: production
       bird_definition: general
       bird_threshold: 0.05
-      core_half_angle_deg: null
-      source_validity_min_radius_over_D: null
+      # 2026-10-25: the 60 deg core keeps 94% of the exit mass flow and puts
+      # the sphere at R = 3.09 D, well inside the domain (the note below is
+      # about a narrow core, where R reaches the domain edge).
+      core_half_angle_deg: 60.0
+      source_validity_min_radius_over_D: 0.7173   # the closure's r_a / D
       validation_evidence: null
     # The B = 0.05 sphere lies near R/D ~ 10 at this Kn -- the domain edge and
     # Cai's r/D = 10 diagnostic sphere. Enlarging the domain and the diagnostic

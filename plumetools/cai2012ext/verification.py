@@ -7,12 +7,12 @@ one particle level, that the levels of a Kn differ in ``nEquivalentParticles``
 alone). This module adds the extension's own promises, each **recomputed here**
 from first principles rather than read back from the code that produced it:
 
-* exactly ``EXTENSION_KNUDSEN x PARTICLE_MULTIPLIERS`` -- the four Kn at the
-  baseline -- and no excluded Kn anywhere, in the manifest or on disk;
+* exactly the explicitly selected Kn suite at the baseline particle level;
+  an unmarked historical manifest retains the original four-case policy;
 * ``n0`` reproduces the target Kn (:func:`plumetools.cai2012ext.provenance.independent_knudsen`);
 * D, S0, T0 and the gas identical in every case;
-* ``nEquivalentParticles * multiplier * 40 = n0 V_exit`` -- the level applied
-  exactly once;
+* ``nEquivalentParticles * multiplier * configured target = n0 V_exit`` -- the
+  level applied exactly once, including declared per-Kn occupancy targets;
 * sampling starts at 10^4 Kn = 0.01 collision times, recomputed from
   ``lambda_ref = 0.01 D`` and the mean thermal speed, in every case;
 * averaging lasts 4.5 domain transits, to within the one write interval the end
@@ -30,7 +30,6 @@ from plumetools.cai2012.config import CaiConfigError, load_case_config
 from plumetools.cai2012.geometry import from_config
 from plumetools.cai2012.verify import VerificationReport, verify_tree
 from plumetools.cai2012ext import (
-    EXTENSION_KNUDSEN,
     PARTICLE_MULTIPLIERS,
     REFERENCE_KNUDSEN,
     policy,
@@ -88,18 +87,24 @@ def verify_extension(root: Path, manifest: dict, *,
     for problem in policy.check_manifest(manifest):
         report.fail("manifest.yaml", problem)
 
-    if len(entries) != policy.expected_case_count():
+    try:
+        allowed_knudsen = policy.suite_knudsen(manifest)
+    except policy.ExtensionError as exc:
+        report.fail("manifest.yaml", str(exc))
+        return report
+    expected_count = policy.expected_case_count(manifest)
+    if len(entries) != expected_count:
         report.fail("manifest.yaml", f"lists {len(entries)} cases, not "
-                                     f"{policy.expected_case_count()}")
+                                     f"{expected_count}")
     pairs = sorted((float(e.get("Kn", "nan")),
                     float(e.get("numerical_particle_multiplier", "nan")))
                    for e in entries)
-    wanted = sorted((k, m) for k in EXTENSION_KNUDSEN for m in PARTICLE_MULTIPLIERS)
+    wanted = sorted((k, m) for k in allowed_knudsen for m in PARTICLE_MULTIPLIERS)
     if len(pairs) == len(wanted) and all(
             policy.same_knudsen(a[0], b[0]) and a[1] == b[1]
             for a, b in zip(pairs, wanted)):
         report.ok("manifest.yaml", f"exactly {len(wanted)} cases: Kn "
-                                   f"{list(EXTENSION_KNUDSEN)} x "
+                                   f"{list(allowed_knudsen)} x "
                                    f"{list(PARTICLE_MULTIPLIERS)}")
     else:
         report.fail("manifest.yaml", f"the (Kn, multiplier) pairs are {pairs}, "
@@ -116,9 +121,9 @@ def verify_extension(root: Path, manifest: dict, *,
                 kn = cfg.exit.knudsen
             except CaiConfigError:
                 kn = None
-            if kn is not None and policy.is_excluded(kn):
+            if kn is not None and not any(policy.same_knudsen(kn, k) for k in allowed_knudsen):
                 report.fail(str(entry.relative_to(root)),
-                            f"holds a case at excluded Kn = {kn:g}. It is not "
+                            f"holds a case at excluded Kn = {kn:g} for this suite. It is not "
                             f"in the manifest and nothing schedules it, but the "
                             f"extension tree must not contain one: remove it.")
             else:
@@ -145,7 +150,21 @@ def verify_extension(root: Path, manifest: dict, *,
         else:
             report.ok(name, "case.yaml is the file the manifest describes")
 
-        if policy.is_excluded(cfg.exit.knudsen):
+        try:
+            case_knudsen = policy.suite_knudsen(cfg)
+        except policy.ExtensionError as exc:
+            report.fail(name, str(exc))
+            continue
+        if case_knudsen != allowed_knudsen:
+            report.fail(name, "case.yaml and manifest select different Knudsen suites")
+        if policy.suite_name(manifest) == policy.FULL_SUITE:
+            source_limitations = policy.source_limitations(cfg)
+            for where, recorded_limitations in (
+                    ("case.yaml meta", cfg.meta.get("known_source_limitations")),
+                    ("manifest row", entry.get("known_source_limitations"))):
+                if recorded_limitations != source_limitations:
+                    report.fail(name, f"{where} does not retain the declared source limitations")
+        if not any(policy.same_knudsen(cfg.exit.knudsen, k) for k in allowed_knudsen):
             report.fail(name, f"case.yaml is at excluded Kn = "
                               f"{cfg.exit.knudsen:g}")
             continue
@@ -171,8 +190,6 @@ def verify_extension(root: Path, manifest: dict, *,
             "exit.T0_K": cfg.exit.T0_K,
             "exit.characteristic_length": cfg.exit.characteristic_length,
             "gas": cfg.gas,
-            "resolution.target_particles_per_cell":
-                cfg.resolution.target_particles_per_cell,
             "resolution.reference_knudsen": cfg.resolution.reference_knudsen,
             "dsmc.transient_basis": cfg.dsmc.transient_basis,
             "dsmc.transient_collision_times": cfg.dsmc.transient_collision_times,
@@ -190,7 +207,7 @@ def verify_extension(root: Path, manifest: dict, *,
                 report.fail(name, f"differs from {template[0]} in {differing}; "
                                   f"these are fixed across the extension")
             else:
-                report.ok(name, f"D, S0, T0, gas, baseline occupancy, startup "
+                report.ok(name, f"D, S0, T0, gas, startup "
                                 f"and averaging as in {template[0]}")
 
         plan = mesh.plan(cfg, geom, exit_state)
@@ -198,6 +215,13 @@ def verify_extension(root: Path, manifest: dict, *,
             cfg, exit_state, geom, min_cell_size_m=plan.min_cell_size_m,
             exit_cell_volume_m3=plan.exit_cell_volume_m3)
         multiplier = float(cfg.dsmc.numerical_particle_multiplier)
+        target = float(cfg.resolution.target_particles_per_cell)
+        recorded_target = (entry.get("weight") or {}).get("baseline_exit_particles_per_cell")
+        if _close(target, recorded_target):
+            report.ok(name, f"configured target {target:g} parcels/cell matches its manifest row")
+        else:
+            report.fail(name, f"configured target {target:g} parcels/cell differs from "
+                              f"its manifest row {recorded_target!r}")
         product = (run.n_equivalent_particles * multiplier
                    * float(cfg.resolution.target_particles_per_cell))
         molecules = exit_state.number_density_per_m3 * plan.exit_cell_volume_m3

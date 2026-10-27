@@ -1,0 +1,21 @@
+[
+  {
+    "path": "cases/cai2012-kn-extension/Cases/Kn10_np1x",
+    "reason": "missing-unaggregated-DSMC-fields",
+    "available_exports": [],
+    "plots": "unavailable for matched three-way estimator"
+  },
+  {
+    "path": "cases/cai2012-kn-extension/Cases_run1_graded/Kn10_np1x",
+    "reason": "missing-unaggregated-DSMC-fields",
+    "available_exports": [
+      "angular_r10D.csv",
+      "centerline.csv",
+      "centerline_extended.csv",
+      "centreline_diagnostics.csv",
+      "density_plane.csv",
+      "meridional_plane.csv"
+    ],
+    "plots": "unavailable for matched three-way estimator"
+  }
+]

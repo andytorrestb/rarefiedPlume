@@ -1,0 +1,20 @@
+# Explicit opt-in, read only when scaling.yaml registration names this file.
+# This is an analysis/specification registry, never a production manifest.
+# No legacy generation, mesh or scheduler guard accepts it as authorization.
+# The seven active Cases_full_suite cases are registered automatically by
+# study.yaml + manifest-full-suite.yaml. Rows below add historical study-local
+# archives only; they do not replace or import the new suite's results.
+scope: cai2012-kn-extension-whole-field-scaling-v1
+purpose: analysis-and-specification-only
+enabled: true
+allow_paper_decades: true
+prepared_decades: [100.0, 10.0, 1.0, 0.1, 0.01, 0.001, 0.0001]
+cases:
+  - name: Kn10_np1x_graded_archive
+    path: Cases_run1_graded/Kn10_np1x
+    Kn: 10.0
+    note: Earlier graded-mesh study run; partial exports do not supply full-field cell volumes.
+  - name: Kn1_np1x_graded_archive
+    path: Cases_run1_graded/Kn1_np1x
+    Kn: 1.0
+    note: Earlier graded-mesh study run; occupancy and stationarity must be assessed independently.

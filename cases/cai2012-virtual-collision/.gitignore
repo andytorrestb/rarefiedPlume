@@ -1,0 +1,6 @@
+# Preserve the reproducible bounded demonstration; larger future runs stay local.
+!results/smoke/*.csv
+results-full/
+results-hpc/
+.test-tmp*/
+__pycache__/

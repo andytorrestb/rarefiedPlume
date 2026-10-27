@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Cai 2012 Knudsen extension: four cases, idempotently.
+"""Generate the configured Cai Knudsen suite idempotently, without running it.
 
     ./generate_cases.py                 create what is missing, keep what matches
     ./generate_cases.py --dry-run       the plan and the feasibility; write nothing
@@ -16,9 +16,8 @@ included. See plumetools/cai2012ext/generation.py.
 
 What it does:
 
-  1. read study.yaml with cases/cai2012's own loader, and refuse anything that
-     is not exactly Kn = 1e-4, 1e-3, 1, 10 at the baseline parcel level -- or
-     that mentions Cai's Kn = 0.01, 0.1 or 100 at all, even disabled
+  1. read study.yaml and enforce its explicit suite profile: seven decades
+     for full_decades, or the historical four Kn when no profile is declared
   2. check baseCase/case.yaml against cases/cai2012-health's template, key by
      key; only the four declared [EXTENSION] keys may differ
   3. stage every case in a scratch directory with the parent family's own
@@ -133,7 +132,7 @@ def main(argv) -> int:
         study = load_study(study_path)
         policy.check_study(study)
         template_cfg = load_case_config(root / study.base_case)
-        policy.check_template(template_cfg, f"{study.base_case}/case.yaml")
+        policy.check_template(template_cfg, f"{study.base_case}/case.yaml", suite=study)
     except (StudyError, CaiConfigError) as exc:
         print(f"generate_cases: {exc}", file=sys.stderr)
         return 1
@@ -154,9 +153,9 @@ def main(argv) -> int:
         return 1
 
     cases = study.expand()
-    if len(cases) != policy.expected_case_count():
+    if len(cases) != policy.expected_case_count(study):
         print(f"generate_cases: the matrix has {len(cases)} cases, not "
-              f"{policy.expected_case_count()}", file=sys.stderr)
+              f"{policy.expected_case_count(study)}", file=sys.stderr)
         return 1
 
     model, origin = feasibility.load_cost_model(root, HEALTH)
@@ -166,7 +165,7 @@ def main(argv) -> int:
     print(f"matrix     {len(study.enabled_cases())} Knudsen numbers x "
           f"{len(study.enabled_particle_levels())} particle levels = "
           f"{len(cases)} cases")
-    print(f"excluded   Kn {list(EXCLUDED_KNUDSEN)} -- never generated or run")
+    print(f"profile    {policy.suite_name(study)}: Kn {list(policy.suite_knudsen(study))}")
     if inherited is not None:
         print(f"inherits   {inherited['n_inherited']} settings from "
               f"cases/cai2012-health; overrides "
@@ -217,6 +216,10 @@ def main(argv) -> int:
             if state.action == "replace" and state.has_results:
                 print(f"generate_cases: --overwrite: DESTROYING the results in "
                       f"{state.destination.relative_to(root)}", file=sys.stderr)
+        for state in states:
+            for target in (state.destination, state.staged):
+                if not target.resolve().is_relative_to(root):
+                    raise StudyError(f"Generation target escaped study directory: {target}")
         generation.apply(states)
 
     entries, hard_failures = [], []
@@ -272,8 +275,7 @@ def main(argv) -> int:
           "(no OpenFOAM)")
     print("    ./validate_cases.py          check the tree against the study")
     print("    ./AllmeshCases               mesh (OpenFOAM)")
-    print("    cd Cases/<case> && qsub runCase.sh   one PBS job per case "
-          "(README.md)")
+    print(f"    cd {study.cases_dir}/<case> && qsub runCase.sh   one PBS job per case (README.md)")
     return 0
 
 

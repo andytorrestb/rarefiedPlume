@@ -1068,9 +1068,7 @@ def post_context(case_dir: Path) -> PostContext:
             generation.derive(case_dir)
         verdict = feasibility.assess(cfg, geom, exit_state, plan, run, nozzle,
                                      particles, checks)
-        refusal = (f"Kn = {cfg.exit.knudsen:g} is one of Cai's own cases; the "
-                   f"extension never post-processes it."
-                   if policy.is_excluded(cfg.exit.knudsen) else None)
+        refusal = policy.direct_exit_problem(cfg, str(case_dir))
         return PostContext("direct", cfg, geom, exit_state, run, verdict,
                            float(nozzle.area_error), None, refusal)
     derived = derive(case_dir)

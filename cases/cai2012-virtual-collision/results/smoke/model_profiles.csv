@@ -1,0 +1,4 @@
+kn,x_over_D,estimator,r_low_over_D,r_high_over_D,x_half_width_over_D,cai_n_over_n0,virtual_n_over_n0,virtual_n_se_over_n0,cai_Ux_m_s,virtual_Ux_m_s,cai_T_K,virtual_T_K,numerical_realizability,single_event_warning,dsmc_reference
+10.0,0.5,volume-averaged cylindrical ring,0.0,0.25,0.2,0.860076511279338,0.8617557354321522,0.0033626019168158075,748.571578315538,748.8305779193778,248.9374177050006,249.1992317819967,True,False,unavailable in predictive demonstration
+10.0,1.5,volume-averaged cylindrical ring,0.0,0.25,0.2,0.34768198797620503,0.3498649071177388,0.003603237464977353,825.9098766281882,826.8203723531956,136.33365550362663,136.01179976427807,True,False,unavailable in predictive demonstration
+10.0,4.0,volume-averaged cylindrical ring,0.0,0.25,0.2,0.06631728567076652,0.06763444820959288,0.0011968298180218488,857.3207608087757,851.704181294967,91.78377308404858,89.08366007932334,True,False,unavailable in predictive demonstration

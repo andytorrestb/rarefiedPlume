@@ -8,12 +8,15 @@ every compared quantity means, and what is not yet known. Running instructions
 are in [`cases/cai2012-kn-extension/README.md`](../cases/cai2012-kn-extension/README.md);
 the parent study is documented in [`docs/cai2012-case.md`](cai2012-case.md).
 
-> **Status (2026-10-21): configured, generated and validated; not run.** Four
-> configurations at one baseline parcel weight: two are production candidates,
-> two are unsuitable for production
-> as configured (§5). No DSMC result exists for any of them. Everything below
-> about outputs describes what the code computes, verified on synthetic fields
-> (§10) — not a scientific finding.
+> **Current setup (2026-10-26): seven-decade full suite prepared, not run.**
+> `full_decades` generates Kn_e = 100, 10, 1, .1, .01, .001, .0001 into
+> `Cases_full_suite/` with `manifest-full-suite.yaml`, preserving prior trees.
+> The dictionary-only smoke passed 84 checks for seven cases and confirmed
+> idempotence and scaling registration. No mesh, DSMC or scheduler job was run.
+> Four cases are pre-run candidates; .01/.001/.0001 remain non-production.
+> The wrong very-low-Kn direct-exit inflow surface is explicitly retained for
+> future work. Current commands are in the study README. Historical validation
+> records below remain labeled with their original date.
 
 ---
 
@@ -30,22 +33,23 @@ the parent study is documented in [`docs/cai2012-case.md`](cai2012-case.md).
 | Collisions | on, at every Kn (NTC, standard `dsmcFoam` v2512) | [PAPER] |
 | Geometry | full 3-D Cartesian, `0 ≤ X/D ≤ 10`, `|Y|,|Z|/D ≤ 10` | `cases/cai2012` |
 
-**Varied:** `Kn ∈ {1e-4, 1e-3, 1, 10}` (on `D`) — four configurations, all at
-**one baseline parcel weight**, 40 parcels in the exit cell. There is no
-parcel-population sweep: the statistical adequacy of each run is judged from
-its own sampled output (§9, and the `diagValid` map of §7a), not from sibling
-runs at other weights. The density follows from `Kn` through the existing chain
-`Kn → λ0 = Kn·D → n0` (G2 in `docs/cai2012-case.md`); no density is typed
-anywhere.
+**Varied:** Kn_e in {100, 10, 1, .1, .01, .001, .0001}, on the
+nozzle diameter. There is one particle multiplier, np1x. The configured exit-cell
+parcel target is 2000 for Kn>=1 and 40 for Kn<=.1; it is verified per case,
+not treated as a physical invariant. Density follows Kn -> lambda=Kn*D -> n0
+using the existing VHS convention. No number density is entered by hand.
 
-**Excluded:** `Kn = 0.01, 0.1, 100` — the conditions Cai's paper compares. The
-requested scientific range was `1e-4 … 10` by decades; its two members that
-are Cai's (0.01, 0.1) and Cai's 100 are refused at five points: `study.yaml`
-validation (even a *disabled* entry), the template, every `All*Cases` script's
-case list (a hand-edited manifest naming one stops the script), each case's own
-PBS job before it meshes or runs (`hpc guard`, on the case's `case.yaml`), and
-the per-case post-processing. Reference *quantities* at Kn = 0.01 are computed — Cai's
-startup is defined by them (§6) — but no case exists there.
+**Policy:** `meta.knudsen_suite: full_decades` explicitly permits all seven in
+generation, manifests, case-level guards and direct-exit post-processing.
+Unmarked historical studies, manifests and cases retain the four-Kn policy and
+paper-Kn exclusions. The template's physical settings remain inherited.
+External-study results are not imported. Every active case is registered in
+scaling through the study's manifest/cases_dir, with missing data reported.
+
+**Source limitation:** at Kn<=.001 the direct-exit inflow surface is a known
+limitation deferred by the user. Metadata, the manifest, KNOWN-LIMITATIONS,
+HPC logs and scaling suitability retain the warning. This setup does not replace
+it with a downstream source, or weaken mesh/time-step requirements.
 
 **Not in scope:** axisymmetric or planar geometry, impingement plates,
 source-surface sensitivity.
@@ -93,28 +97,25 @@ imports them, and its new code is a separate package, `plumetools/cai2012ext/`.
 
 ---
 
-## 3. The four configurations
+## 3. The seven active configurations
 
-All derived; reproduced by `./generate_cases.py` and recorded per case in
-`manifest.yaml`. `U0 = 706.95 m/s`, `β0 = 1/(2RT0)`, one domain transit
-`x_max/U0 = 2.829e-3 s`. "Kn recomputed" is `n0` put back through the VHS
-expression written out independently of the gas module (`provenance.independent_knudsen`); all
-agree with the target to < 1e-12 relative.
+Derived from the current `manifest-full-suite.yaml`; generated inputs are under
+`Cases_full_suite/`. These are configuration checks, not simulation results.
 
-| case | Kn | Kn recomputed | n0 [m⁻³] | ρ0 [kg/m³] | p0 [Pa] | λ0 [m] | weight | exit-cell parcels | verdict |
-|---|---|---|---|---|---|---|---|---|---|
-| `Kn10_np1x` | 10 | 10 | 6.6201e17 | 4.3891e-8 | 2.7420e-3 | 2.0 | 1.6550e10 | 40 | candidate |
-| `Kn1_np1x` | 1 | 1 | 6.6201e18 | 4.3891e-7 | 2.7420e-2 | 0.2 | 1.6550e11 | 40 | candidate |
-| `Kn0p001_np1x` | 1e-3 | 1e-3 | 6.6201e21 | 4.3891e-4 | 2.7420e1 | 2.0e-4 | 2.3403e13 | 40 | **unsuitable** |
-| `Kn0p0001_np1x` | 1e-4 | 1e-4 | 6.6201e22 | 4.3891e-3 | 2.7420e2 | 2.0e-5 | 2.5332e14 | 40 | **unsuitable** |
+| Case | Kn_e | n_e [m^-3] | Exit-cell parcel target | Pre-run status |
+|---|---:|---:|---:|---|
+| `Kn100_np1x` | 100 | 6.62008e+16 | 2000 | production-candidate |
+| `Kn10_np1x` | 10 | 6.62008e+17 | 2000 | production-candidate |
+| `Kn1_np1x` | 1 | 6.62008e+18 | 2000 | production-candidate |
+| `Kn0p1_np1x` | 0.1 | 6.62008e+19 | 40 | production-candidate |
+| `Kn0p01_np1x` | 0.01 | 6.62008e+20 | 40 | unsuitable-for-production |
+| `Kn0p001_np1x` | 0.001 | 6.62008e+21 | 40 | unsuitable-for-production |
+| `Kn0p0001_np1x` | 0.0001 | 6.62008e+22 | 40 | unsuitable-for-production |
 
-`nEquivalentParticles = n0 V_exit / 40`, derived from each case's own density
-and realised exit-cell volume, never copied between Kn. The `_np1x` suffix is
-the parent study's naming, kept because its loader names a case by its particle
-level; `generate_cases.py` refuses a second level.
+`nEquivalentParticles = n_e V_exit / configured_target`, derived separately
+for each case. The reference startup and averaging windows remain shared.
 
 ---
-
 ## 4. Settings inherited from `cases/cai2012-health`
 
 The template is `cases/cai2012-health/baseCase/case.yaml` with exactly five keys
@@ -127,7 +128,7 @@ stops generation.
 | `resolution.target_particles_per_cell` | **40** | health `study.yaml`, weights `ppc040` | override of the health template's 20 — its generator writes the row value per case |
 | `dsmc.sampling_domain_transits` | **4.5** | health `study.yaml`, samplings `s4p5` | override of the template's 1.5, same reason |
 | `dsmc.transient_basis` | **`cai`** | `cases/cai2012` template default | **deliberate override** of health's `transits` (2 transits), which that family documents as far-field-limiting |
-| `exit.knudsen` | per case (template: 10) | — | health pins 100, excluded here |
+| `exit.knudsen` | per case (template: 10) | — | health pins 100; the full profile now includes it |
 | `dsmc.n_subdomains` | **192** | — | override of the health template's 12 (its development machine's cores): one HPC node of 192 cores, each case its own PBS job; `./Allrun` reads it from `system/decomposeParDict`, `simple` `(4 6 8)` |
 | `dsmc.write_interval_s` | 3.536e-4 s | health template | inherited; rounded to whole steps: 258 (3.5420e-4 s) at Kn ≥ 1, 496 (3.5374e-4 s) at Kn = 1e-3, 483 (3.5365e-4 s) at Kn = 1e-4 |
 | `dsmc.courant_target` | 0.2 | health template | inherited; `Δt` recomputed per mesh |
@@ -146,12 +147,15 @@ copied: all three are recomputed for each Kn.
 
 ## 5. Resolution and feasibility, before meshing
 
-| Kn | cells | core cell | cell/λ0 | cells for `dx = λ0` | `Δt` | `Δt/τ0` | Courant | steps | nozzle faces, area error |
-|---|---|---|---|---|---|---|---|---|---|
-| 10 | 1,310,720 | 10.0 mm | 0.005 | (met) | 1.373e-6 s | 2.7e-4 | 0.20 | 45,924 | 316, +0.59% |
-| 1 | 1,310,720 | 10.0 mm | 0.05 | (met) | 1.373e-6 s | 2.7e-3 | 0.20 | 45,924 | 316, +0.59% |
-| 1e-3 | 3,918,213 | 5.23 mm | **26.2** | **1.9e10** | 7.132e-7 s | **1.42** | 0.20 | 88,288 | 1153, −0.10% |
-| 1e-4 | 3,726,000 | 5.39 mm | **270** | **1.8e13** | 7.322e-7 s | **14.6** | 0.20 | 85,974 | 1092, −0.24% |
+| Kn_e | Planned cells | cell/lambda_e | dt/tau_e | Pre-run status |
+|---:|---:|---:|---:|---|
+| 100 | 4,000,000 | 0.001 | 5.4758e-05 | production-candidate |
+| 10 | 4,000,000 | 0.01 | 0.00054758 | production-candidate |
+| 1 | 4,000,000 | 0.1 | 0.0054758 | production-candidate |
+| 0.1 | 1,310,720 | 0.5 | 0.027379 | production-candidate |
+| 0.01 | 3,726,000 | 2.6941 | 0.14602 | unsuitable-for-production |
+| 0.001 | 3,918,213 | 26.17 | 1.4223 | unsuitable-for-production |
+| 0.0001 | 3,726,000 | 269.51 | 14.602 | unsuitable-for-production |
 
 `τ0 = λ0/c̄` is the exit mean collision time, the densest state in the domain.
 Courant is a molecule at `U0 + 3σ` against the smallest cell.
@@ -183,7 +187,7 @@ was not enlarged, the gas was not changed. The mesh was coarsened by the
 existing budget rule and the verdict says so; **more parcels would change none
 of the numerical criteria** (asserted in
 `tests/unit/test_cai2012ext_policy.py`). Startup passes `transient_length` 17.7
-times over in all four.
+times over in all seven.
 
 ---
 
@@ -192,7 +196,7 @@ times over in all four.
 **Startup** is Cai's: 10⁴ reference collision times, with the reference the
 **Kn = 0.01 exit state** for every case —
 `t_ref = λ_ref / c̄ = 0.002 m / 398.9 m/s = 5.0143e-6 s`, so sampling starts at
-`5.01435e-2 s`, identical in all four cases. `validate_cases.py` recomputes
+`5.01435e-2 s`, identical in all seven active cases. `validate_cases.py` recomputes
 this from `λ_ref = 0.01 D` and `c̄ = √(8kT0/πm)` without the gas module.
 
 | | Kn = 10 | Kn = 1 | Kn = 1e-3 | Kn = 1e-4 |
@@ -202,7 +206,7 @@ this from `λ_ref = 0.01 D` and `c̄ = √(8kT0/πm)` without the gas module.
 | domain transits | 17.7 | 17.7 | 17.7 | 17.7 |
 
 The reference is held deliberately — it is what the paper specifies and what
-makes the four startups the same instant. In a supersonic plume into vacuum
+makes the seven startups the same instant. In a supersonic plume into vacuum
 the time to steady state is set by transits (the slow tail of the exit
 Maxwellian filling the far field, `docs/cai2012-case.md` §5.1), and 17.7
 transits is nine times the health family's 2. That it is only 10 local
@@ -238,7 +242,7 @@ Everything is computed from the **time-averaged** fields (`rhoNMean`,
 analytical value comes from `plumetools.cai2012.analytical` — the
 free-molecular disk integral already in the repository, re-derived there from
 first principles. **The reference throughout is Cai's collisionless analytical
-solution.** There is no published DSMC at any Kn in this study; Cai's reported
+solution.** No external-study DSMC fields are imported; Cai's reported
 errors at Kn = 100 / 0.1 / 0.01 are not used as tolerances, and the study table
 has no column for them.
 
@@ -263,7 +267,7 @@ alongside. This is `post.centerline`'s method extended to every output.
 | 5 | Off-axis `u_x√β0`, `u_r√β0` | `u_r = (y u_y + z u_z)/r`, cylindrical, positive away from the axis | centre-plane cells, as 2 | **not verified** |
 | 6 | Off-axis `T/T0`, `p/p0` | `3RT = ⟨v²⟩ − |u|²` (local translational); `p = nkT`, `p/p0 = (n/n0)(T/T0)` | as 5 | **not verified** |
 | 7 | Per-case metrics, study table | §8; `results/comparison.yaml`, `results/study-table.csv` | all of the above | — |
-| 8 | Knudsen comparison | the four Kn on one figure (`knudsen-comparison.png`): centreline `n`, `U`, `T`, angular `n`, `F`, and the centreline `Δmax/λ` from §7a beside them. Normalised, the collisionless curve is the same for every Kn, so the spread is the collisional departure | as 1, 3, 4 | — |
+| 8 | Knudsen comparison | the active Kn cases on one figure (`knudsen-comparison.png`): centreline `n`, `U`, `T`, angular `n`, `F`, and the centreline `Δmax/λ` from §7a beside them. Normalised, the collisionless curve is the same for every Kn, so the spread is the collisional departure | as 1, 3, 4 | — |
 
 **The 3-D velocity in a meridional plot.** Each cell's Cartesian velocity is
 projected: `u_x` (axial), `u_r` (cylindrical radial), `u_φ = (y u_z − z u_y)/r`
@@ -327,7 +331,7 @@ documented there:
   (`post.centerline_*`), so a station is the same cells as in
   `centerline.csv`, drawn with the nozzle-plume function;
 * images of every field from `viz-diagnostics.yaml` — R-4D's entries, with
-  `KnCellMax` and `mfpResolved` on pinned ranges so the four Kn compare;
+  `KnCellMax` and `mfpResolved` on pinned ranges so the active Kn cases compare;
 * one block of this family's, `exit_plane`: the measured `KnD` and Δ_max/λ in
   the exit cells beside the target Kn and the pre-run cell/λ0. It is the check
   that what generation planned is what the run produced. On a real
@@ -411,7 +415,13 @@ startup produced in the parent study.
 
 ---
 
-## 10. Checks performed (2026-10-21, laptop, no DSMC run)
+## 10. Historical checks (2026-10-21, legacy four-case study)
+
+The table below records the earlier four-case configuration and is not the
+validation record for the new seven-case profile. Current preparation produced
+70 dictionaries for seven cases, passed 84 independent verification checks, and
+confirmed runtime-policy acceptance, idempotence and scaling registration;
+see `results/full-suite-preparation/smoke.json`. No HPC execution is claimed.
 
 | Check | How | Outcome |
 |---|---|---|

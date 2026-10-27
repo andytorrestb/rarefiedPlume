@@ -5,11 +5,12 @@
 #   ./AllcleanCases              remove solver output from each case
 #   ./AllcleanCases --dry-run    list what would be removed
 #   ./AllcleanCases --mesh       also remove each case's mesh and dictionaries
-#   ./AllcleanCases --purge      DELETE the whole Cases/ tree and manifest.yaml
+#   ./AllcleanCases --purge      DELETE the active cases tree and its manifest
 #   ./AllcleanCases --help
 #
 # Delegates to each case's own ./Allclean, which refuses to run in a directory
-# without a case.yaml. Nothing here deletes by pattern outside Cases/.
+# without a case.yaml. Active paths come from study.yaml; shared results and
+# historical cases trees are retained.
 #
 # NEVER touched:
 #   baseCase/          the template
@@ -37,38 +38,43 @@ done
 
 die() { echo "" >&2; echo "AllcleanCases: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
-
-if [ "$PURGE" -eq 1 ]; then
-    echo "### purge: this DELETES the generated tree"
-    echo "    $PWD/Cases"
-    echo "    $PWD/manifest.yaml"
-    echo "    $PWD/results"
-    echo ""
-    echo "baseCase/ and study.yaml are NOT touched, so ./generate_cases.py"
-    echo "reproduces everything."
-    if [ "$DRY" -eq 1 ]; then
-        echo ""
-        echo "--dry-run: nothing removed."
-        exit 0
-    fi
-    rm -rf Cases manifest.yaml results
-    echo "removed. Regenerate with ./generate_cases.py"
-    exit 0
-fi
-
-[ -f manifest.yaml ] || die "no manifest.yaml, so there is no record of which
-       cases belong to this study. Nothing cleaned -- use --purge to remove the
-       Cases/ tree outright."
-
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
-mapfile -t CASES < <($PYTHON - <<'PY'
-import yaml
-document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
-for entry in document.get("cases", []):
-    print(entry["path"])
+if [ "$PURGE" -eq 1 ]; then
+    $PYTHON - "$DRY" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+from plumetools.cai2012.study import load_study
+from plumetools.cai2012ext import policy
+root = Path.cwd().resolve()
+study = load_study(root / "study.yaml")
+policy.check_study(study)
+paths = [root / study.cases_dir, root / study.manifest_name]
+if any(path.is_symlink() for path in paths):
+    raise ValueError("Refusing to purge a symlinked cases tree or manifest")
+targets = [path.resolve() for path in paths]
+for target in targets:
+    if target == root or not target.is_relative_to(root):
+        raise ValueError(f"Refusing cleanup outside the active study: {target}")
+print("Purge active generated cases and manifest only; shared/legacy results are retained:")
+for target in targets:
+    print(f"    {target}")
+if int(sys.argv[1]):
+    print("--dry-run: nothing removed.")
+else:
+    for target in targets:
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
 PY
-) || die "could not read manifest.yaml"
+    exit $?
+fi
+
+LISTING=$($PYTHON -m plumetools.cai2012ext.policy --study study.yaml --all) \
+    || die "the active study manifest is missing or invalid; nothing cleaned"
+mapfile -t CASES <<< "$LISTING"
 
 echo "### cleaning ${#CASES[@]} case(s)"
 echo ""

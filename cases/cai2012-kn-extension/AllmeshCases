@@ -59,8 +59,6 @@ done
 die() { echo "" >&2; echo "AllmeshCases: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
-       ./generate_cases.py"
 
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
@@ -68,9 +66,9 @@ have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no pyth
 # record of what was generated, and a stale directory from an earlier study must
 # not be picked up as if it belonged to this one. Through the policy gate, and
 # captured BEFORE mapfile: a failure inside `< <(...)` would not reach a `||`.
-LISTING=$($PYTHON -m plumetools.cai2012ext.policy manifest.yaml --all) \
-    || die "manifest.yaml breaks the extension policy (above); nothing meshed"
-[ -n "$LISTING" ] || die "manifest.yaml lists no cases"
+LISTING=$($PYTHON -m plumetools.cai2012ext.policy --study study.yaml --all) \
+    || die "the active study manifest is missing or invalid (above); generate the cases first"
+[ -n "$LISTING" ] || die "the active manifest lists no cases"
 mapfile -t CASES <<< "$LISTING"
 
 # --------------------------------------------------------------------------- #
@@ -147,4 +145,4 @@ if [ ${#FAILED[@]} -gt 0 ]; then
 fi
 
 echo "### all ${#CASES[@]} case(s) meshed"
-echo "    next:  cd Cases/<case> && qsub runCase.sh   (one PBS job per case)"
+echo "    next:  cd <listed-case-path> && qsub runCase.sh   (one PBS job per case)"

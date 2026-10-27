@@ -22,7 +22,7 @@ import pytest
 import yaml
 
 from plumetools.cai2012.config import load_case_config
-from plumetools.cai2012ext import feasibility, hpc
+from plumetools.cai2012ext import feasibility, hpc, policy
 
 REPO = Path(__file__).resolve().parents[2]
 FAMILY = REPO / "cases" / "cai2012-kn-extension"
@@ -32,7 +32,17 @@ CASE_SCRIPTS = [FAMILY / "baseCase" / name for name in
 FAMILY_SCRIPTS = [FAMILY / name for name in ("runMeshAll.sh", "runAnalyse.sh")]
 JOB_SCRIPTS = CASE_SCRIPTS + FAMILY_SCRIPTS
 
-needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="no bash")
+def bash_executable():
+    """Prefer a native shell on Windows, rather than the WSL launch shim."""
+    if sys.platform == "win32":
+        git_bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git" / "bin" / "bash.exe"
+        if git_bash.is_file():
+            return str(git_bash)
+    return shutil.which("bash")
+
+
+BASH = bash_executable()
+needs_bash = pytest.mark.skipif(BASH is None, reason="no bash")
 needs_flock = pytest.mark.skipif(sys.platform == "win32", reason="no fcntl")
 
 
@@ -70,7 +80,7 @@ def python_env(tmp_path: Path) -> dict:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     wrapper = bin_dir / "python"
-    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+    wrapper.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
                        encoding="utf-8")
     wrapper.chmod(0o755)
     env = {key: value for key, value in os.environ.items()
@@ -207,7 +217,7 @@ def test_the_shell_script_list_is_complete():
 @pytest.mark.parametrize("script", SHELL_SCRIPTS,
                          ids=lambda p: p.relative_to(FAMILY).as_posix())
 def test_every_shell_script_parses(script):
-    result = subprocess.run(["bash", "-n", str(script)], capture_output=True,
+    result = subprocess.run([BASH, "-n", script.as_posix()], capture_output=True,
                             text=True)
     assert result.returncode == 0, result.stderr
 
@@ -231,8 +241,8 @@ def test_a_job_fails_loudly_without_its_directory_or_environment(
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("PBS_")}
     run = lambda workdir: subprocess.run(  # noqa: E731
-        ["bash", str(script)], capture_output=True, text=True, cwd=tmp_path,
-        env=env if workdir is None else {**env, "PBS_O_WORKDIR": str(workdir)})
+        [BASH, script.as_posix()], capture_output=True, text=True, cwd=tmp_path,
+        env=env if workdir is None else {**env, "PBS_O_WORKDIR": workdir.as_posix()})
 
     result = run(None)
     assert result.returncode == 1
@@ -256,7 +266,7 @@ def test_a_job_fails_loudly_without_its_directory_or_environment(
 @needs_bash
 def test_hpc_env_refuses_set_u(tmp_path):
     result = subprocess.run(
-        ["bash", "-c", f'set -u; source "{FAMILY / "hpc_env.sh"}" || echo "refused $?"'],
+        [BASH, "-c", f'set -u; source "{(FAMILY / "hpc_env.sh").as_posix()}" || echo "refused $?"'],
         capture_output=True, text=True, cwd=tmp_path)
     assert "set -u" in result.stderr
     assert result.stdout == "refused 1\n"           # before any module is touched
@@ -271,7 +281,7 @@ def test_hpc_env_hides_the_callers_arguments_from_the_openfoam_bashrc(tmp_path):
     for name in ("setup-env.sh", "activate"):
         (stubs / name).write_text("", encoding="utf-8")
     seen = tmp_path / "bashrc-saw"
-    (stubs / "bashrc").write_text(f'echo "$#:$*" > "{seen}"\n', encoding="utf-8")
+    (stubs / "bashrc").write_text(f'echo "$#:$*" > "{seen.as_posix()}"\n', encoding="utf-8")
 
     text = read(FAMILY / "hpc_env.sh")
     for site, stub in (
@@ -280,13 +290,13 @@ def test_hpc_env_hides_the_callers_arguments_from_the_openfoam_bashrc(tmp_path):
             ("/home2/torresfa/scratch/OpenFOAM/rarefiedPlume/.venv/bin/activate",
              "activate")):
         assert site in text
-        text = text.replace(site, str(stubs / stub))
+        text = text.replace(site, (stubs / stub).as_posix())
     env_file = tmp_path / "hpc_env.sh"
     env_file.write_text(text, encoding="utf-8")
 
-    script = (f'set -eo pipefail; spack() {{ echo "{stubs}"; }}; module() {{ :; }}; '
-              f'source "{env_file}"; echo "args:$#:$*"; echo "pv:$PVPYTHON_PATH"')
-    result = subprocess.run(["bash", "-c", script, "job", "case.yaml", "other"],
+    script = (f'set -eo pipefail; spack() {{ echo "{stubs.as_posix()}"; }}; module() {{ :; }}; '
+              f'source "{env_file.as_posix()}"; echo "args:$#:$*"; echo "pv:$PVPYTHON_PATH"')
+    result = subprocess.run([BASH, "-c", script, "job", "case.yaml", "other"],
                             capture_output=True, text=True, cwd=tmp_path,
                             env={**os.environ, "PVPYTHON_PATH": "/my/pvpython"})
     assert result.returncode == 0, result.stderr
@@ -311,7 +321,7 @@ def test_run_case_labels_runs_records_and_then_does_not_record_again(tmp_path):
         encoding="utf-8")
     env = {**python_env(tmp_path), "PBS_O_WORKDIR": str(case)}
 
-    result = subprocess.run(["bash", str(case / "runCase.sh")], capture_output=True,
+    result = subprocess.run([BASH, (case / "runCase.sh").as_posix()], capture_output=True,
                             text=True, cwd=tmp_path, env=env, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "stand-in environment" in result.stdout
@@ -325,7 +335,7 @@ def test_run_case_labels_runs_records_and_then_does_not_record_again(tmp_path):
     assert measurements[0]["production_status"] == feasibility.STATUS_UNSUITABLE
 
     model.unlink()
-    result = subprocess.run(["bash", str(case / "runCase.sh")], capture_output=True,
+    result = subprocess.run([BASH, (case / "runCase.sh").as_posix()], capture_output=True,
                             text=True, cwd=tmp_path, env=env, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "had already reached endTime" in result.stdout
@@ -339,10 +349,12 @@ def test_run_case_labels_runs_records_and_then_does_not_record_again(tmp_path):
 @needs_bash
 def test_allpostcases_no_analyse_skips_the_study_analysis(tmp_path):
     family = tmp_path / "fam"
-    (family / "Cases" / "Kn1_np1x").mkdir(parents=True)
+    (family / "Cases_full_suite" / "Kn1_np1x").mkdir(parents=True)
     shutil.copy2(FAMILY / "AllpostCases", family / "AllpostCases")
-    (family / "manifest.yaml").write_text(yaml.safe_dump({"cases": [
-        {"name": "Kn1_np1x", "path": "Cases/Kn1_np1x", "Kn": 1.0,
+    shutil.copy2(FAMILY / "study.yaml", family / "study.yaml")
+    (family / "manifest-full-suite.yaml").write_text(yaml.safe_dump({
+        "meta": {"knudsen_suite": policy.FULL_SUITE}, "cases": [
+        {"name": "Kn1_np1x", "path": "Cases_full_suite/Kn1_np1x", "Kn": 1.0,
          "feasibility": {"status": "production-candidate"}}]}), encoding="utf-8")
     ran = family / "analysed"
     (family / "analyse.py").write_text(
@@ -350,7 +362,7 @@ def test_allpostcases_no_analyse_skips_the_study_analysis(tmp_path):
         encoding="utf-8")
     env = python_env(tmp_path)
     run = lambda *flags: subprocess.run(  # noqa: E731
-        ["bash", str(family / "AllpostCases"), *flags], capture_output=True,
+        [BASH, (family / "AllpostCases").as_posix(), *flags], capture_output=True,
         text=True, cwd=tmp_path, env=env, timeout=300)
 
     result = run("--case", "Kn1_np1x", "--no-viz", "--no-analyse")
@@ -365,6 +377,27 @@ def test_allpostcases_no_analyse_skips_the_study_analysis(tmp_path):
     result = run("--analyse-only", "--no-analyse")
     assert result.returncode == 1
     assert "opposite" in result.stderr
+
+
+@needs_bash
+def test_cleanup_dry_run_scopes_active_suite_and_preserves_legacy_results(tmp_path):
+    family = tmp_path / "family"
+    family.mkdir()
+    shutil.copy2(FAMILY / "AllcleanCases", family / "AllcleanCases")
+    shutil.copy2(FAMILY / "study.yaml", family / "study.yaml")
+    active = family / "Cases_full_suite" / "Kn100_np1x" / "sentinel"
+    legacy = family / "Cases" / "Kn1_np1x" / "results" / "sentinel"
+    shared = family / "results" / "cost-model.yaml"
+    for item in (active, legacy, shared):
+        item.parent.mkdir(parents=True, exist_ok=True)
+        item.write_text("preserved", encoding="utf-8")
+    result = subprocess.run([BASH, (family / "AllcleanCases").as_posix(), "--purge", "--dry-run"],
+                            capture_output=True, text=True, cwd=tmp_path,
+                            env=python_env(tmp_path), timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Cases_full_suite" in result.stdout and "manifest-full-suite.yaml" in result.stdout
+    assert "--dry-run: nothing removed" in result.stdout
+    assert all(item.read_text(encoding="utf-8") == "preserved" for item in (active, legacy, shared))
 
 
 # --------------------------------------------------------------------------- #

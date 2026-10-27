@@ -80,13 +80,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 [ "$ANALYSE_ONLY" -eq 1 ] && [ "$ANALYSE" -eq 0 ] \
     && die "--analyse-only and --no-analyse ask for opposite things"
-[ -f manifest.yaml ] || die "no manifest.yaml. Generate the cases first:
-       ./generate_cases.py"
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
-LISTING=$($PYTHON -m plumetools.cai2012ext.policy manifest.yaml --all) \
-    || die "manifest.yaml breaks the extension policy (above); nothing processed"
-[ -n "$LISTING" ] || die "manifest.yaml lists no cases"
+LISTING=$($PYTHON -m plumetools.cai2012ext.policy --study study.yaml --all) \
+    || die "the active study manifest is missing or invalid (above); nothing processed"
+[ -n "$LISTING" ] || die "the active manifest lists no cases"
 mapfile -t CASES <<< "$LISTING"
 
 if [ ${#SELECT[@]} -gt 0 ]; then
@@ -136,9 +134,10 @@ from pathlib import Path
 import yaml
 
 from plumetools.cai2012ext.vizspec import write_group_specs
+from plumetools.cai2012.study import load_study
 
 wanted = set(sys.argv[1:])
-manifest = yaml.safe_load(Path("manifest.yaml").read_text(encoding="utf-8"))
+manifest = yaml.safe_load(Path(load_study("study.yaml").manifest_name).read_text(encoding="utf-8"))
 for name, (path, cases) in write_group_specs(
         manifest, Path("viz.yaml"), Path("results") / "viz-specs").items():
     chosen = [c for c in cases if c in wanted]

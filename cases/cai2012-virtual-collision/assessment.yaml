@@ -1,0 +1,35 @@
+# All controls below are numerical; no physical parameters are fitted to DSMC.
+families: [cai2012, cai2012-kn-extension]
+kn: [100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
+source_case: cases/cai2012-kn-extension/baseCase
+smoke:
+  kn: [10]
+  samples: 64
+  hazard_steps: 8
+  partner_radial: 4
+  partner_azimuthal: 8
+  partner_speed: 12
+  batches: 4
+  seed: 2026
+  domain_length_D: 12
+  domain_radius_D: 12
+  chunk_size: 64
+full:
+  samples: 2048
+  hazard_steps: 24
+  partner_radial: 4
+  partner_azimuthal: 16
+  partner_speed: 12
+  batches: 8
+  seed: 2026
+  domain_length_D: 20
+  domain_radius_D: 16
+  chunk_size: 128
+assessment_bins:
+  x_count: 20
+  r_count: 20
+  x_max_over_D: 10
+  r_max_over_D: 10
+  # Cell-volume quadrature into the SAME cylindrical bins for every model.
+  # Empty bins remain missing; no separate per-prediction assessment masks.
+  density_floor_over_n0: 0.001

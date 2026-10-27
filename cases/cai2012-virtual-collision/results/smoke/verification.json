@@ -1,0 +1,29 @@
+{
+  "audited_source_revision": "ad4cdc636b094b3bf1e0b601e7967b8b927370cc",
+  "new_focused_suite": {
+    "passed": 33,
+    "failed": 0,
+    "elapsed_s": 32.10,
+    "command": "python -m pytest -q tests/unit/test_virtualcollision_kernel.py tests/unit/test_virtualcollision_model.py tests/unit/test_virtualcollision_assessment.py"
+  },
+  "affected_legacy_suite": {
+    "passed": 189,
+    "failed": 3,
+    "elapsed_s": 273.50,
+    "command": "python -m pytest -q tests/unit/test_cai2012_analytical.py tests/unit/test_cai2012_gas.py tests/unit/test_cai2012ext_comparison.py tests/unit/test_cai2012ext_policy.py tests/unit/test_cai2012ext_interface_case.py",
+    "same_failures_reproduced_from_pristine_HEAD": true,
+    "pristine_three_node_elapsed_s": 30.92,
+    "failures": [
+      "test_cai2012ext_policy.py::test_overrides_that_would_break_an_invariant_are_refused[resolution-target_particles_per_cell-20.0]",
+      "test_cai2012ext_interface_case.py::test_the_manifest_records_every_verdict",
+      "test_cai2012ext_interface_case.py::test_guard_refuses_an_infeasible_or_incomplete_production_case"
+    ]
+  },
+  "cli_help": "passed",
+  "inventory": "passed; 17 records explicitly excluded from primary accuracy assessment",
+  "bounded_smoke": "passed; numerical convergence and scientific effectiveness not established",
+  "pbs_shell_syntax": "passed; bash -n only",
+  "production_DSMC_run": false,
+  "cases_generated": false,
+  "scheduler_jobs_submitted": false
+}

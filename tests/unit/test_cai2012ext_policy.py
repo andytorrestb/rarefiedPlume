@@ -25,6 +25,7 @@ from plumetools.cai2012.study import load_study
 from plumetools.cai2012ext import (
     EXCLUDED_KNUDSEN,
     EXTENSION_KNUDSEN,
+    FULL_SUITE_KNUDSEN,
     PARTICLE_MULTIPLIERS,
     feasibility,
     policy,
@@ -39,6 +40,14 @@ PARENT = REPO / "cases" / "cai2012"
 
 def shipped_study_document() -> dict:
     return yaml.safe_load((FAMILY / "study.yaml").read_text(encoding="utf-8"))
+
+
+def legacy_study_document() -> dict:
+    document = shipped_study_document()
+    document["meta"].pop("knudsen_suite", None)
+    document["kn_cases"] = [c for c in document["kn_cases"]
+                            if c["Kn"] in EXTENSION_KNUDSEN]
+    return document
 
 
 def write_study(tmp_path, document) -> Path:
@@ -95,19 +104,20 @@ def test_a_knudsen_number_typed_as_a_decimal_is_still_recognised():
 # the study
 # --------------------------------------------------------------------------- #
 
-def test_the_shipped_study_is_exactly_the_extension(tmp_path):
+def test_the_shipped_study_is_exactly_the_full_decade_suite(tmp_path):
     study = load_study(FAMILY / "study.yaml")
     policy.check_study(study)
     cases = study.expand()
-    assert len(cases) == 4
-    assert sorted(c.knudsen for c in cases) == sorted(EXTENSION_KNUDSEN)
+    assert len(cases) == 7
+    assert sorted(c.knudsen for c in cases) == sorted(FULL_SUITE_KNUDSEN)
     assert {c.multiplier for c in cases} == {1.0}
-    assert not any(policy.is_excluded(c.knudsen) for c in study.all_cases())
+    assert policy.suite_name(study) == policy.FULL_SUITE
+    assert policy.expected_case_count(study) == 7
 
 
 @pytest.mark.parametrize("excluded", [0.01, 0.1, 100.0])
 def test_an_excluded_kn_is_refused_even_when_disabled(tmp_path, excluded):
-    document = shipped_study_document()
+    document = legacy_study_document()
     document["kn_cases"].append(
         {"name": f"Kn{excluded:g}".replace(".", "p"), "Kn": excluded,
          "enabled": False})
@@ -144,7 +154,6 @@ def test_the_parent_study_multipliers_are_not_inherited(tmp_path, key):
     ("exit", "T0_K", 350.0),
     ("dsmc", "sampling_domain_transits", 1.5),
     ("dsmc", "transient_basis", "transits"),
-    ("resolution", "target_particles_per_cell", 20.0),
 ])
 def test_overrides_that_would_break_an_invariant_are_refused(tmp_path, section,
                                                              key, value):
@@ -159,6 +168,33 @@ def test_a_per_kn_mesh_budget_is_an_allowed_override(tmp_path):
     document["kn_cases"][2]["overrides"] = {"mesh": {"max_cells": 40000000},
                                             "dsmc": {"n_subdomains": 256}}
     policy.check_study(load_study(write_study(tmp_path, document)))
+
+
+def test_a_per_kn_parcel_target_is_an_allowed_numerical_override(tmp_path):
+    document = shipped_study_document()
+    document["kn_cases"][0]["overrides"] = {"resolution": {"target_particles_per_cell": 20.0}}
+    policy.check_study(load_study(write_study(tmp_path, document)))
+
+
+def test_legacy_study_still_requires_exactly_four_kn(tmp_path):
+    study = load_study(write_study(tmp_path, legacy_study_document()))
+    policy.check_study(study)
+    assert policy.suite_name(study) == policy.LEGACY_SUITE
+    assert policy.expected_case_count(study) == 4
+
+
+@pytest.mark.parametrize("source", ["unknown", {"meta": {"knudsen_suite": "unknown"}}])
+def test_unknown_suite_is_not_permissive(source):
+    with pytest.raises(policy.ExtensionError, match="Unknown knudsen_suite"):
+        policy.suite_knudsen(source)
+
+
+def test_full_suite_requires_every_decade(tmp_path):
+    document = shipped_study_document()
+    document["meta"]["knudsen_suite"] = policy.FULL_SUITE
+    document["kn_cases"] = [c for c in document["kn_cases"] if c["Kn"] != 0.01]
+    with pytest.raises(policy.ExtensionError, match="does not enable Kn"):
+        policy.check_study(load_study(write_study(tmp_path, document)))
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +226,24 @@ def test_a_template_with_another_startup_reference_is_refused():
 def test_a_template_at_an_excluded_kn_is_refused():
     with pytest.raises(policy.ExtensionError, match="Cai's own"):
         policy.check_template(template_at(100.0))
+
+
+@pytest.mark.parametrize("kn", [100., .1, .01])
+def test_explicit_full_suite_template_permits_paper_kn(kn):
+    cfg = template_at(kn)
+    cfg = dataclasses.replace(cfg, meta={**cfg.meta, "knudsen_suite": policy.FULL_SUITE})
+    policy.check_template(cfg)
+
+
+def test_template_can_use_explicit_study_profile():
+    policy.check_template(template_at(100.), suite=policy.FULL_SUITE)
+
+
+def test_unknown_template_profile_is_refused():
+    cfg = template_at(10.)
+    cfg = dataclasses.replace(cfg, meta={**cfg.meta, "knudsen_suite": "unknown"})
+    with pytest.raises(policy.ExtensionError, match="Unknown knudsen_suite"):
+        policy.check_template(cfg)
 
 
 def test_everything_but_five_declared_keys_is_inherited_from_health():
@@ -257,6 +311,91 @@ def test_the_command_line_gate_exits_2_on_an_excluded_kn(tmp_path, capsys):
         encoding="utf-8")
     assert policy.main([str(path), "--all"]) == 2
     assert capsys.readouterr().out == ""
+
+
+def test_full_suite_manifest_can_list_all_seven_cases():
+    manifest = _manifest(*[{"name": f"Kn{k:g}", "Kn": k,
+                            "feasibility": {"status": "production-candidate"}}
+                           for k in FULL_SUITE_KNUDSEN])
+    manifest["meta"] = {"knudsen_suite": policy.FULL_SUITE}
+    assert policy.check_manifest(manifest) == []
+    runnable, refused = policy.schedulable(manifest)
+    assert len(runnable) == 7 and not refused
+
+
+def test_unknown_manifest_profile_refuses_all_cases():
+    manifest = _manifest({"name": "Kn1", "Kn": 1.})
+    manifest["meta"] = {"knudsen_suite": "unknown"}
+    with pytest.raises(policy.ExtensionError, match="Unknown knudsen_suite"):
+        policy.schedulable(manifest, allow_unsuitable=True)
+
+
+def test_policy_cli_resolves_active_manifest_from_study(tmp_path, capsys):
+    document = legacy_study_document()
+    document["manifest_name"] = "manifest-selected.yaml"
+    study_path = write_study(tmp_path, document)
+    manifest = _manifest({"name": "Kn1_np1x", "path": "Cases/Kn1_np1x", "Kn": 1.,
+                          "feasibility": {"status": "production-candidate"}})
+    (tmp_path / "manifest-selected.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    assert policy.main(["--study", str(study_path), "--all"]) == 0
+    assert capsys.readouterr().out.strip() == "Cases/Kn1_np1x"
+
+
+def test_hpc_guard_requires_full_profile_on_paper_case(tmp_path):
+    from plumetools.cai2012ext import hpc
+    data = yaml.safe_load((FAMILY / "baseCase/case.yaml").read_text(encoding="utf-8"))
+    data["exit"]["knudsen"] = 100.
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert hpc.guard(tmp_path) is not None
+    data["meta"]["knudsen_suite"] = policy.FULL_SUITE
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert hpc.guard(tmp_path) is None
+
+
+def test_full_low_kn_label_preserves_numerical_and_source_warnings(tmp_path):
+    from plumetools.cai2012ext import hpc
+    data = yaml.safe_load((FAMILY / "baseCase/case.yaml").read_text(encoding="utf-8"))
+    data["exit"]["knudsen"] = .0001
+    data["meta"]["knudsen_suite"] = policy.FULL_SUITE
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert hpc.guard(tmp_path) is None
+    text = hpc.label(tmp_path)
+    assert "UNSUITABLE FOR PRODUCTION" in text
+    assert "cell_over_mean_free_path" in text and "time_step_collision_time" in text
+    assert "known_low_kn_inflow_surface" in text
+    assert (tmp_path / "NON-PRODUCTION").is_file()
+    assert (tmp_path / "KNOWN-LIMITATIONS").is_file()
+
+
+@pytest.mark.parametrize("kn", [100., .1, .01])
+def test_full_paper_cases_pass_direct_post_context(tmp_path, kn):
+    from plumetools.cai2012ext import interface_case
+    data = yaml.safe_load((FAMILY / "baseCase/case.yaml").read_text(encoding="utf-8"))
+    data["exit"]["knudsen"] = kn
+    data["meta"]["knudsen_suite"] = policy.FULL_SUITE
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    context = interface_case.post_context(tmp_path)
+    assert context.mode == "direct" and context.refusal is None
+    assert context.exit_state.knudsen == pytest.approx(kn)
+
+
+def test_full_paper_case_diagnostics_reaches_field_processing(tmp_path, monkeypatch):
+    from plumetools.cai2012ext import diagnostics
+    data = yaml.safe_load((FAMILY / "baseCase/case.yaml").read_text(encoding="utf-8"))
+    data["exit"]["knudsen"] = 100.
+    data["meta"]["knudsen_suite"] = policy.FULL_SUITE
+    (tmp_path / "case.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    (tmp_path / "diagnostics.yaml").write_bytes((FAMILY / "baseCase/diagnostics.yaml").read_bytes())
+
+    class FieldProcessingReached(Exception):
+        pass
+
+    def no_production_fields(*args, **kwargs):
+        raise FieldProcessingReached("The policy accepted this configured case; no DSMC fields are run here")
+
+    monkeypatch.setattr(diagnostics, "diagnose", no_production_fields)
+    with pytest.raises(FieldProcessingReached):
+        diagnostics.run(tmp_path)
 
 
 # --------------------------------------------------------------------------- #
@@ -400,8 +539,3 @@ def test_the_case_scripts_are_cai2012s_byte_for_byte(name):
 def test_the_audit_script_is_the_health_familys_byte_for_byte():
     assert (FAMILY / "baseCase" / "Allaudit.py").read_bytes() == (
         HEALTH / "baseCase" / "Allaudit.py").read_bytes()
-
-
-def test_allcleancases_is_cai2012s_byte_for_byte():
-    assert (FAMILY / "AllcleanCases").read_bytes() == (
-        PARENT / "AllcleanCases").read_bytes()
