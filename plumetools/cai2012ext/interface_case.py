@@ -1062,17 +1062,15 @@ class PostContext:
 
 def post_context(case_dir: Path) -> PostContext:
     """The direct-exit derivation unchanged, or the interface one."""
-    from plumetools.cai2012ext import generation
+    from plumetools.cai2012ext import direct_case
 
     case_dir = Path(case_dir)
     if interface.load_interface(case_dir) is None:
-        cfg, geom, exit_state, plan, run, nozzle, particles, checks = \
-            generation.derive(case_dir)
-        verdict = feasibility.assess(cfg, geom, exit_state, plan, run, nozzle,
-                                     particles, checks)
-        refusal = policy.direct_exit_problem(cfg, str(case_dir))
-        return PostContext("direct", cfg, geom, exit_state, run, verdict,
-                           float(nozzle.area_error), None, refusal)
+        case = direct_case.derive(case_dir)
+        verdict = feasibility.assess_case(case)
+        refusal = policy.direct_exit_problem(case.cfg, str(case_dir))
+        return PostContext("direct", case.cfg, case.geom, case.exit_state, case.run,
+                           verdict, float(case.nozzle.area_error), None, refusal)
     derived = derive(case_dir)
     assessment = assess(derived)
     refusal = knudsen_problem(derived.cfg, derived.settings, case_dir.name)

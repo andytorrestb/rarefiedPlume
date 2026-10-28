@@ -18,11 +18,11 @@ import zipfile
 import numpy as np
 import yaml
 
-from plumetools.cai2012 import checks, inflow, mesh, post
+from plumetools.cai2012 import inflow, post
 from plumetools.cai2012.config import load_case_config, validate
 from plumetools.cai2012.geometry import from_config
 from plumetools.cai2012.study import load_study
-from plumetools.cai2012ext import feasibility, interface, policy, provenance
+from plumetools.cai2012ext import direct_case, feasibility, interface, policy, provenance
 
 
 TARGET_DECADES = (100.0, 10.0, 1.0, 0.1, 0.01, 0.001, 0.0001)
@@ -116,19 +116,9 @@ def _replace_config(cfg, overrides):
 
 def _assess_config(cfg):
     """Use existing bounded analytical planners, never write mesh dictionaries."""
-    geom = from_config(cfg)
-    state = inflow.from_config(cfg)
-    plan = mesh.plan(cfg, geom, state)
-    run = inflow.derive_run_settings(cfg, state, geom,
-        min_cell_size_m=plan.min_cell_size_m,
-        exit_cell_volume_m3=plan.exit_cell_volume_m3)
-    nozzle = mesh.predicted_nozzle_faces(plan, geom)
-    particles = mesh.estimate_particles(plan, geom, state, run.n_equivalent_particles)
-    check = checks.run_checks(cfg, geom, state, plan, run,
-                             nozzle=nozzle, particles=particles)
-    assessment = feasibility.assess(cfg, geom, state, plan, run, nozzle,
-                                    particles, check)
-    return provenance.exit_conditions(cfg, geom, state), assessment
+    case = direct_case.derive_config(cfg)
+    assessment = feasibility.assess_case(case)
+    return provenance.exit_conditions(cfg, case.geom, case.exit_state), assessment
 
 
 def _stratum(cfg):

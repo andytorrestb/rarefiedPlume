@@ -435,10 +435,10 @@ def test_the_direct_exit_post_context_is_the_parent_derivation(generated, tmp_pa
     shutil.copytree(FAMILY / "baseCase", case,
                     ignore=shutil.ignore_patterns("system", "constant", "results"))
     context = interface_case.post_context(case)
-    cfg, geom, exit_state, plan, run, nozzle, particles, report = generation.derive(case)
+    derived = generation.derive(case)
     assert context.mode == "direct" and context.interface is None
-    assert context.run == run
-    assert context.nozzle_area_error == nozzle.area_error
+    assert context.run == derived.run
+    assert context.nozzle_area_error == derived.nozzle.area_error
 
 
 @pytest.mark.skipif(sys.platform == "win32",

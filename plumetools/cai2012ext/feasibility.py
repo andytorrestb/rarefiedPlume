@@ -193,13 +193,21 @@ def record_measurement(path: Path, entry: dict) -> Path:
     return path
 
 
+def assess_case(case, *, cost_model=None, cost_origin: str | None = None) -> dict:
+    """:func:`assess` of a :class:`~plumetools.cai2012ext.direct_case.DirectCase`."""
+    return assess(case.cfg, case.geom, case.exit_state, case.plan, case.run,
+                  case.nozzle, case.particles, case.report,
+                  cost_model=cost_model, cost_origin=cost_origin)
+
+
 def assess(cfg, geom, exit_state, plan, run, nozzle, particles, report, *,
            cost_model=None, cost_origin: str | None = None) -> dict:
     """Read one fully derived case against the production criteria.
 
     Args:
-        cfg, geom, exit_state, plan, run, nozzle, particles, report: exactly
-            what ``generate_cases.derive`` returns for the case.
+        cfg, geom, exit_state, plan, run, nozzle, particles, report: the
+            attributes of a :class:`~plumetools.cai2012ext.direct_case.DirectCase`
+            -- :func:`assess_case` passes them.
         cost_model: a :class:`plumetools.cai2012.health.CostModel`, or ``None``
             to skip the wall-clock estimate.
         cost_origin: where the model's measurements live, for the record.
