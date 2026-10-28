@@ -52,8 +52,10 @@ import yaml
 from plumetools import geometry as facegeom
 from plumetools.cai2012 import dictionaries, foamfields
 from plumetools.cai2012 import inflow as cai_inflow
-from plumetools.cai2012.config import load_case_config
+from plumetools.cai2012.config import CaiCaseConfig, load_case_config
+from plumetools.cai2012.geometry import CaiGeometry
 from plumetools.cai2012.geometry import from_config as cai_geometry
+from plumetools.cai2012.inflow import ExitState, RunSettings
 from plumetools.cai2012ext import feasibility, interface, interface_mesh, policy
 from plumetools.foamio import volfield
 from plumetools.foamio.patchfields import nonuniform_value_entry
@@ -110,28 +112,83 @@ class _RetainedState:
 
 
 @dataclass(frozen=True)
+class InterfacePlan:
+    """What a meshable interface case runs at -- all of it, or none of it.
+
+    Attributes:
+        mesh_plan: the lattice and snappyHexMesh plan around the sphere.
+        run: time step, averaging window and particle weight, set at the
+            declared reference cell rather than the exit cell.
+        reference: the reference cell's state: ``identity``,
+            ``number_density_per_m3``, ``characteristic_speed_m_per_s``,
+            ``collision_time_s``.
+        parcels: estimated parcels in the retained box at steady state.
+        ideal_flux: the flux balance on the exact (unmeshed) sphere.
+        resolution: planned cell / mean free path along the axis and the core
+            edge, and the cells the criterion would need.
+    """
+
+    mesh_plan: interface_mesh.InterfaceMeshPlan
+    run: RunSettings
+    reference: dict
+    parcels: float
+    ideal_flux: dict
+    resolution: dict
+
+
+@dataclass(frozen=True)
 class Derived:
-    """Everything an interface case runs at. Built only by :func:`derive`."""
+    """Everything an interface case runs at. Built only by :func:`derive`.
+
+    ``planned`` is set exactly when an admissible sphere was found and its
+    mesh planned, and then holds every planned quantity. When it is ``None``,
+    ``selection`` (no admissible sphere) or ``mesh_error`` (planning failed)
+    says why; nothing downstream has to infer which from the fields that are
+    missing.
+
+    ``mesh_plan``, ``run``, ``reference``, ``parcels``, ``ideal_flux`` and
+    ``resolution`` read through to ``planned`` -- ``None`` when it is -- for
+    code written against the earlier flat layout.
+    """
 
     case_dir: Path
-    cfg: object
-    geom: object
-    exit_state: object
+    cfg: CaiCaseConfig
+    geom: CaiGeometry
+    exit_state: ExitState
     settings: interface.InterfaceConfig
     raw: dict
     source: interface.EquivalentSource
     selection: interface.SphereSelection
-    mesh_plan: interface_mesh.InterfaceMeshPlan | None = None
-    run: object = None
-    reference: dict | None = None
-    parcels: float | None = None
-    ideal_flux: dict | None = None
-    resolution: dict | None = None
+    planned: InterfacePlan | None = None
     mesh_error: str | None = None
 
     @property
     def meshable(self) -> bool:
-        return self.mesh_plan is not None and self.run is not None
+        return self.planned is not None
+
+    @property
+    def mesh_plan(self) -> interface_mesh.InterfaceMeshPlan | None:
+        return None if self.planned is None else self.planned.mesh_plan
+
+    @property
+    def run(self) -> RunSettings | None:
+        return None if self.planned is None else self.planned.run
+
+    @property
+    def reference(self) -> dict | None:
+        return None if self.planned is None else self.planned.reference
+
+    @property
+    def parcels(self) -> float | None:
+        return None if self.planned is None else self.planned.parcels
+
+    @property
+    def ideal_flux(self) -> dict | None:
+        return None if self.planned is None else self.planned.ideal_flux
+
+    @property
+    def resolution(self) -> dict | None:
+        return None if self.planned is None else self.planned.resolution
 
 
 def estimate_parcels(source, settings, geom, radius_m: float, weight: float,
@@ -250,8 +307,9 @@ def derive(case_dir: Path) -> Derived:
                 mean_free_path_m=float(at_interface["lambda"][0])).retained_cells
         except ValueError:
             resolution["cells_to_meet_criterion"] = None
-    return Derived(**base, mesh_plan=mesh_plan, run=run, reference=reference,
-                   parcels=parcels, ideal_flux=ideal, resolution=resolution)
+    return Derived(**base, planned=InterfacePlan(
+        mesh_plan=mesh_plan, run=run, reference=reference, parcels=parcels,
+        ideal_flux=ideal, resolution=resolution))
 
 
 def _check_resources(raw, case_dir) -> None:
@@ -332,8 +390,9 @@ def assess(derived: Derived, *, cost_model=None, cost_origin=None) -> dict:
     if selection.admissible and derived.mesh_error:
         add("interface_mesh", "numerical", None, None, False, derived.mesh_error)
 
-    if derived.meshable:
-        plan, run, ref = derived.mesh_plan, derived.run, derived.reference
+    planned = derived.planned
+    if planned is not None:
+        plan, run, ref = planned.mesh_plan, planned.run, planned.reference
         add("interface_radius_set_by", "interface", None, None, True,
             f"R_interface is set by the {selection.limited_by}"
             + ("" if selection.limited_by == "bird" else
@@ -346,8 +405,8 @@ def assess(derived: Derived, *, cost_model=None, cost_origin=None) -> dict:
             f"{plan.core_cell_size_m:.4e} m core"
             + (f"; lambda at the interface asked for "
                f"{plan.requested_cell_size_m:.4e} m, which needs "
-               + (f"{derived.resolution['cells_to_meet_criterion']:.3e}"
-                  if derived.resolution.get("cells_to_meet_criterion") else "more than")
+               + (f"{planned.resolution['cells_to_meet_criterion']:.3e}"
+                  if planned.resolution.get("cells_to_meet_criterion") else "more than")
                + f" retained cells against mesh.max_cells = {plan.max_cells:,}"
                if plan.coarsened else ""))
         limit = float(cfg.checks.max_cell_over_mfp)
@@ -355,8 +414,8 @@ def assess(derived: Derived, *, cost_model=None, cost_origin=None) -> dict:
             plan.cell_over_mfp <= limit,
             f"the interface core cell {plan.core_cell_size_m:.4e} m is "
             f"{plan.cell_over_mfp:.3g} closure mean free paths at (R, 0)")
-        worst = max(derived.resolution["axis"]["max_cell_over_lambda"],
-                    derived.resolution["core_edge"]["max_cell_over_lambda"])
+        worst = max(planned.resolution["axis"]["max_cell_over_lambda"],
+                    planned.resolution["core_edge"]["max_cell_over_lambda"])
         add("downstream_resolution_estimate", "estimate", worst, limit,
             worst <= limit,
             f"largest planned cell/lambda along the axis and core edge is "
@@ -392,10 +451,10 @@ def assess(derived: Derived, *, cost_model=None, cost_origin=None) -> dict:
             f"{run.exit_particles_per_cell:.1f} parcels in the declared reference "
             f"cell ({ref['identity']}); occupancy elsewhere is measured after "
             f"the run")
-        add("parcel_count", "resource", derived.parcels, feasibility.PARCEL_LIMIT,
-            derived.parcels <= feasibility.PARCEL_LIMIT,
-            f"an estimated {derived.parcels:.3e} parcels at steady state")
-        balance = derived.ideal_flux
+        add("parcel_count", "resource", planned.parcels, feasibility.PARCEL_LIMIT,
+            planned.parcels <= feasibility.PARCEL_LIMIT,
+            f"an estimated {planned.parcels:.3e} parcels at steady state")
+        balance = planned.ideal_flux
         residual = max(abs(balance["net_mass_residual"]),
                        abs(balance["gross_mass_residual"]),
                        abs(balance["gross_energy_residual"]))
@@ -509,8 +568,9 @@ def _memory(derived: Derived) -> dict:
                            "for this solver at these densities "
                            "(resources.bytes_per_cell, bytes_per_parcel); collect "
                            "them from the smoke run's log and set them"}
-    estimate = (float(per_cell) * derived.mesh_plan.retained_cells
-                + float(per_parcel) * derived.parcels)
+    planned = derived.planned
+    estimate = (float(per_cell) * planned.mesh_plan.retained_cells
+                + float(per_parcel) * planned.parcels)
     within = None if ceiling is None else estimate <= float(ceiling)
     return {"within": within, "estimate_bytes": estimate, "ceiling_bytes": ceiling,
             "message": f"~{estimate / 1024 ** 3:.1f} GiB from the user-supplied "
@@ -519,7 +579,8 @@ def _memory(derived: Derived) -> dict:
 
 
 def _cost(derived: Derived, cost_model, cost_origin) -> dict:
-    plan, run, parcels = derived.mesh_plan, derived.run, derived.parcels
+    planned = derived.planned
+    plan, run, parcels = planned.mesh_plan, planned.run, planned.parcels
     fields = feasibility.FIELD_BYTES_PER_CELL * plan.retained_cells
     cloud = feasibility.CLOUD_BYTES_PER_PARCEL * parcels
     cost = {
@@ -574,12 +635,12 @@ def report(derived: Derived, assessment: dict | None = None, *,
         out["angular_shape_comparison"] = interface.angular_shape_comparison(source)
     if derived.meshable:
         out.update({
-            "mesh": derived.mesh_plan.as_dict(),
-            "run": derived.run.as_dict(),
-            "reference_cell": derived.reference,
-            "estimated_parcels": derived.parcels,
-            "ideal_sphere_flux_balance": derived.ideal_flux,
-            "resolution_estimate": derived.resolution,
+            "mesh": derived.planned.mesh_plan.as_dict(),
+            "run": derived.planned.run.as_dict(),
+            "reference_cell": derived.planned.reference,
+            "estimated_parcels": derived.planned.parcels,
+            "ideal_sphere_flux_balance": derived.planned.ideal_flux,
+            "resolution_estimate": derived.planned.resolution,
         })
     if decision_table:
         r_max, _ = interface.domain_radius_limit(derived.cfg, settings)
@@ -633,15 +694,15 @@ def manifest_entry(root: Path, name: str, derived: Derived, assessment: dict,
     }
     if derived.meshable:
         entry.update({
-            "n_cells": int(derived.mesh_plan.retained_cells),
-            "core_cell_size_m": derived.mesh_plan.core_cell_size_m,
-            "cell_over_interface_mfp": derived.mesh_plan.cell_over_mfp,
-            "deltaT_s": float(derived.run.delta_t_s),
-            "n_equivalent_particles": float(derived.run.n_equivalent_particles),
-            "average_start_s": float(derived.run.average_start_s),
-            "end_time_s": float(derived.run.end_time_s),
-            "n_steps": int(derived.run.n_steps),
-            "estimated_parcels": float(derived.parcels),
+            "n_cells": int(derived.planned.mesh_plan.retained_cells),
+            "core_cell_size_m": derived.planned.mesh_plan.core_cell_size_m,
+            "cell_over_interface_mfp": derived.planned.mesh_plan.cell_over_mfp,
+            "deltaT_s": float(derived.planned.run.delta_t_s),
+            "n_equivalent_particles": float(derived.planned.run.n_equivalent_particles),
+            "average_start_s": float(derived.planned.run.average_start_s),
+            "end_time_s": float(derived.planned.run.end_time_s),
+            "n_steps": int(derived.planned.run.n_steps),
+            "estimated_parcels": float(derived.planned.parcels),
         })
     return entry
 
@@ -657,14 +718,14 @@ def describe(derived: Derived, assessment: dict) -> list[str]:
         f"{s.core_fraction if s.core_fraction is None else round(s.core_fraction, 4)}",
     ]
     if derived.meshable:
-        p, r = derived.mesh_plan, derived.run
+        p, r = derived.planned.mesh_plan, derived.planned.run
         lines += [
             f"          mesh      R = {p.radius_m / d:.4f} D, {p.retained_cells:,} "
             f"cells (lattice {p.lattice.n_cells:,}), core {p.core_cell_size_m:.4e} m, "
             f"cell/lambda {p.cell_over_mfp:.3g}",
             f"          step      deltaT {r.delta_t_s:.4e} s ({r.delta_t_source}), "
             f"Courant {r.courant:.3f}, weight {r.n_equivalent_particles:.4e}, "
-            f"~{derived.parcels:.2e} parcels",
+            f"~{derived.planned.parcels:.2e} parcels",
         ]
     lines.append(f"          verdict   {assessment['status'].upper()}"
                  f" (numerical: {assessment['numerical']['status']}, coupling: "
@@ -717,9 +778,9 @@ def identity(derived: Derived) -> dict:
             (case / "case.yaml").read_bytes()).hexdigest(),
         "interface_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
         "R_interface_m": float(derived.selection.radius_m),
-        "core_cell_size_m": float(derived.mesh_plan.core_cell_size_m),
-        "divisions": [int(v) for v in derived.mesh_plan.lattice.divisions],
-        "n_equivalent_particles": float(derived.run.n_equivalent_particles),
+        "core_cell_size_m": float(derived.planned.mesh_plan.core_cell_size_m),
+        "divisions": [int(v) for v in derived.planned.mesh_plan.lattice.divisions],
+        "n_equivalent_particles": float(derived.planned.run.n_equivalent_particles),
     }
 
 
@@ -832,9 +893,9 @@ def write_mesh_dictionaries(derived: Derived) -> list[Path]:
             f"{derived.mesh_error or derived.selection.reason}")
     case = derived.case_dir
     paths = interface_mesh.write_mesh_setup(case, derived.cfg, derived.geom,
-                                            derived.mesh_plan)
+                                            derived.planned.mesh_plan)
     paths += dictionaries.write_case_dictionaries(case, derived.cfg,
-                                                  derived.exit_state, derived.run)
+                                                  derived.exit_state, derived.planned.run)
     properties = case / "constant" / "dsmcProperties"
     text = properties.read_text(encoding="utf-8")
     note = ("// INTERFACE MODE: 'nozzle' is the downstream continuum sphere "
@@ -1074,7 +1135,7 @@ def post_context(case_dir: Path) -> PostContext:
     derived = derive(case_dir)
     assessment = assess(derived)
     refusal = knudsen_problem(derived.cfg, derived.settings, case_dir.name)
-    if derived.run is None:
+    if not derived.meshable:
         refusal = refusal or f"{assessment['status']}: nothing was meshed"
     d = derived.source.diameter_m
     radius = derived.selection.radius_m
@@ -1229,7 +1290,7 @@ def main(argv=None) -> int:
             print(f"interface_case mesh-dicts: REFUSED. {exc}", file=sys.stderr)
             write_report(case, report(derived, assessment, decision_table=True))
             return 3
-        print("\n".join(derived.mesh_plan.describe()))
+        print("\n".join(derived.planned.mesh_plan.describe()))
         for path in paths + [write_identity(derived),
                              write_report(case, report(derived, assessment))]:
             print(f"    wrote {path}")

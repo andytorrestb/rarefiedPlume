@@ -460,3 +460,17 @@ def test_interface_mesh_patch_problems_are_specific():
     problems = interface_mesh.patch_problems(report, snap_tolerance=0.02,
                                              min_core_faces=12, area_tolerance=0.05)
     assert len(problems) == 2
+
+
+# --------------------------------------------------------------------------- #
+# the derivation's shape, and the module boundaries
+# --------------------------------------------------------------------------- #
+
+def test_planning_is_all_or_nothing(generated):
+    """A case is meshable exactly when every planned quantity exists."""
+    smoke = interface_case.derive(generated / "Interface" / SMOKE)
+    assert smoke.meshable and isinstance(smoke.planned, interface_case.InterfacePlan)
+    assert smoke.mesh_plan is smoke.planned.mesh_plan and smoke.run is smoke.planned.run
+    infeasible = interface_case.derive(generated / "Interface" / "val_Kn0p01_B0p05")
+    assert not infeasible.meshable and infeasible.planned is None
+    assert (infeasible.mesh_plan, infeasible.run, infeasible.parcels) == (None, None, None)

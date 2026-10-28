@@ -186,9 +186,9 @@ def measurement(case_dir: Path, seconds: float, derived, assessment) -> dict:
             "path": case_dir.relative_to(family_root(case_dir)).as_posix(),
             "Kn": float(derived.cfg.exit.knudsen),
             "seconds": float(seconds),
-            "parcels": float(derived.parcels),
-            "cells": int(derived.mesh_plan.retained_cells),
-            "steps": int(derived.run.n_steps),
+            "parcels": float(derived.planned.parcels),
+            "cells": int(derived.planned.mesh_plan.retained_cells),
+            "steps": int(derived.planned.run.n_steps),
             "numerical_particle_multiplier": float(
                 derived.cfg.dsmc.numerical_particle_multiplier),
             "production_status": assessment["status"],
