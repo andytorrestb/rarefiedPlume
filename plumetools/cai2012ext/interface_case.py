@@ -32,17 +32,30 @@ The verdicts
 Numerical suitability (``numerical.status``) is reported separately from the
 coupling validation (``coupling_validation.status``), and neither implies the
 other.
+
+Where each part lives
+---------------------
+This module is the coordination: :func:`derive`, the guard and label the PBS
+steps call, the mesh dictionaries, the inflow and its checks, the
+post-processing context, and the command line. The rest is in
+
+==================================  ==========================================
+:mod:`.interface_config`            ``interface.yaml``: schema, reading, mode
+:mod:`.interface_assessment`        the verdict, criteria, memory and cost
+:mod:`.interface_evidence`          what overlap evidence a verdict may rest on
+:mod:`.interface_identity`          what a mesh and its parcels were built for
+:mod:`.interface_report`            report file, manifest row, console, collect
+==================================  ==========================================
+
+and every name that moved is still importable from here.
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import hashlib
-import json
 import math
 import sys
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,23 +70,38 @@ from plumetools.cai2012.geometry import CaiGeometry
 from plumetools.cai2012.geometry import from_config as cai_geometry
 from plumetools.cai2012.inflow import ExitState, RunSettings
 from plumetools.cai2012ext import feasibility, interface, interface_mesh, policy
+# Each responsibility in its own module; the names stay importable from here.
+from plumetools.cai2012ext.interface_assessment import (  # noqa: F401
+    STATUS_CANDIDATE,
+    STATUS_INFEASIBLE,
+    STATUS_PENDING,
+    STATUS_SMOKE,
+    STATUS_UNSUITABLE,
+    STATUS_VALIDATION,
+    assess,
+)
+from plumetools.cai2012ext.interface_identity import (  # noqa: F401
+    IDENTITY_FILE,
+    identity,
+    identity_problem,
+    write_identity,
+)
+from plumetools.cai2012ext.interface_report import (  # noqa: F401
+    REPORT_FILE,
+    _plain,
+    collect,
+    describe,
+    label_text,
+    log_summary,
+    manifest_entry,
+    report,
+    write_report,
+)
 from plumetools.foamio import volfield
 from plumetools.foamio.patchfields import nonuniform_value_entry
 from plumetools.inflow import read_patch_geometry
 from plumetools.mesh.boundary import read_boundary
 
-STATUS_INFEASIBLE = "interface-infeasible"
-STATUS_UNSUITABLE = feasibility.STATUS_UNSUITABLE
-STATUS_PENDING = "pending-coupling-validation"
-STATUS_CANDIDATE = feasibility.STATUS_CANDIDATE
-STATUS_VALIDATION = "interface-validation"
-STATUS_SMOKE = "development-smoke"
-
-#: Written beside ``case.yaml`` by ``Allmesh``; checked before every run.
-IDENTITY_FILE = "interface-identity.yaml"
-
-#: The per-case report, written by ``Allmesh`` and ``runInflow.py``.
-REPORT_FILE = Path("results") / "interface-report.yaml"
 
 #: Excluded Kn an interface-VALIDATION case may sit at: Cai's 0.01, where the
 #: full-domain benchmark exists. 0.1 and 100 stay refused for every purpose.
@@ -332,485 +360,6 @@ def _check_resources(raw, case_dir) -> None:
                 f"{case_dir}: resources.{key} must be a positive number or null")
 
 
-# --------------------------------------------------------------------------- #
-# assessment
-# --------------------------------------------------------------------------- #
-
-def _coupling_validation(derived: Derived) -> dict:
-    """Whether overlap evidence at THIS threshold has passed."""
-    settings = derived.settings
-    if settings.purpose != "production":
-        return {"required": False, "status": "not-applicable",
-                "note": f"a {settings.purpose} run does not need it"}
-    path = settings.validation_evidence
-    if path is None:
-        return {"required": True, "status": "pending",
-                "note": "no overlap evidence named (interface.validation_evidence)"}
-    evidence = (derived.case_dir / path).resolve()
-    if not evidence.is_file():
-        return {"required": True, "status": "missing", "evidence": str(evidence),
-                "note": "the named overlap result is not on this machine"}
-    try:
-        doc = yaml.safe_load(evidence.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        return {"required": True, "status": "unreadable", "evidence": str(evidence),
-                "note": str(exc)}
-    verdict = str(doc.get("verdict", "missing"))
-    threshold = (doc.get("interface") or {}).get("bird_threshold")
-    same = threshold is not None and math.isclose(
-        float(threshold), float(settings.bird_threshold), rel_tol=1e-12)
-    status = "passed" if verdict == "pass" and same else (
-        "threshold-mismatch" if verdict == "pass" else verdict)
-    return {"required": True, "status": status, "evidence": str(evidence),
-            "evidence_threshold": threshold, "verdict": verdict}
-
-
-def assess(derived: Derived, *, cost_model=None, cost_origin=None) -> dict:
-    """The verdict, the criteria behind it, and what the case would cost."""
-    settings = derived.settings
-    cfg = derived.cfg
-    selection = derived.selection
-    criteria = []
-
-    def add(name, kind, value, limit, passed, message, blocking=True):
-        criteria.append({"name": name, "kind": kind,
-                         "value": None if value is None else float(value),
-                         "limit": None if limit is None else float(limit),
-                         "passed": bool(passed), "blocking": bool(blocking),
-                         "message": message})
-
-    missing = settings.missing_decisions() if settings.scientific else []
-    add("configuration_complete", "configuration", float(len(missing)), 0.0,
-        not missing, "every scientific decision is stated" if not missing
-        else " ".join(missing))
-    add("interface_selection", "interface", selection.max_core_bird_at_radius
-        if selection.admissible else selection.max_core_bird_at_r_min,
-        selection.bird_threshold, selection.admissible,
-        f"{selection.status}: {selection.reason}")
-    if selection.admissible and derived.mesh_error:
-        add("interface_mesh", "numerical", None, None, False, derived.mesh_error)
-
-    planned = derived.planned
-    if planned is not None:
-        plan, run, ref = planned.mesh_plan, planned.run, planned.reference
-        add("interface_radius_set_by", "interface", None, None, True,
-            f"R_interface is set by the {selection.limited_by}"
-            + ("" if selection.limited_by == "bird" else
-               " -- the B bound would allow a larger sphere; enlarge "
-               "geometry.* (and diagnostic_radius_over_D) explicitly if more "
-               "of the far plume should be continuum-injected"), blocking=False)
-        add("mesh_budget", "numerical", float(plan.retained_cells),
-            float(plan.max_cells), not plan.coarsened,
-            f"{plan.retained_cells:,} retained cells at a "
-            f"{plan.core_cell_size_m:.4e} m core"
-            + (f"; lambda at the interface asked for "
-               f"{plan.requested_cell_size_m:.4e} m, which needs "
-               + (f"{planned.resolution['cells_to_meet_criterion']:.3e}"
-                  if planned.resolution.get("cells_to_meet_criterion") else "more than")
-               + f" retained cells against mesh.max_cells = {plan.max_cells:,}"
-               if plan.coarsened else ""))
-        limit = float(cfg.checks.max_cell_over_mfp)
-        add("cell_over_mean_free_path", "numerical", plan.cell_over_mfp, limit,
-            plan.cell_over_mfp <= limit,
-            f"the interface core cell {plan.core_cell_size_m:.4e} m is "
-            f"{plan.cell_over_mfp:.3g} closure mean free paths at (R, 0)")
-        worst = max(planned.resolution["axis"]["max_cell_over_lambda"],
-                    planned.resolution["core_edge"]["max_cell_over_lambda"])
-        add("downstream_resolution_estimate", "estimate", worst, limit,
-            worst <= limit,
-            f"largest planned cell/lambda along the axis and core edge is "
-            f"{worst:.3g} (continuum estimate; measured by Alldiagnose.py)",
-            blocking=False)
-        tau = float(ref["collision_time_s"])
-        ratio = float(run.delta_t_s) / tau
-        add("time_step_collision_time", "numerical", ratio,
-            feasibility.MAX_DT_OVER_COLLISION_TIME,
-            ratio <= feasibility.MAX_DT_OVER_COLLISION_TIME * (1.0 + 1e-12),
-            f"deltaT {run.delta_t_s:.4e} s is {ratio:.3g} reference-cell "
-            f"collision times (tau = {tau:.4e} s; source: {run.delta_t_source})")
-        courant_limit = float(cfg.checks.warn_courant)
-        add("time_step_courant", "numerical", float(run.courant), courant_limit,
-            float(run.courant) <= courant_limit,
-            f"a molecule at |U| + 3 sqrt(RT) of the interface state "
-            f"({ref['characteristic_speed_m_per_s']:.1f} m/s) crosses "
-            f"{run.courant:.3f} of the smallest cell per step")
-        add("transient_length", "numerical", float(run.average_start_s),
-            float(run.domain_transit_s),
-            float(run.average_start_s) >= float(run.domain_transit_s),
-            f"averaging starts at {run.average_start_s:.4e} s, "
-            f"{run.average_start_s / run.domain_transit_s:.3g} transits "
-            f"(x_max/U_e; transient basis '{run.transient_basis}'"
-            + ("; Cai's 10^4 reference collision times, unchanged by the "
-               "interface)" if run.transient_basis == "cai" else ")"))
-        dof = int(cfg.gas.internal_degrees_of_freedom)
-        add("internal_energy_exchange", "numerical", float(dof), 0.0, dof == 0,
-            f"{dof} internal degree(s) of freedom; the closure is monatomic")
-        floor = float(cfg.checks.min_particles_per_cell)
-        add("particles_per_cell", "statistics", float(run.exit_particles_per_cell),
-            floor, float(run.exit_particles_per_cell) >= floor,
-            f"{run.exit_particles_per_cell:.1f} parcels in the declared reference "
-            f"cell ({ref['identity']}); occupancy elsewhere is measured after "
-            f"the run")
-        add("parcel_count", "resource", planned.parcels, feasibility.PARCEL_LIMIT,
-            planned.parcels <= feasibility.PARCEL_LIMIT,
-            f"an estimated {planned.parcels:.3e} parcels at steady state")
-        balance = planned.ideal_flux
-        residual = max(abs(balance["net_mass_residual"]),
-                       abs(balance["gross_mass_residual"]),
-                       abs(balance["gross_energy_residual"]))
-        add("ideal_sphere_flux_balance", "coupling", residual,
-            settings.meshed_flux_tolerance,
-            residual <= settings.meshed_flux_tolerance,
-            f"on the exact sphere the core injects gross mass "
-            f"{balance['gross_mass_residual']:+.2e} and energy "
-            f"{balance['gross_energy_residual']:+.2e} relative to the core "
-            f"targets (net mass {balance['net_mass_residual']:+.2e}); the meshed "
-            f"patch is checked again by runInflow.py")
-        # Not a gate -- the collisionless solution is not the truth at low Kn,
-        # the overlap study is -- but the size of the angular-law mismatch is
-        # stated before any run, never discovered afterwards.
-        from plumetools.cai2012 import analytical
-
-        radius = float(derived.selection.radius_m)
-        closure = float(derived.source.state(np.array([radius]),
-                                             np.array([0.0]))["n"][0]) / derived.source.n_e
-        cai = float(analytical.centerline_density_ratio(
-            np.array([radius]), 0.5 * derived.source.diameter_m,
-            float(cfg.exit.speed_ratio))[0])
-        add("angular_law_axis_density", "coupling", closure / cai, 1.0, True,
-            f"at R the closure's axis density is {closure / cai:.3f} x Cai's "
-            f"collisionless value (Markelov's sonic-orifice f(theta) is broader "
-            f"than this supersonic exit's plume; CP-3 is not tuned -- the "
-            f"overlap study measures the consequence)", blocking=False)
-        memory = _memory(derived)
-        add("memory_ceiling", "resource", memory.get("estimate_bytes"),
-            memory.get("ceiling_bytes"), memory["within"] is not False,
-            memory["message"], blocking=memory["within"] is False)
-
-    numerical_unresolved = [f"{c['name']}: {c['message']}" for c in criteria
-                            if c["blocking"] and not c["passed"]]
-    if not derived.meshable:
-        numeric_status = "not-assessed"
-    else:
-        numeric_status = STATUS_CANDIDATE if not numerical_unresolved else STATUS_UNSUITABLE
-    numerical = {"status": numeric_status, "unresolved": numerical_unresolved}
-    coupling = _coupling_validation(derived)
-
-    if not selection.admissible or missing or not derived.meshable:
-        status = STATUS_INFEASIBLE
-    elif settings.purpose == "development-smoke":
-        status = STATUS_SMOKE
-    elif settings.purpose == "interface-validation":
-        status = STATUS_VALIDATION
-    elif numerical_unresolved:
-        status = STATUS_UNSUITABLE
-    elif coupling["status"] != "passed":
-        status = STATUS_PENDING
-    else:
-        status = STATUS_CANDIDATE
-
-    unresolved = list(numerical_unresolved)
-    if coupling["required"] and coupling["status"] != "passed":
-        unresolved.append(f"coupling_validation: {coupling['status']} -- "
-                          f"{coupling.get('note', coupling.get('evidence', ''))}")
-    if settings.purpose != "production":
-        unresolved.append(f"purpose: {settings.purpose} -- never a production "
-                          f"result")
-    if settings.run_mode == "exploratory":
-        unresolved.append("run_mode: exploratory -- runs with unresolved "
-                          "criteria, labelled NON-PRODUCTION")
-
-    runnable, refusal = _runnable(derived, status, numerical, coupling)
-    cost = _cost(derived, cost_model, cost_origin) if derived.meshable else None
-    return {
-        "status": status,
-        "production_ready": status == STATUS_CANDIDATE,
-        "purpose": settings.purpose,
-        "run_mode": settings.run_mode,
-        "runnable": runnable,
-        "refusal": refusal,
-        "unresolved": unresolved,
-        "numerical": numerical,
-        "coupling_validation": coupling,
-        "criteria": criteria,
-        "cost": cost,
-        "note": "numerical suitability and coupling validation are separate; "
-                "a pending HPC validation stays pending",
-    }
-
-
-def _runnable(derived, status, numerical, coupling) -> tuple[bool, str | None]:
-    settings = derived.settings
-    if status == STATUS_INFEASIBLE:
-        return False, "the interface is infeasible as configured"
-    if settings.run_mode == "exploratory":
-        return True, None
-    if settings.purpose == "production" and status != STATUS_CANDIDATE:
-        return False, (f"{status}: a production run needs every numerical "
-                       f"criterion met and the coupling validated "
-                       f"(coupling: {coupling['status']}). Set run_mode: "
-                       f"exploratory to run it labelled NON-PRODUCTION.")
-    if settings.purpose == "interface-validation" and numerical["unresolved"]:
-        return False, ("an overlap validation on an unresolved mesh measures "
-                       "the mesh, not the coupling. Fix the criteria, or set "
-                       "run_mode: exploratory.")
-    return True, None
-
-
-def _memory(derived: Derived) -> dict:
-    resources = derived.raw.get("resources") or {}
-    per_cell = resources.get("bytes_per_cell")
-    per_parcel = resources.get("bytes_per_parcel")
-    ceiling = resources.get("memory_ceiling_bytes")
-    if per_cell is None or per_parcel is None:
-        return {"within": None, "ceiling_bytes": ceiling,
-                "message": "UNCALIBRATED: no measured bytes per cell / parcel "
-                           "for this solver at these densities "
-                           "(resources.bytes_per_cell, bytes_per_parcel); collect "
-                           "them from the smoke run's log and set them"}
-    planned = derived.planned
-    estimate = (float(per_cell) * planned.mesh_plan.retained_cells
-                + float(per_parcel) * planned.parcels)
-    within = None if ceiling is None else estimate <= float(ceiling)
-    return {"within": within, "estimate_bytes": estimate, "ceiling_bytes": ceiling,
-            "message": f"~{estimate / 1024 ** 3:.1f} GiB from the user-supplied "
-                       f"calibration" + ("" if ceiling is None else
-                                         f" against {float(ceiling) / 1024 ** 3:.0f} GiB")}
-
-
-def _cost(derived: Derived, cost_model, cost_origin) -> dict:
-    planned = derived.planned
-    plan, run, parcels = planned.mesh_plan, planned.run, planned.parcels
-    fields = feasibility.FIELD_BYTES_PER_CELL * plan.retained_cells
-    cloud = feasibility.CLOUD_BYTES_PER_PARCEL * parcels
-    cost = {
-        "n_cells": int(plan.retained_cells),
-        "lattice_cells": int(plan.lattice.n_cells),
-        "estimated_parcels": float(parcels),
-        "n_steps": int(run.n_steps),
-        "n_writes": int(run.n_writes),
-        "n_sampled_writes": int(run.n_sampled_writes),
-        "disk_gb_estimate": run.n_writes * 2.0 * (fields + cloud) / 1024 ** 3,
-        "disk_basis": "cases/cai2012-health bytes per cell and per parcel "
-                      "(collisionless Kn = 100); every write kept, decomposed "
-                      "and reconstructed",
-        "memory": _memory(derived),
-    }
-    if cost_model is not None:
-        seconds = cost_model.seconds(parcels=parcels, cells=plan.retained_cells,
-                                     steps=run.n_steps)
-        cost.update({"predicted_wall_hours": seconds / 3600.0,
-                     "cost_model_origin": cost_origin,
-                     "cost_caveat": "fitted to collisionless runs; no collision "
-                                    "work in it -- a lower bound, uncalibrated "
-                                    "for interface cases"})
-    return cost
-
-
-# --------------------------------------------------------------------------- #
-# the report and the manifest row
-# --------------------------------------------------------------------------- #
-
-def report(derived: Derived, assessment: dict | None = None, *,
-           decision_table: bool = False) -> dict:
-    """Everything about the case, for ``results/interface-report.yaml``."""
-    assessment = assessment or assess(derived)
-    source, selection, settings = derived.source, derived.selection, derived.settings
-    d = source.diameter_m
-    out = {
-        "model": interface.MODEL_NAME,
-        "purpose": settings.purpose,
-        "non_production": assessment["status"] != STATUS_CANDIDATE,
-        "settings": settings.as_dict(),
-        "source": source.as_dict(),
-        "selection": selection.as_dict(d, source.r_a),
-        "diagnostic_radius_over_D": settings.diagnostic_radius_over_D,
-        "diagnostic_radius_reproduces_cai": settings.diagnostic_radius_over_D == 10.0,
-        "assessment": assessment,
-        "terminal_model_comparison": interface.compare_with_terminal_model(
-            source, sorted({1.0, 2.0, 5.0, 10.0} | (
-                {selection.radius_m / d} if selection.admissible else set()))),
-    }
-    if decision_table:
-        out["angular_shape_comparison"] = interface.angular_shape_comparison(source)
-    if derived.meshable:
-        out.update({
-            "mesh": derived.planned.mesh_plan.as_dict(),
-            "run": derived.planned.run.as_dict(),
-            "reference_cell": derived.planned.reference,
-            "estimated_parcels": derived.planned.parcels,
-            "ideal_sphere_flux_balance": derived.planned.ideal_flux,
-            "resolution_estimate": derived.planned.resolution,
-        })
-    if decision_table:
-        r_max, _ = interface.domain_radius_limit(derived.cfg, settings)
-        r_valid = settings.source_validity_min_radius_over_D or (source.r_a / d)
-        out["decision_table"] = {
-            "note": "what each (core angle, threshold) WOULD give at "
-                    f"source_validity_min_radius_over_D = {r_valid:.4g}; for "
-                    "choosing them before any DSMC result, not against one",
-            "rows": interface.radius_table(
-                source, settings, angles_deg=(10.0, 20.0, 30.0, 45.0, 60.0),
-                thresholds=sorted({0.02, 0.03, 0.05, settings.bird_threshold}),
-                r_min_over_D=r_valid, r_max_m=r_max),
-        }
-    return out
-
-
-def manifest_entry(root: Path, name: str, derived: Derived, assessment: dict,
-                   *, group: str) -> dict:
-    """One ``interface-manifest.yaml`` row."""
-    selection, source, settings = derived.selection, derived.source, derived.settings
-    d = source.diameter_m
-    entry = {
-        "name": name,
-        "path": derived.case_dir.resolve().relative_to(Path(root).resolve()).as_posix(),
-        "group": group,
-        "mode": "interface",
-        "model": interface.MODEL_NAME,
-        "Kn": float(derived.cfg.exit.knudsen),
-        "purpose": settings.purpose,
-        "run_mode": settings.run_mode,
-        "bird_threshold": float(settings.bird_threshold),
-        "bird_definition": settings.bird_definition,
-        "core_half_angle_deg": settings.core_half_angle_deg,
-        "selection_status": selection.status,
-        "R_interface_over_D": None if selection.radius_m is None
-        else selection.radius_m / d,
-        "r_a_over_D": source.r_a / d,
-        "max_core_bird_at_r_min": selection.max_core_bird_at_r_min,
-        "axis_bird_at_r_min": selection.axis_bird_at_r_min,
-        "core_mass_fraction": selection.core_fraction,
-        "status": assessment["status"],
-        "numerical_status": assessment["numerical"]["status"],
-        "coupling_validation": assessment["coupling_validation"]["status"],
-        "runnable": assessment["runnable"],
-        "unresolved": assessment["unresolved"],
-        "exit": {"D_m": d, "S0": float(derived.cfg.exit.speed_ratio),
-                 "T0_K": float(derived.cfg.exit.T0_K), "n0_per_m3": source.n_e,
-                 "U0_m_per_s": source.U_e,
-                 "mdot_target_kg_per_s": source.targets.mdot_kg_per_s,
-                 "h_target_J_per_kg": source.targets.h_J_per_kg},
-    }
-    if derived.meshable:
-        entry.update({
-            "n_cells": int(derived.planned.mesh_plan.retained_cells),
-            "core_cell_size_m": derived.planned.mesh_plan.core_cell_size_m,
-            "cell_over_interface_mfp": derived.planned.mesh_plan.cell_over_mfp,
-            "deltaT_s": float(derived.planned.run.delta_t_s),
-            "n_equivalent_particles": float(derived.planned.run.n_equivalent_particles),
-            "average_start_s": float(derived.planned.run.average_start_s),
-            "end_time_s": float(derived.planned.run.end_time_s),
-            "n_steps": int(derived.planned.run.n_steps),
-            "estimated_parcels": float(derived.planned.parcels),
-        })
-    return entry
-
-
-def describe(derived: Derived, assessment: dict) -> list[str]:
-    """Report lines for the console."""
-    s, src = derived.selection, derived.source
-    d = src.diameter_m
-    lines = [
-        f"          interface {s.status}: {s.reason}",
-        f"          source    r_a = {src.r_a / d:.4f} D, M_a = {src.M_a:.4f}, "
-        f"T_t = {src.T_t:.2f} K, V_inf = {src.V_inf:.2f} m/s, core fraction "
-        f"{s.core_fraction if s.core_fraction is None else round(s.core_fraction, 4)}",
-    ]
-    if derived.meshable:
-        p, r = derived.planned.mesh_plan, derived.planned.run
-        lines += [
-            f"          mesh      R = {p.radius_m / d:.4f} D, {p.retained_cells:,} "
-            f"cells (lattice {p.lattice.n_cells:,}), core {p.core_cell_size_m:.4e} m, "
-            f"cell/lambda {p.cell_over_mfp:.3g}",
-            f"          step      deltaT {r.delta_t_s:.4e} s ({r.delta_t_source}), "
-            f"Courant {r.courant:.3f}, weight {r.n_equivalent_particles:.4e}, "
-            f"~{derived.planned.parcels:.2e} parcels",
-        ]
-    lines.append(f"          verdict   {assessment['status'].upper()}"
-                 f" (numerical: {assessment['numerical']['status']}, coupling: "
-                 f"{assessment['coupling_validation']['status']})")
-    for reason in assessment["unresolved"]:
-        lines.append(f"          UNRESOLVED {reason}")
-    return lines
-
-
-def write_report(case_dir: Path, document: dict) -> Path:
-    path = Path(case_dir) / REPORT_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# GENERATED by plumetools.cai2012ext.interface_case -- do "
-                    "not edit.\n" + yaml.safe_dump(_plain(document), sort_keys=False,
-                                                   default_flow_style=False),
-                    encoding="utf-8", newline="\n")
-    return path
-
-
-def _plain(value):
-    """numpy scalars and tuples to plain YAML types."""
-    if isinstance(value, dict):
-        return {str(k): _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, float) and not math.isfinite(value):
-        return str(value)
-    return value
-
-
-# --------------------------------------------------------------------------- #
-# identity: never resume old parcels on a different mesh or source
-# --------------------------------------------------------------------------- #
-
-def identity(derived: Derived) -> dict:
-    """What a mesh and its results were built for."""
-    case = derived.case_dir
-    physics = dict(derived.raw.get("interface") or {})
-    physics.pop("validation_evidence", None)
-    physics.pop("label", None)
-    canonical = json.dumps(physics, sort_keys=True, default=str)
-    return {
-        "mode": "interface",
-        "model": interface.MODEL_NAME,
-        "case_yaml_sha256": hashlib.sha256(
-            (case / "case.yaml").read_bytes()).hexdigest(),
-        "interface_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
-        "R_interface_m": float(derived.selection.radius_m),
-        "core_cell_size_m": float(derived.planned.mesh_plan.core_cell_size_m),
-        "divisions": [int(v) for v in derived.planned.mesh_plan.lattice.divisions],
-        "n_equivalent_particles": float(derived.planned.run.n_equivalent_particles),
-    }
-
-
-def write_identity(derived: Derived) -> Path:
-    path = derived.case_dir / IDENTITY_FILE
-    path.write_text("# GENERATED by Allmesh (interface mode): what this mesh was "
-                    "built for.\n# A run whose results disagree with it is "
-                    "refused.\n" + yaml.safe_dump(identity(derived), sort_keys=True),
-                    encoding="utf-8", newline="\n")
-    return path
-
-
-def identity_problem(derived: Derived) -> str | None:
-    """Why the case's mesh/results are not this configuration's, or ``None``."""
-    path = derived.case_dir / IDENTITY_FILE
-    if not path.is_file():
-        return (f"no {IDENTITY_FILE}: the mesh here was not built by the "
-                f"interface Allmesh (a direct-exit mesh, or none). Old parcels are "
-                f"never resumed on a different mesh: ./Allclean --mesh && ./Allmesh.")
-    stored = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    want = identity(derived)
-    differ = sorted(k for k in want if stored.get(k) != want[k])
-    if differ:
-        return (f"{IDENTITY_FILE} disagrees with the current configuration in "
-                f"{differ}: the mesh (and any parcels on it) belong to another "
-                f"interface, source or weight. Start over: ./Allclean --mesh && "
-                f"./Allmesh. Old parcels are never resumed on a different mesh.")
-    return None
-
-
 def knudsen_problem(cfg, settings, where: str) -> str | None:
     """The Kn rule for interface cases: Cai's 0.01 for validation only."""
     kn = cfg.exit.knudsen
@@ -850,14 +399,6 @@ def guard(case_dir: Path) -> str | None:
     if has_solver_output(case_dir):
         return identity_problem(derived)
     return None
-
-
-def label_text(assessment: dict) -> str:
-    return ("This interface case was run by its runCase.sh job.\n"
-            f"Status: {assessment['status']} (purpose {assessment['purpose']}, "
-            f"run_mode {assessment['run_mode']}). Nothing from it is a "
-            "validated production result.\n\nUnresolved:\n"
-            + "".join(f"  - {line}\n" for line in assessment["unresolved"]))
 
 
 def label(case_dir: Path, marker_name: str) -> tuple[str, bool]:
@@ -1162,82 +703,6 @@ def post_context(case_dir: Path) -> PostContext:
                "unresolved": assessment["unresolved"]}
     return PostContext("interface", derived.cfg, derived.geom, derived.exit_state,
                        derived.run, verdict, None, provenance, refusal)
-
-
-# --------------------------------------------------------------------------- #
-# collect: a small file to bring back from the cluster
-# --------------------------------------------------------------------------- #
-
-def collect(case_dir: Path) -> dict:
-    """Concise evidence from a run: verdicts, metrics, resources, log tails.
-
-    Reads only small files the case already wrote -- never a field -- so it
-    can be run on the cluster and the output copied to the laptop.
-    """
-    case_dir = Path(case_dir)
-    out = {"case": case_dir.resolve().name}
-    for key, relative in (("interface_report", REPORT_FILE),
-                          ("inflow", Path("results") / "interface-inflow.yaml"),
-                          ("overlap", Path("results") / "overlap.yaml"),
-                          ("comparison", Path("results") / "comparison.yaml"),
-                          ("diagnostics", Path("results") / "diagnostics_summary.yaml"),
-                          ("stationarity", Path("results") / "stationarity.yaml")):
-        path = case_dir / relative
-        if path.is_file():
-            try:
-                doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except yaml.YAMLError:
-                doc = {"unreadable": str(path)}
-            out[key] = _summarise(key, doc)
-    marker = case_dir / "NON-PRODUCTION"
-    out["non_production_marker"] = marker.read_text(encoding="utf-8") \
-        if marker.is_file() else None
-    for log in ("log.dsmcFoam", "log.snappyHexMesh", "log.checkMesh",
-                "output.log", "error.log"):
-        path = case_dir / log
-        if path.is_file():
-            out.setdefault("logs", {})[log] = log_summary(path)
-    return out
-
-
-def log_summary(path: Path) -> dict:
-    """A log's line count, last 15 lines, last 5 memory lines, last ExecutionTime.
-
-    One streamed pass holding only those few lines: a ``log.dsmcFoam`` from a
-    long run is gigabytes, and reading it whole to keep twenty lines of it
-    needed several times its size in memory. Lines are split exactly as
-    ``str.splitlines`` splits the whole text.
-    """
-    count = 0
-    tail, memory, execution = deque(maxlen=15), deque(maxlen=5), deque(maxlen=1)
-    with open(path, encoding="utf-8", errors="replace", newline="") as handle:
-        for physical in handle:
-            for line in physical.splitlines():
-                count += 1
-                tail.append(line)
-                if "MB" in line or "memory" in line.lower():
-                    memory.append(line)
-                if line.startswith("ExecutionTime"):
-                    execution.append(line)
-    return {"lines": count, "tail": list(tail), "memory_lines": list(memory),
-            "execution_time": list(execution)}
-
-
-def _summarise(key: str, doc):
-    if not isinstance(doc, dict):
-        return doc
-    if key == "interface_report":
-        keep = ("purpose", "non_production", "selection", "assessment",
-                "reference_cell", "estimated_parcels", "ideal_sphere_flux_balance")
-        summary = {k: doc[k] for k in keep if k in doc}
-        if "assessment" in summary:
-            summary["assessment"] = {k: summary["assessment"].get(k) for k in
-                                     ("status", "runnable", "unresolved",
-                                      "numerical", "coupling_validation")}
-        if "selection" in summary:
-            summary["selection"].pop("scan", None)
-        return summary
-    return doc
 
 
 # --------------------------------------------------------------------------- #

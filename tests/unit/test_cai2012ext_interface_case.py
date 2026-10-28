@@ -474,3 +474,22 @@ def test_planning_is_all_or_nothing(generated):
     infeasible = interface_case.derive(generated / "Interface" / "val_Kn0p01_B0p05")
     assert not infeasible.meshable and infeasible.planned is None
     assert (infeasible.mesh_plan, infeasible.run, infeasible.parcels) == (None, None, None)
+
+
+def test_the_extracted_modules_never_import_the_coordinator():
+    """interface_case uses them; none of them reaches back into it."""
+    import ast
+    import inspect
+
+    from plumetools.cai2012ext import (interface_assessment, interface_config,
+                                       interface_evidence, interface_identity,
+                                       interface_report)
+
+    for module in (interface_assessment, interface_config, interface_evidence,
+                   interface_identity, interface_report):
+        imported = set()
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+                imported.update(f"{node.module}.{a.name}" for a in node.names)
+        assert not any("interface_case" in name for name in imported), module.__name__
