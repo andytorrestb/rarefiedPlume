@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
-from plumetools.hybridplume import cfd, config, workflow
+from _hybridmesh import box_mesh
+from plumetools.hybridplume import cfd, config, dsmc, workflow
 from plumetools.hybridplume import mesh as hm
+from plumetools.hybridplume.physics import BIRD_ARGON, SourceState
+from plumetools.mesh.boundary import read_boundary
 
 ROOT = Path(__file__).resolve().parents[2]
 STUDY = ROOT / "cases" / "cai2012-hybrid" / "hybrid.yaml"
@@ -59,6 +64,64 @@ def test_cfd_case_uses_vhs_transport_and_caps_the_viscous_step(tmp_path):
     assert tm["max_delta_t_s"] <= tm["viscous_dt_limit_s"] * (1 + 1e-12)
     p = (tmp_path / "0" / "p").read_text()
     assert "waveTransmissive" in p and f"{src.pressure:.10g}" in p
+
+
+def test_dsmc_dictionaries(tmp_path):
+    cfg = config.load(STUDY, "smoke-collisionless")
+    src = config.build_source(cfg)
+    run = dsmc.RunPlan(1e12, 1e-6, 10, 20, 2e-4, 1e-4, 1e-3, {})
+    text = dsmc.render_dsmc_properties(cfg, src, run, ["source"])
+    assert "BinaryCollisionModel  none;" in text          # v2512's name, not NoBinaryCollision
+    assert "patches ( source );" in text and "axisymmetric" not in text.lower()
+    on = config.load(STUDY, "smoke-kn0p01")
+    text = dsmc.render_dsmc_properties(on, config.build_source(on), run, ["interface", "source"])
+    assert "VariableHardSphere" in text and "patches ( interface source );" in text
+    ctrl = dsmc.render_control_dict(cfg, run)
+    assert "writeControl    timeStep;" in ctrl and "timeStart 0.0001;" in ctrl
+
+
+def test_dsmc_fields_carry_values_only_on_inflow_patches(tmp_path):
+    box_mesh(tmp_path, np.linspace(0, 0.2, 5), np.linspace(-0.15, 0.15, 7),
+             np.linspace(-0.15, 0.15, 7), 0.1)
+    patches = read_boundary(tmp_path)
+    src = SourceState(BIRD_ARGON)
+    k = patches["source"].n_faces
+    from plumetools.hybridplume import mapping
+    dsmc.write_fields(tmp_path, patches, "Ar", {"source": mapping.source_inflow(k, src)}, src)
+    t = (tmp_path / "0" / "boundaryT").read_text()
+    assert t.count("nonuniform") == 1 and "class       volScalarField;" in t
+    n = (tmp_path / "0" / "boundaryNumberDensity_Ar").read_text()
+    assert f"{src.number_density:.12g}" in n
+    for name, *_ in dsmc.MEASUREMENT_FIELDS:
+        assert (tmp_path / "0" / name).is_file()
+
+
+def test_zero_face_interface_patch_is_appended(tmp_path):
+    box_mesh(tmp_path, np.linspace(0, 0.2, 3), np.linspace(-0.15, 0.15, 3),
+             np.linspace(-0.15, 0.15, 3), 0.1)
+    workflow._add_zero_face_patch(tmp_path, "interface")
+    p = read_boundary(tmp_path)
+    assert p["interface"].type == "patch" and p["interface"].n_faces == 0
+    workflow._add_zero_face_patch(tmp_path, "interface")      # idempotent
+    assert len(read_boundary(tmp_path)) == 4
+
+
+def test_keep_set_format(tmp_path):
+    path = dsmc.write_keep_set(tmp_path, np.array([5, 1, 3]))
+    text = path.read_text()
+    assert "class cellSet;" in text and "\n3\n(\n1\n3\n5\n)" in text
+
+
+def test_dsmc_setup_refuses_an_unsuitable_interface(tmp_path):
+    case = tmp_path / "case"
+    (case / "results").mkdir(parents=True)
+    cfg = config.load(STUDY, "smoke-kn0p01")
+    (case / workflow.RESOLVED).write_text(yaml.safe_dump(
+        {"profile": cfg.profile, "digest": cfg.digest, "config": cfg.doc}))
+    (case / "results" / "interface.json").write_text(json.dumps(
+        {"status": "unsuitable", "reasons": ["return_mass_fraction"], "allow_unsuitable": False}))
+    with pytest.raises(workflow.WorkflowError, match="unsuitable"):
+        workflow.dsmc_setup(case)
 
 
 def test_interface_step_reports_full_dsmc_for_mode_none(tmp_path):

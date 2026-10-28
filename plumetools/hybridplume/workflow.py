@@ -17,6 +17,8 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``cfd-report``      budgets of the converged precursor; background sensitivity
 ``breakdown``       3-D Kn_rho, Kn_T, Kn_U, Kn_GLL, B_exp on the CFD cells
 ``interface``       select (automatic/manual/none) and assess the surface
+``dsmc-setup``      DSMC dictionaries + the cellSet that subsetMesh removes
+``dsmc-fields``     map CFD states onto the DSMC inflow faces; write 0/
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -400,4 +402,140 @@ def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = 
         doc["dsmc_estimate"]["cells_total_in_dsmc_region"] = int(keep.sum())
     np.save(res / "retained.npy", retained)
     write_json(res / "interface.json", doc)
+    return doc
+
+
+# --------------------------------------------------------------------------- #
+# dsmc-setup / dsmc-fields
+# --------------------------------------------------------------------------- #
+
+def _add_zero_face_patch(case: Path, name: str) -> None:
+    """Append ``name`` (type patch, 0 faces) so subsetMesh does not make it ``empty``."""
+    from plumetools.mesh.boundary import read_boundary
+    patches = read_boundary(case)
+    if name in patches:
+        return
+    path = Path(case) / "constant" / "polyMesh" / "boundary"
+    n_faces = max(p.start_face + p.n_faces for p in patches.values())
+    text = path.read_text()
+    count = len(patches)
+    marker = f"\n{count}\n("
+    if marker not in text:
+        raise WorkflowError(f"cannot find the patch count {count} in {path}")
+    head, _, tail = text.rpartition(")")
+    head = head.replace(marker, f"\n{count + 1}\n(", 1)
+    entry = (f"    {name}\n    {{\n        type            patch;\n"
+             f"        nFaces          0;\n        startFace       {n_faces};\n    }}\n")
+    path.write_text(head + entry + ")" + tail)
+
+
+def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
+    import shutil
+    from . import breakdown as bd
+    from . import dsmc, resources
+    from .cfd import background_state
+    from .interface import STATUS_FULL_DSMC, STATUS_SUITABLE
+    from .meshgeom import read_mesh
+    np_ranks = kwargs.get("np", np_ranks)
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    res = results_dir(case_dir)
+    itf_path = res / "interface.json"
+    mode = cfg.get("interface.mode", "automatic")
+    if itf_path.is_file():
+        itf = json.loads(itf_path.read_text())
+    elif mode == "none":
+        itf = {"mode": "none", "status": STATUS_FULL_DSMC}
+    else:
+        raise WorkflowError("run the 'interface' step first")
+    status = itf["status"]
+    if status not in (STATUS_SUITABLE, STATUS_FULL_DSMC) and not itf.get("allow_unsuitable"):
+        raise WorkflowError(f"interface status is {status!r} ({itf.get('reasons')}); "
+                            "re-run 'interface --allow-unsuitable' to build it as a "
+                            "labelled machinery smoke test, or choose full DSMC")
+    cfd = case_dir / "cfd"
+    dsmc_dir = case_dir / "dsmc"
+    mesh = read_mesh(cfd)
+    retained = (np.load(res / "retained.npy")
+                if status != STATUS_FULL_DSMC and (res / "retained.npy").is_file()
+                else np.zeros(mesh.n_cells, bool))
+    keep = ~retained
+    has_interface = bool(retained.any())
+    src_sl = mesh.patch_slice(mesh_mod.PATCHES["source"])
+    src_left = int((~retained[mesh.owner[src_sl]]).sum())
+
+    t = _latest_or_none(cfd)
+    if t is not None and float(t) > 0:
+        state = bd.read_state(cfd, t, source.gas)
+        floor = 3.0 * background_state(cfg, source)["density_kg_m3"]
+        use = keep & (state.rho > floor)
+        est = resources.dsmc_estimate(
+            cfg, source, number_density=state.rho[use] / source.gas.mass_kg,
+            temperature=state.T[use], speed=state.speed[use],
+            volumes=mesh.cell_volumes[use], sizes=mesh.cell_size()[use],
+            length_scale_m=float(mesh.points[:, 0].max()),
+            basis="CFD state on the DSMC cells")
+    else:
+        est = resources.assess_configuration(cfg, source,
+                                             mesh_mod.plan(cfg, source))["full_dsmc"]
+    run = dsmc.plan_run(cfg, source, est, float(mesh.points[:, 0].max()))
+    ranks = int(np_ranks or cfg.get("resources.max_ranks", 1))
+    patches = dsmc.inflow_patches(has_interface, src_left)
+    dsmc_dir.mkdir(parents=True, exist_ok=True)
+    poly = dsmc_dir / "constant" / "polyMesh"
+    if not (poly / "owner").is_file():
+        shutil.copytree(cfd / "constant" / "polyMesh", poly, dirs_exist_ok=True)
+        shutil.rmtree(poly / "sets", ignore_errors=True)
+        if has_interface:
+            _add_zero_face_patch(dsmc_dir, dsmc.INTERFACE_PATCH)
+            dsmc.write_keep_set(dsmc_dir, np.nonzero(keep)[0])
+    dsmc.write_case(dsmc_dir, cfg, source, run, patches, ranks)
+    doc = {"label": cfg.get("label", cfg.profile), "interface_status": status,
+           "smoke_only": status not in (STATUS_SUITABLE, STATUS_FULL_DSMC),
+           "inflow_patches": patches, "dsmc_cells": int(keep.sum()),
+           "source_faces_injected_by_dsmc": src_left, "run": run.describe(), "ranks": ranks}
+    write_json(res / "dsmc_setup.json", doc)
+    return doc
+
+
+def dsmc_fields(case_dir: Path) -> dict:
+    """After subsetMesh: write 0/ with the mapped interface and residual source."""
+    from plumetools.mesh.boundary import read_boundary
+    from . import dsmc, mapping
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    res = results_dir(case_dir)
+    dsmc_dir = case_dir / "dsmc"
+    patches = read_boundary(dsmc_dir)
+    setup_doc = json.loads((res / "dsmc_setup.json").read_text())
+    inflow = {}
+    doc = {"label": cfg.get("label", cfg.profile)}
+    dmesh = read_mesh(dsmc_dir)
+    cfd_mesh = read_mesh(case_dir / "cfd")
+    cell_map = mapping.match_cells(dmesh.cell_centres, cfd_mesh.cell_centres,
+                                   cfd_mesh.cell_size().max(axis=1))
+    np.save(res / "dsmc_to_cfd_cells.npy", cell_map)
+    doc["cell_map"] = {"dsmc_cells": int(cell_map.size), "verified": "centre coincidence"}
+    if dsmc.INTERFACE_PATCH in setup_doc["inflow_patches"]:
+        info = patches.get(dsmc.INTERFACE_PATCH)
+        if info is None or info.type != "patch" or info.n_faces == 0:
+            raise WorkflowError(f"DSMC mesh interface patch is {info}; expected a non-empty "
+                                "'patch' (an 'empty' patch means it was not pre-created)")
+        fields = mapping.load(res / "interface_fields.npz")
+        match = mapping.match_interface(dmesh, fields, dsmc.INTERFACE_PATCH)
+        inflow[dsmc.INTERFACE_PATCH] = mapping.inflow_from_fields(fields, match)
+        doc["mapping"] = {k: v for k, v in match.items()
+                          if k not in ("rows", "dsmc_faces", "dsmc_area_vectors")}
+        doc["mapping_flux_change"] = mapping.flux_change(fields, match, source.gas)
+        np.save(res / "interface_match_rows.npy", match["rows"])
+    src = mesh_mod.PATCHES["source"]
+    if src in setup_doc["inflow_patches"]:
+        inflow[src] = mapping.source_inflow(patches[src].n_faces, source)
+        doc["source_faces"] = patches[src].n_faces
+    dsmc.write_fields(dsmc_dir, patches, source.gas.name, inflow, source)
+    doc["patches"] = {k: {"type": v.type, "n_faces": v.n_faces} for k, v in patches.items()}
+    write_json(res / "dsmc_fields.json", doc)
     return doc

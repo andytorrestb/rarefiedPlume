@@ -26,7 +26,8 @@ def main(argv=None) -> int:
     s.add_argument("--background-ratio", type=float,
                    help="write a background-floor sensitivity copy instead of cfd/")
 
-    for name in ("check-mesh", "cfd-report", "breakdown", "interface"):
+    for name in ("check-mesh", "cfd-report", "breakdown", "interface", "dsmc-setup",
+                 "dsmc-fields"):
         p = sub.add_parser(name)
         p.add_argument("case")
         if name in ("check-mesh",):
@@ -37,6 +38,8 @@ def main(argv=None) -> int:
             p.add_argument("--allow-unsuitable", action="store_true",
                            help="build the DSMC region even if the surface fails the "
                                 "criteria; the outcome is recorded as a smoke test only")
+        if name == "dsmc-setup":
+            p.add_argument("--np", type=int)
 
     args = ap.parse_args(argv)
     try:
