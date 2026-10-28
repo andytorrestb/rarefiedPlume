@@ -26,11 +26,13 @@ def main(argv=None) -> int:
     s.add_argument("--background-ratio", type=float,
                    help="write a background-floor sensitivity copy instead of cfd/")
 
-    for name in ("check-mesh",):
+    for name in ("check-mesh", "cfd-report"):
         p = sub.add_parser(name)
         p.add_argument("case")
         if name in ("check-mesh",):
             p.add_argument("--subdir", default="cfd")
+        if name in ("cfd-report",):
+            p.add_argument("--time", help="CFD time directory (default: latest)")
 
     args = ap.parse_args(argv)
     try:

@@ -14,6 +14,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ==================  ==========================================================
 ``setup``           resolve the profile, assess resources, write the CFD case
 ``check-mesh``      built source patch == predicted staircase (count, area)
+``cfd-report``      budgets of the converged precursor; background sensitivity
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -170,3 +171,73 @@ def check_mesh(case_dir: Path, subdir: str = "cfd") -> dict:
 def background_label(ratio: float) -> str:
     """``cfd_bg1e-03`` style directory name for a sensitivity copy."""
     return "cfd_bg" + f"{ratio:.0e}".replace("+", "")
+
+
+# --------------------------------------------------------------------------- #
+# cfd-report
+# --------------------------------------------------------------------------- #
+
+def _latest(case: Path) -> str:
+    from plumetools.foamio.times import latest_time
+    t = latest_time(case)
+    if float(t) <= 0.0:
+        raise WorkflowError(f"{case} has no solution time beyond 0")
+    return t
+
+
+def _latest_or_none(case: Path):
+    from plumetools.foamio.times import latest_time
+    try:
+        return latest_time(case)
+    except Exception:
+        return None
+
+
+def _postprocessing_series(case: Path, name: str) -> np.ndarray | None:
+    """Concatenate a function object's .dat files over restarts (by time)."""
+    base = Path(case) / "postProcessing" / name
+    if not base.is_dir():
+        return None
+    rows = []
+    for f in sorted(base.rglob("*.dat")):
+        for line in f.read_text().splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            rows.append([float(v) for v in line.replace("(", " ").replace(")", " ").split()])
+    if not rows:
+        return None
+    width = min(len(r) for r in rows)
+    arr = np.asarray([r[:width] for r in rows])
+    _, keep = np.unique(arr[:, 0], return_index=True)
+    return arr[np.sort(keep)]
+
+
+def cfd_report(case_dir: Path, time: str | None = None, subdir: str = "cfd") -> dict:
+    """Mass/momentum/energy budgets and stationarity of the converged precursor."""
+    from .budgets import cfd_budgets
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    cfd = case_dir / subdir
+    time = time or _latest(cfd)
+    mesh = read_mesh(cfd)
+    series = {k: _postprocessing_series(cfd, k) for k in (
+        "boundaryMassFlux", "exitPlaneMassFlux", "farFieldMassFlux", "domainMass")}
+    doc = cfd_budgets(cfd, time, mesh, source, series, cfg)
+    doc["time"] = time
+    doc["label"] = cfg.get("label", cfg.profile)
+    doc["run_record"] = _run_record(cfd, cfg)
+    write_json(results_dir(case_dir) / f"cfd_report_{subdir}.json", doc)
+    return doc
+
+
+def _run_record(case: Path, cfg, extra: dict | None = None) -> dict:
+    """Configuration digest, mesh identity, repository and toolchain state, now."""
+    mesh_files = {name: provenance.sha256(Path(case) / "constant" / "polyMesh" / name)
+                  for name in ("points", "faces", "owner", "neighbour", "boundary")}
+    rec = {"config_digest": cfg.digest, "profile": cfg.profile,
+           "mesh_sha256": mesh_files,
+           "provenance": provenance.collect(Path(__file__).resolve().parents[2])}
+    rec.update(extra or {})
+    return rec
