@@ -77,7 +77,7 @@ import numpy as np
 import yaml
 
 from plumetools.cai2012 import post
-from plumetools.cai2012ext import interface
+from plumetools.cai2012ext import interface, interface_evidence
 from plumetools.foamio.times import time_directories
 
 K_BOLTZMANN = 1.380649e-23
@@ -592,11 +592,9 @@ def run(case_dir: Path, *, baseline: Path | None = None) -> dict:
     written = write_rows(case_dir / "results" / "overlap_bins.csv", rows)
     document = {
         "verdict": result["verdict"],
-        "interface": {"bird_threshold": derived.settings.bird_threshold,
-                      "bird_definition": derived.settings.bird_definition,
-                      "core_half_angle_deg": derived.settings.core_half_angle_deg,
-                      "R_interface_over_D": derived.selection.radius_m / d,
-                      "core_mass_fraction": derived.selection.core_fraction},
+        # What coupling this verdict is evidence for: interface_evidence decides
+        # whether a production case may rest on it.
+        "interface": interface_evidence.evidence_provenance(derived),
         "comparison": cfg.as_dict(),
         "baseline": {k: full[k] for k in ("case", "t_start", "frames", "final_time",
                                           "blocks", "cells_in_region")},

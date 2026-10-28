@@ -26,6 +26,7 @@ from plumetools.cai2012ext import (
     hpc,
     interface,
     interface_case,
+    interface_evidence,
     interface_mesh,
     interface_study,
     policy,
@@ -412,7 +413,9 @@ def test_label_marks_smoke_runs_and_refuses_pending_production(generated, tmp_pa
     assert (production / hpc.MARKER).is_file()
 
 
-def test_production_needs_passed_evidence_at_the_same_threshold(generated, tmp_path):
+@pytest.fixture
+def evidence_case(generated, tmp_path):
+    """A production case that names overlap evidence, and that evidence's writer."""
     family = clone(generated, tmp_path)
     case = family / "Interface" / "Kn0p001_np1x_sphere"
     raw = yaml.safe_load((case / "interface.yaml").read_text())
@@ -420,13 +423,58 @@ def test_production_needs_passed_evidence_at_the_same_threshold(generated, tmp_p
                             source_validity_min_radius_over_D=1.0,
                             validation_evidence="overlap.yaml")
     (case / "interface.yaml").write_text(yaml.safe_dump(raw))
-    for verdict, threshold, expected in (("pass", 0.05, "passed"),
-                                         ("pass", 0.03, "threshold-mismatch"),
-                                         ("inconclusive", 0.05, "inconclusive")):
+    # What a passed Kn = 0.01 validation at this coupling records.
+    full = dict(interface_evidence.evidence_provenance(interface_case.derive(case)),
+                purpose="interface-validation", knudsen=0.01, R_interface_over_D=4.2,
+                core_mass_fraction=0.5)
+
+    def coupling(verdict="pass", block=None, **changes):
         (case / "overlap.yaml").write_text(yaml.safe_dump(
-            {"verdict": verdict, "interface": {"bird_threshold": threshold}}))
-        coupling = interface_case.assess(interface_case.derive(case))["coupling_validation"]
-        assert coupling["status"] == expected
+            {"verdict": verdict, "interface": dict(full, **changes) if block is None
+             else block}))
+        return interface_case.assess(interface_case.derive(case))["coupling_validation"]
+
+    return coupling
+
+
+def test_production_needs_passed_evidence_for_the_same_coupling(evidence_case):
+    # Reuse across Kn -- and with it R and the core's mass fraction -- is the point.
+    assert evidence_case()["status"] == "passed"
+    assert evidence_case(bird_threshold=0.03)["status"] == "threshold-mismatch"
+    assert evidence_case("inconclusive")["status"] == "inconclusive"
+
+
+@pytest.mark.parametrize("item,value", [
+    ("bird_definition", "radial_approx"),
+    ("core_half_angle_deg", 45.0),
+    ("tails", "inject_exploratory"),
+    ("angular_exponent_offset", 0.5),
+    ("model", "some_other_closure"),
+    ("purpose", "production"),
+])
+def test_a_pass_for_another_coupling_is_not_evidence(evidence_case, item, value):
+    result = evidence_case(**{item: value})
+    assert result["status"] == "incompatible"
+    assert [m["item"] for m in result["mismatches"]] == [item]
+
+
+def test_a_pass_from_another_source_problem_is_not_evidence(evidence_case, generated):
+    case = interface_case.derive(generated / "Interface" / "Kn0p001_np1x_sphere")
+    other = interface_evidence.source_problem(case.cfg)
+    other["S0"] = 3.0
+    other["gas"] = dict(other["gas"], species_name="N2")
+    result = evidence_case(source_problem=other)
+    assert result["status"] == "incompatible"
+    assert result["mismatches"][0]["item"] == "source_problem"
+
+
+def test_a_pass_that_records_only_the_threshold_is_not_evidence(evidence_case):
+    """Defect 4 as observed: this was enough before 2026-10-27."""
+    result = evidence_case(block={"bird_threshold": 0.05})
+    assert result["status"] == "insufficient-provenance"
+    assert set(result["missing_provenance"]) == set(interface_evidence.REQUIRED) - {
+        "bird_threshold"}
+    assert "Alloverlap.py" in result["note"]
 
 
 def test_the_direct_exit_post_context_is_the_parent_derivation(generated, tmp_path):
