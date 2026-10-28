@@ -15,6 +15,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``setup``           resolve the profile, assess resources, write the CFD case
 ``check-mesh``      built source patch == predicted staircase (count, area)
 ``cfd-report``      budgets of the converged precursor; background sensitivity
+``breakdown``       3-D Kn_rho, Kn_T, Kn_U, Kn_GLL, B_exp on the CFD cells
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -241,3 +242,85 @@ def _run_record(case: Path, cfg, extra: dict | None = None) -> dict:
            "provenance": provenance.collect(Path(__file__).resolve().parents[2])}
     rec.update(extra or {})
     return rec
+
+
+# --------------------------------------------------------------------------- #
+# breakdown
+# --------------------------------------------------------------------------- #
+
+def breakdown(case_dir: Path, time: str | None = None) -> dict:
+    from . import breakdown as bd
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    gas = source.gas
+    cfd = case_dir / "cfd"
+    time = time or _latest(cfd)
+    mesh = read_mesh(cfd)
+    graph = mesh.cell_graph()
+    state = bd.read_state(cfd, time, gas)
+    grads = bd.gradients(mesh, state, graph)
+    conv = cfg.get("breakdown.mean_free_path_convention", "vhs")
+    ind = bd.indicators(state, grads, gas, conv)
+    thresholds = cfg.require("breakdown.thresholds")
+    criterion = tuple(cfg.get("breakdown.criterion", ["Kn_GLL", "B_exp"]))
+    mask = bd.continuum_mask(ind, thresholds, criterion)
+    reg = bd.source_connected(mesh, mask, mesh_mod.PATCHES["source"])
+    lip = bd.lip_distance(mesh, source.radius_m)
+    near_lip = lip < float(cfg.get("breakdown.lip_exclusion_over_D", 0.05)) * source.diameter_m
+    doc = {
+        "time": time, "label": cfg.get("label", cfg.profile),
+        "definitions": {
+            "lambda": f"Gas.mean_free_path, convention {conv!r}",
+            "Kn_rho": "lambda |grad rho| / rho", "Kn_T": "lambda |grad T| / T",
+            "Kn_U": "lambda |grad |U|| / max(|U|, c)",
+            "Kn_GLL": "max(Kn_rho, Kn_T, Kn_U)",
+            "B_exp": "-(lambda / c_bar) U . grad(rho) / rho  (signed; >0 expansion)",
+            "gradient": "weighted least squares over face neighbours (OpenFOAM leastSquares); "
+                        "one-sided at boundaries; unaveraged CFD cell values",
+            "criterion": list(criterion), "thresholds": thresholds,
+            "threshold_status": "sensitivity-study settings, not validity boundaries",
+        },
+        "summary": bd.summarise(mesh, ind, reg["retained"], near_lip),
+        "regions": {k: v for k, v in reg.items() if k not in ("retained", "labels")},
+        "threshold_sensitivity": bd.threshold_sensitivity(
+            mesh, ind, thresholds, criterion,
+            cfg.get("breakdown.sensitivity_factors", [0.5, 1.0, 2.0]),
+            mesh_mod.PATCHES["source"]),
+    }
+    # Background-floor sensitivity of the retained core: same mesh, other floor.
+    sens = []
+    for other in sorted(case_dir.glob("cfd_bg*")):
+        t_other = _latest_or_none(other)
+        if t_other is None or float(t_other) <= 0:
+            sens.append({"case": other.name, "available": False,
+                         "reason": "no solution beyond t = 0"})
+            continue
+        st2 = bd.read_state(other, t_other, gas)
+        r = reg["retained"]
+        ind2 = bd.indicators(st2, bd.gradients(mesh, st2, graph), gas, conv)
+        reg2 = bd.source_connected(mesh, bd.continuum_mask(ind2, thresholds, criterion),
+                                   mesh_mod.PATCHES["source"])
+
+        def rel(a, b):
+            return float(np.nanmax(np.abs(a[r] / b[r] - 1.0))) if r.any() else None
+        sens.append({
+            "case": other.name, "time": t_other, "available": True,
+            "max_rel_diff_in_retained": {"rho": rel(st2.rho, state.rho),
+                                         "T": rel(st2.T, state.T),
+                                         "speed": rel(st2.speed, state.speed)},
+            "retained_cells": int(reg2["retained"].sum()),
+            "retained_cells_reference": int(r.sum()),
+            "retained_symmetric_difference_cells": int((reg2["retained"] ^ r).sum())})
+    doc["background_sensitivity"] = sens
+    fields = {k: ind[k] for k in bd.INDICATORS}
+    fields["lambda"] = ind["lambda"]
+    fields["continuumMask"] = mask.astype(float)
+    fields["retainedRegion"] = reg["retained"].astype(float)
+    bd.write_fields(cfd, time, mesh, fields)
+    np.savez_compressed(results_dir(case_dir) / "breakdown.npz", retained=reg["retained"],
+                        mask=mask, near_lip=near_lip, time=time,
+                        valid=ind["valid"], **{k: ind[k] for k in bd.INDICATORS})
+    write_json(results_dir(case_dir) / "breakdown.json", doc)
+    return doc

@@ -1,4 +1,4 @@
-"""hybridplume: mesh geometry, on a Python-written 3-D hex box."""
+"""hybridplume: mesh geometry and breakdown connectivity, on a Python-written hex box."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from _hybridmesh import box_mesh
+from plumetools.hybridplume import breakdown as bd
 from plumetools.hybridplume.config import from_document
 from plumetools.hybridplume.meshgeom import read_mesh
 from plumetools.hybridplume.physics import BIRD_ARGON, SourceState
@@ -48,3 +49,39 @@ def test_source_staircase_area_error_is_reported_not_hidden():
         errs.append(abs(pred.area_error))
         assert pred.exact_area_m2 == pytest.approx(np.pi * 0.01)
     assert errs[2] < errs[0]          # refinement reduces the staircase error
+
+
+def _uniform_state(n_cells, rho=1e-4, t=300.0, u=(700.0, 0.0, 0.0)):
+    return bd.CfdState(np.full(n_cells, rho), np.full(n_cells, t),
+                       np.tile(u, (n_cells, 1)), np.full(n_cells, rho * BIRD_ARGON.gas_constant * t),
+                       "1")
+
+
+def test_uniform_field_is_continuum_everywhere_and_connected(mesh):
+    st = _uniform_state(mesh.n_cells)
+    ind = bd.indicators(st, bd.gradients(mesh, st), BIRD_ARGON)
+    assert np.nanmax(ind["Kn_GLL"]) < 1e-12
+    mask = bd.continuum_mask(ind, {"Kn_GLL": 0.05, "B_exp": 0.05})
+    reg = bd.source_connected(mesh, mask, "source")
+    assert reg["retained"].all()
+
+
+def test_invalid_cells_are_never_continuum(mesh):
+    st = _uniform_state(mesh.n_cells)
+    rho = st.rho.copy()
+    rho[5] = -1.0
+    rho[7] = np.nan
+    st = bd.CfdState(rho, st.T, st.U, st.p, "1")
+    ind = bd.indicators(st, bd.gradients(mesh, st), BIRD_ARGON)
+    mask = bd.continuum_mask(ind, {"Kn_GLL": 0.05, "B_exp": 0.05})
+    assert not mask[5] and not mask[7]
+    assert np.isnan(ind["Kn_GLL"][5])
+
+
+def test_disconnected_pocket_is_handed_to_dsmc(mesh):
+    c = mesh.cell_centres
+    near = np.linalg.norm(c, axis=1) < 0.08
+    pocket = np.linalg.norm(c - [0.17, 0.0, 0.0], axis=1) < 0.03
+    reg = bd.source_connected(mesh, near | pocket, "source")
+    assert reg["retained"][near].all() and not reg["retained"][pocket].any()
+    assert reg["n_disconnected_continuum_components"] == 1
