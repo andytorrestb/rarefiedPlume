@@ -383,6 +383,27 @@ def test_the_nonuniform_entry_is_written_as_before():
 # the old names still work, and are the shared objects
 # --------------------------------------------------------------------------- #
 
+def test_old_import_paths_are_the_shared_objects():
+    from plumetools.cai2012 import foamfields as cai_fields
+    from plumetools.foamio import fields as legacy_fields
+    from plumetools.markelov1999 import foamfields as markelov_fields
+    from plumetools.mesh import patches, polymesh
+    from plumetools.nozzleplume import foamfields as nozzle_fields
+    from plumetools.nozzleplume import meshread, post
+    from plumetools.rarefaction import foam
+
+    for module in (cai_fields, legacy_fields, markelov_fields, nozzle_fields):
+        assert module.patch_field_type is patchfields.patch_field_type
+        assert module.CONSTRAINT_PATCH_TYPES is patchfields.CONSTRAINT_PATCH_TYPES
+    assert meshread.PatchGeometry is patches.PatchGeometry
+    assert meshread.face_geometry is patches.face_geometry
+    assert meshread.read_patches is patches.read_patches
+    assert meshread.read_cell_count is polymesh.read_cell_count
+    assert post.read_internal_field is volfield.read_internal_field
+    assert post.read_patch_field is volfield.read_patch_field
+    assert post.latest_time is times.latest_time and foam.latest_time is times.latest_time
+
+
 def test_error_classes_keep_what_each_handler_caught():
     from plumetools.cai2012 import post as cai_post
     from plumetools.nozzleplume import post as nozzle_post

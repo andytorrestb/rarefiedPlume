@@ -77,8 +77,8 @@ import numpy as np
 from plumetools.foamio.errors import FoamDataError
 from plumetools.foamio.times import latest_time
 from plumetools.foamio.volfield import read_internal_field, read_patch_field
+from plumetools.mesh.patches import read_patches
 from plumetools.nozzleplume.constants import BOLTZMANN_J_PER_K
-from plumetools.nozzleplume.meshread import read_patches
 
 #: Averaged cell fields the centreline needs, and whether each is a vector.
 CENTRELINE_FIELDS = {

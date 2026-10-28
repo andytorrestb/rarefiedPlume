@@ -201,6 +201,26 @@ def read_label_list(path: Path) -> np.ndarray:
     return labels
 
 
+_N_CELLS = re.compile(r"nCells\s*:\s*(\d+)")
+
+
+def read_cell_count(case_dir: Path) -> int | None:
+    """The mesh's cell count, from the ``note`` in ``polyMesh/owner``.
+
+    OpenFOAM writes ``note "nPoints:... nCells:... nFaces:..."`` into the header
+    of ``owner``. Reading it there costs nothing; counting distinct owners would
+    mean parsing a file with one line per face. ``None`` if the note is absent,
+    which a mesh from another tool may be.
+    """
+    path = Path(case_dir) / "constant" / "polyMesh" / "owner"
+    if not path.is_file():
+        return None
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        head = handle.read(4096)
+    match = _N_CELLS.search(head)
+    return int(match.group(1)) if match else None
+
+
 def read_points_array(case_dir: Path) -> np.ndarray:
     """``constant/polyMesh/points`` as an ``(n_points, 3)`` float64 array.
 
