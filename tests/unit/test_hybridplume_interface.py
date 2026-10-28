@@ -1,4 +1,4 @@
-"""hybridplume: mesh geometry and breakdown connectivity, on a Python-written hex box."""
+"""hybridplume: mesh geometry, breakdown connectivity and interface extraction."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import pytest
 
 from _hybridmesh import box_mesh
 from plumetools.hybridplume import breakdown as bd
+from plumetools.hybridplume import interface as itf
 from plumetools.hybridplume.config import from_document
 from plumetools.hybridplume.meshgeom import read_mesh
 from plumetools.hybridplume.physics import BIRD_ARGON, SourceState
@@ -85,3 +86,76 @@ def test_disconnected_pocket_is_handed_to_dsmc(mesh):
     reg = bd.source_connected(mesh, near | pocket, "source")
     assert reg["retained"][near].all() and not reg["retained"][pocket].any()
     assert reg["n_disconnected_continuum_components"] == 1
+
+
+def test_interface_closes_and_points_cfd_to_dsmc(mesh):
+    c = mesh.cell_centres
+    retained = itf.connected_to_source(mesh, np.linalg.norm(c, axis=1) < 0.09)
+    surf = itf.extract(mesh, retained)
+    cl = itf.closure(mesh, surf)
+    assert cl["relative_to_boundary_area"] < 1e-12
+    # the normal points from the CFD cell to the DSMC cell
+    d = c[surf.dsmc_cell] - c[surf.cfd_cell]
+    assert np.all(np.einsum("ij,ij->i", d, surf.normal) > 0)
+    assert retained[surf.cfd_cell].all() and not retained[surf.dsmc_cell].any()
+    # a ball of radius 0.09 does not cover the r = 0.1 disk fully
+    assert surf.source_uncovered.size > 0 and surf.source_covered.size > 0
+    assert surf.outer_contact.size == 0
+
+
+def test_region_touching_the_far_field_is_detected(mesh):
+    retained = itf.connected_to_source(mesh, np.abs(mesh.cell_centres[:, 1]) < 0.06)
+    surf = itf.extract(mesh, retained)
+    assert surf.outer_contact.size > 0
+
+
+def test_linear_face_interpolation_is_exact_for_linear_fields(mesh):
+    c = mesh.cell_centres
+    retained = itf.connected_to_source(mesh, np.linalg.norm(c, axis=1) < 0.09)
+    surf = itf.extract(mesh, retained)
+    phi = 3.0 + 2.0 * c[:, 0] - 5.0 * c[:, 1] + 0.5 * c[:, 2]
+    fv = itf.face_values(mesh, surf, phi)
+    fc = surf.centre
+    assert np.allclose(fv, 3.0 + 2.0 * fc[:, 0] - 5.0 * fc[:, 1] + 0.5 * fc[:, 2], rtol=1e-12)
+
+
+def _cfg(mode="automatic", **criteria):
+    doc = {"schema": "hybridplume/1", "base": {
+        "source": {"diameter_m": 0.2, "speed_ratio": 2.0, "temperature_K": 300.0,
+                   "knudsen": 0.01},
+        "gas": {"mass_kg": 6.63e-26, "diameter_m": 4.17e-10, "t_ref_K": 273.0, "omega": 0.81},
+        "domain": {"x_max_over_D": 1.0, "half_width_over_D": 0.75},
+        "mesh": {"core_cell_over_D": 0.125}, "dsmc": {"backend": "dsmcFoam"},
+        "breakdown": {"thresholds": {"Kn_GLL": 0.05, "B_exp": 0.05}},
+        "interface": {"mode": mode, "criteria": criteria}}}
+    return from_document(doc)
+
+
+def test_supersonic_outflow_surface_passes_and_reversed_flow_fails(mesh):
+    src = SourceState(BIRD_ARGON, knudsen=0.01)
+    c = mesh.cell_centres
+    retained = itf.connected_to_source(mesh, c[:, 0] < 0.1)   # a slab: outflow face +x
+    surf = itf.extract(mesh, retained)
+    cfg = _cfg(max_outer_boundary_contact_fraction=1.0, min_overlap_layers=0)
+    st = _uniform_state(mesh.n_cells, u=(3000.0, 0.0, 0.0))
+    g = bd.gradients(mesh, st)
+    ind = bd.indicators(st, g, BIRD_ARGON)
+    doc = itf.assess(mesh, surf, st, g, ind, cfg, src, mode="automatic")
+    assert doc["criteria"]["return_mass_fraction"]["pass"]
+    assert doc["normal_mach"]["subsonic_area_fraction"] == 0.0
+    back = _uniform_state(mesh.n_cells, u=(-3000.0, 0.0, 0.0))
+    g2 = bd.gradients(mesh, back)
+    doc2 = itf.assess(mesh, surf, back, g2, bd.indicators(back, g2, BIRD_ARGON), cfg, src,
+                      mode="automatic")
+    assert doc2["status"] == itf.STATUS_UNSUITABLE
+    assert any("return_mass_fraction" in r for r in doc2["reasons"])
+
+
+def test_empty_region_is_an_explicit_outcome(mesh):
+    src = SourceState(BIRD_ARGON, knudsen=0.01)
+    surf = itf.extract(mesh, np.zeros(mesh.n_cells, bool))
+    st = _uniform_state(mesh.n_cells)
+    g = bd.gradients(mesh, st)
+    doc = itf.assess(mesh, surf, st, g, bd.indicators(st, g, BIRD_ARGON), _cfg(), src,
+                     mode="automatic")
+    assert doc["status"] == itf.STATUS_NONE
