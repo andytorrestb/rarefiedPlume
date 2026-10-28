@@ -1,20 +1,25 @@
-"""Streamed reads give byte-for-byte what the whole-file versions gave.
+"""Streamed reads and writes give byte-for-byte what the whole-file versions gave.
 
-One path stopped holding a whole file in memory on 2026-10-27:
+Two paths stopped holding a whole file in memory on 2026-10-27:
 
 * face ranges and face-set labels of ``constant/polyMesh/faces``
-  (:mod:`plumetools.mesh.polymesh`), used for every patch read.
+  (:mod:`plumetools.mesh.polymesh`), used for every patch read;
+* the per-cell values of a rarefaction diagnostic field
+  (:func:`plumetools.rarefaction.foam._write_streamed`).
 
-It is checked here against the code it replaced.
+Each is checked here against the code it replaced.
 """
 
 from __future__ import annotations
 
 import random
 
+import numpy as np
 import pytest
 
+from plumetools.foamio.primitives import write_lines
 from plumetools.mesh import polymesh
+from plumetools.rarefaction import foam
 
 
 def write_faces(case, faces, *, header_comment=True):
@@ -92,3 +97,18 @@ def test_a_list_shorter_than_its_count_is_refused(tmp_path):
     path.write_text(text[:text.index("3(1 2 3)") + len("3(1 2 3)\n")])   # cut off
     with pytest.raises(ValueError, match="ends before face 2"):
         polymesh.read_face_range(tmp_path, 0, 3)
+
+
+# --------------------------------------------------------------------------- #
+# the rarefaction field writer
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("n", [0, 1, 6, 7, 8, 20])
+def test_streamed_field_is_byte_identical_to_the_list_of_lines(tmp_path, monkeypatch, n):
+    monkeypatch.setattr(foam, "WRITE_CHUNK", 7)
+    values = np.random.default_rng(n).lognormal(size=n) * 1e19
+    head = ["// head", "internalField   nonuniform List<scalar>", str(n), "("]
+    tail = [")", ";", "", "// tail"]
+    foam._write_streamed(tmp_path / "new", head, values, tail)
+    write_lines(tmp_path / "old", head + [f"{v:.10g}" for v in values.tolist()] + tail)
+    assert (tmp_path / "new").read_bytes() == (tmp_path / "old").read_bytes()
