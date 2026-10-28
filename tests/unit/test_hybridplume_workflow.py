@@ -1,15 +1,29 @@
-"""hybridplume: configuration and its refusals."""
+"""hybridplume: configuration, the mesh plan and its refusals."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+import yaml
 
 from plumetools.hybridplume import config
+from plumetools.hybridplume import mesh as hm
 
 ROOT = Path(__file__).resolve().parents[2]
 STUDY = ROOT / "cases" / "cai2012-hybrid" / "hybrid.yaml"
+
+
+def test_every_profile_validates_and_is_full_3d():
+    raw = yaml.safe_load(STUDY.read_text())
+    for name in ["base"] + list(raw["profiles"]):
+        cfg = config.load(STUDY, name)
+        src = config.build_source(cfg)
+        plan = hm.plan(cfg, src)
+        text = hm.render_block_mesh_dict(plan)
+        for forbidden in ("wedge", "empty", "symmetry"):
+            assert f"type {forbidden}" not in text
+        assert plan.divisions[1] == plan.divisions[2]   # no half domain
 
 
 @pytest.mark.parametrize("key", ["mesh.axisymmetric", "mesh.wedge", "dsmc.radial_weighting",
