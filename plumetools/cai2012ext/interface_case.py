@@ -54,6 +54,7 @@ from plumetools.cai2012 import inflow as cai_inflow
 from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012.geometry import from_config as cai_geometry
 from plumetools.cai2012ext import feasibility, interface, interface_mesh, policy
+from plumetools.foamio import volfield
 from plumetools.inflow import read_patch_geometry
 from plumetools.markelov1999 import foamfields as markelov_fields
 from plumetools.mesh.boundary import read_boundary
@@ -975,9 +976,9 @@ def write_inflow(derived: Derived) -> tuple[list[Path], dict]:
     written += foamfields.write_measurement_fields(case, patches)
 
     # Read back in patch order: the ordering contract with the solver.
-    back_n = markelov_fields.read_patch_field(out / f"boundaryNumberDensity_{species}", name)
-    back_u = markelov_fields.read_patch_field(out / "boundaryU", name)
-    back_t = markelov_fields.read_patch_field(out / "boundaryT", name)
+    back_n = volfield.read_patch_field(out / f"boundaryNumberDensity_{species}", name)
+    back_u = volfield.read_patch_field(out / "boundaryU", name)
+    back_t = volfield.read_patch_field(out / "boundaryT", name)
     for label, got, want in (("n", back_n, faces_inflow.number_density),
                              ("U", back_u, faces_inflow.velocity),
                              ("T", back_t, faces_inflow.temperature)):
@@ -1011,10 +1012,10 @@ def check_decomposed(derived: Derived) -> dict:
         if name not in patches or patches[name].n_faces == 0:
             return 0.0, 0
         _, faces, points = read_patch_geometry(directory, name)
-        n = markelov_fields.read_patch_field(
+        n = volfield.read_patch_field(
             directory / "0" / f"boundaryNumberDensity_{species}", name)
-        u = markelov_fields.read_patch_field(directory / "0" / "boundaryU", name)
-        t = markelov_fields.read_patch_field(directory / "0" / "boundaryT", name)
+        u = volfield.read_patch_field(directory / "0" / "boundaryU", name)
+        t = volfield.read_patch_field(directory / "0" / "boundaryT", name)
         normals = openfoam_normals(faces, points)
         areas = facegeom.areas(faces, points)
         j1, _ = interface.one_way_moments(np.einsum("ij,ij->i", u, -normals), t,

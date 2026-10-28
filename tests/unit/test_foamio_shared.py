@@ -1,17 +1,327 @@
-"""The shared OpenFOAM readers: plumetools.foamio.times, and their error.
+"""The shared OpenFOAM readers: plumetools.foamio.{volfield,times}.
 
-Twelve loops over a case's subdirectories decided, each in its own way, which
-were time directories; foamio.times is the one rule now. FoamDataError is the
-error the shared readers raise, and the names each family's handlers have
-always caught still catch it.
+One field parser replaced three -- ``nozzleplume.post``, ``cai2012.post`` and
+``markelov1999.foamfields`` -- so the corpus below is the union of what those
+read, and each legacy parser is kept here, verbatim from the tag
+``pre-refactor-2026-10-27``, as an oracle: on every input it accepted, the
+shared reader must return the identical array.
 """
 
 from __future__ import annotations
 
+import re
+
+import numpy as np
 import pytest
 
-from plumetools.foamio import times
+from plumetools.foamio import times, volfield
 from plumetools.foamio.errors import FoamDataError
+
+
+# --------------------------------------------------------------------------- #
+# the legacy parsers, verbatim, as oracles
+# --------------------------------------------------------------------------- #
+
+def _legacy_nozzleplume_values(text, start, what):
+    head = re.compile(r"\s*(uniform|nonuniform)\s*").match(text, start)
+    if not head:
+        raise ValueError(f"{what}: expected 'uniform' or 'nonuniform'")
+    semicolon = text.find(";", head.end())
+    if semicolon < 0:
+        raise ValueError(f"{what}: unterminated entry")
+    if head.group(1) == "uniform":
+        token = text[head.end():semicolon].strip()
+        numbers = np.asarray(
+            [float(v) for v in token.strip("()").split()], dtype=np.float64)
+        return numbers.reshape(1, 3) if token.startswith("(") else numbers
+    kind = re.compile(r"List<(\w+)>").match(text, head.end())
+    if not kind:
+        raise ValueError(f"{what}: nonuniform value with no List<> type")
+    opening = text.find("(", kind.end(), semicolon)
+    if opening < 0:
+        return np.empty((0, 3) if kind.group(1) == "vector" else (0,))
+    closing = text.rfind(")", opening, semicolon)
+    payload = text[opening + 1:closing].replace("(", " ").replace(")", " ")
+    numbers = np.fromstring(payload, dtype=np.float64, sep=" ")
+    return numbers.reshape(-1, 3) if kind.group(1) == "vector" else numbers
+
+
+def legacy_nozzleplume_internal(text):
+    match = re.search(r"^internalField", text, re.M)
+    if not match:
+        raise ValueError("no internalField entry")
+    return _legacy_nozzleplume_values(text, match.end(), "internalField")
+
+
+def legacy_nozzleplume_patch(text, patch):
+    start = text.find("boundaryField")
+    entry = re.compile(rf"^\s*{re.escape(patch)}\s*$", re.M).search(text, start)
+    if not entry:
+        raise ValueError("not in the boundaryField")
+    body_start = text.index("{", entry.end())
+    body_end = text.index("}", body_start)
+    value = re.compile(r"^\s*value\s", re.M).search(text, body_start, body_end)
+    if not value:
+        raise ValueError("no 'value' entry")
+    return _legacy_nozzleplume_values(text, value.end() - 1, "patch")
+
+
+def legacy_cai2012_internal(text):
+    head = re.compile(r"internalField\s+(uniform|nonuniform)", re.S).search(text)
+    if not head:
+        raise ValueError("no internalField entry")
+    if head.group(1) == "uniform":
+        token = re.search(r"internalField\s+uniform\s+(\([^)]*\)|[-+0-9.eE]+)\s*;", text)
+        if not token:
+            raise ValueError("malformed uniform internalField")
+        value = token.group(1)
+        if value.startswith("("):
+            return np.asarray([[float(v) for v in re.findall(r"[-+0-9.eE]+", value)]],
+                              dtype=np.float64)
+        return np.asarray([float(value)], dtype=np.float64)
+    kind = re.search(r"internalField\s+nonuniform\s+List<(\w+)>", text)
+    if not kind:
+        raise ValueError("nonuniform internalField with no List<> type")
+    start = text.index("(", head.start())
+    depth, i = 0, start
+    while i < len(text):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    payload = text[start + 1:i]
+    values = np.fromstring(payload.replace("(", " ").replace(")", " "), sep=" ")
+    return values.reshape(-1, 3) if kind.group(1) == "vector" else values
+
+
+def legacy_markelov_patch(text, patch):
+    start = text.find("boundaryField")
+    match = re.search(rf"^\s*{re.escape(patch)}\s*$", text[start:], re.M)
+    if not match:
+        raise ValueError("not in the boundaryField")
+    body_start = text.index("{", start + match.end())
+    depth, i = 0, body_start
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    body = text[body_start + 1:i]
+    nonuniform = re.search(
+        r"value\s+nonuniform\s+List<(\w+)>\s*(\d+)?\s*\((.*?)\)\s*;", body, re.S)
+    if nonuniform:
+        kind, _count, payload = nonuniform.groups()
+        numbers = [float(v) for v in re.findall(r"[-+0-9.eE]+", payload)]
+        arr = np.asarray(numbers, dtype=np.float64)
+        return arr.reshape(-1, 3) if kind == "vector" else arr
+    uniform = re.search(r"value\s+uniform\s+(\([^)]*\)|[-+0-9.eE]+)\s*;", body)
+    if uniform:
+        token = uniform.group(1)
+        if token.startswith("("):
+            return np.asarray(
+                [[float(v) for v in re.findall(r"[-+0-9.eE]+", token)]],
+                dtype=np.float64)
+        return np.asarray([float(token)], dtype=np.float64)
+    raise ValueError("no 'value' entry")
+
+
+# --------------------------------------------------------------------------- #
+# the corpus
+# --------------------------------------------------------------------------- #
+
+HEADER = """/*--------------------------------*- C++ -*----------------------------------*\\
+  =========                 |
+  \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       %s;
+    location    "0.5";
+    object      %s;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 -3 0 0 0 0 0];
+
+"""
+
+FOOTER = "\n// ************************************************************************* //\n"
+
+
+def field(internal: str, boundary: str = "", cls="volScalarField") -> str:
+    return (HEADER % (cls, "f") + "internalField   " + internal + "\n\nboundaryField\n{\n"
+            + boundary + "}\n" + FOOTER)
+
+
+SCALARS = [1.5e20, 0.0, -2.25, 3.125e-7, 1.0e-300]
+VECTORS = [(1.0, 2.0, 3.0), (-4.5, 0.0, 6.25e3), (7.0, 8.0, -9.0e-5)]
+
+INTERNAL_CASES = {
+    "uniform scalar": (field("uniform 2.5;"), np.array([2.5])),
+    "uniform scalar exponent": (field("uniform 1.25e+20;"), np.array([1.25e20])),
+    "uniform vector": (field("uniform (1 -2 3.5);", cls="volVectorField"),
+                       np.array([[1.0, -2.0, 3.5]])),
+    "nonuniform scalar": (field(
+        "nonuniform List<scalar>\n5\n(\n" + "\n".join(f"{v:.10g}" for v in SCALARS)
+        + "\n)\n;"), np.array(SCALARS)),
+    "nonuniform vector": (field(
+        "nonuniform List<vector>\n3\n(\n" + "\n".join(f"({x:.10g} {y:.10g} {z:.10g})"
+                                                     for x, y, z in VECTORS)
+        + "\n)\n;", cls="volVectorField"), np.array(VECTORS)),
+    "inline scalar": (field("nonuniform List<scalar> 3(1 2 3);"), np.array([1.0, 2.0, 3.0])),
+    "inline vector": (field("nonuniform List<vector> 2((1 2 3) (4 5 6));",
+                            cls="volVectorField"),
+                      np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
+    "empty list": (field("nonuniform List<scalar> 0();"), np.empty(0)),
+    "boundary after": (field(
+        "nonuniform List<scalar>\n2\n(\n1\n2\n)\n;",
+        "    outer\n    {\n        type            zeroGradient;\n    }\n"),
+        np.array([1.0, 2.0])),
+}
+
+
+@pytest.mark.parametrize("name", sorted(INTERNAL_CASES))
+def test_internal_field_matches_every_legacy_parser(tmp_path, name):
+    text, expected = INTERNAL_CASES[name]
+    path = tmp_path / "f"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    got = volfield.read_internal_field(path)
+    np.testing.assert_array_equal(got, expected)
+    assert got.dtype == np.float64
+    for legacy in (legacy_nozzleplume_internal, legacy_cai2012_internal):
+        np.testing.assert_array_equal(got, legacy(text))
+
+
+def test_crlf_files_read_the_same(tmp_path):
+    text, expected = INTERNAL_CASES["nonuniform vector"]
+    path = tmp_path / "f"
+    path.write_bytes(text.replace("\n", "\r\n").encode())
+    np.testing.assert_array_equal(volfield.read_internal_field(path), expected)
+
+
+def test_a_header_comment_naming_the_keywords_is_not_the_entry(tmp_path):
+    text = field("uniform 4;").replace(
+        "FoamFile", "// note: internalField and boundaryField are written below\nFoamFile")
+    path = tmp_path / "f"
+    path.write_text(text, encoding="utf-8")
+    np.testing.assert_array_equal(volfield.read_internal_field(path), [4.0])
+
+
+def test_metadata_says_what_was_written(tmp_path):
+    path = tmp_path / "f"
+    path.write_text(INTERNAL_CASES["uniform vector"][0], encoding="utf-8")
+    uniform = volfield.read_internal(path)
+    assert uniform.uniform and uniform.value_type == "vector"
+    assert uniform.declared_count is None and uniform.n_components == 3
+    path.write_text(INTERNAL_CASES["nonuniform scalar"][0], encoding="utf-8")
+    listed = volfield.read_internal(path)
+    assert not listed.uniform and listed.value_type == "scalar"
+    assert listed.declared_count == 5 and listed.n_values == 5
+
+
+def test_tensor_types_keep_their_components(tmp_path):
+    path = tmp_path / "f"
+    path.write_text(field("nonuniform List<symmTensor> 2((1 2 3 4 5 6) (7 8 9 10 11 12));",
+                          cls="volSymmTensorField"), encoding="utf-8")
+    values = volfield.read_internal(path)
+    assert values.value_type == "symmTensor" and values.values.shape == (2, 6)
+
+
+# --------------------------------------------------------------------------- #
+# patches
+# --------------------------------------------------------------------------- #
+
+def patch_entry(name, body):
+    return f"    {name}\n    {{\n{body}    }}\n"
+
+
+PATCH_FILE = field("uniform 0;", "".join([
+    patch_entry("inflowOuter", "        type            zeroGradient;\n"),
+    patch_entry("inflow",
+                "        type            fixedValue;\n"
+                "        value           nonuniform List<scalar>\n        3\n        (\n"
+                "            1e+20\n            2e+20\n            3e+20\n        );\n"),
+    patch_entry("plate", "        type            calculated;\n"
+                         "        value           uniform 7;\n"),
+    patch_entry("wall", "        type            calculated;\n"
+                        "        value           nonuniform List<vector> 2((1 2 3) (4 5 6));\n"),
+    patch_entry("outer", "        type            zeroGradient;\n"),
+]))
+
+
+@pytest.mark.parametrize("patch,expected", [
+    ("inflow", np.array([1e20, 2e20, 3e20])),
+    ("plate", np.array([7.0])),
+    ("wall", np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
+])
+def test_patch_values_match_both_legacy_parsers(tmp_path, patch, expected):
+    path = tmp_path / "f"
+    path.write_text(PATCH_FILE, encoding="utf-8")
+    got = volfield.read_patch_field(path, patch)
+    np.testing.assert_array_equal(got, expected)
+    for legacy in (legacy_nozzleplume_patch, legacy_markelov_patch):
+        np.testing.assert_array_equal(got, legacy(PATCH_FILE, patch))
+
+
+def test_a_nested_dictionary_does_not_end_the_patch(tmp_path):
+    """markelov1999's parser balanced braces; nozzleplume's stopped at the first."""
+    text = field("uniform 0;", patch_entry(
+        "inflow", "        type            fixedValue;\n"
+                  "        options { note x; }\n"
+                  "        value           uniform 5;\n"))
+    path = tmp_path / "f"
+    path.write_text(text, encoding="utf-8")
+    np.testing.assert_array_equal(volfield.read_patch_field(path, "inflow"), [5.0])
+    np.testing.assert_array_equal(legacy_markelov_patch(text, "inflow"), [5.0])
+
+
+def test_a_value_inside_a_nested_dictionary_is_not_the_patch_value(tmp_path):
+    text = field("uniform 0;", patch_entry(
+        "inflow", "        type            fixedValue;\n"
+                  "        sub\n        {\n        value           uniform 9;\n        }\n"
+                  "        value           uniform 5;\n"))
+    path = tmp_path / "f"
+    path.write_text(text, encoding="utf-8")
+    np.testing.assert_array_equal(volfield.read_patch_field(path, "inflow"), [5.0])
+
+
+@pytest.mark.parametrize("patch,message", [
+    ("outer", "no 'value' entry"),
+    ("panel", "patch 'panel' is not in the boundaryField"),
+    ("inflo", "is not in the boundaryField"),
+])
+def test_patch_errors_say_why(tmp_path, patch, message):
+    path = tmp_path / "f"
+    path.write_text(PATCH_FILE, encoding="utf-8")
+    with pytest.raises(FoamDataError, match=message):
+        volfield.read_patch_field(path, patch)
+
+
+@pytest.mark.parametrize("text,message", [
+    (HEADER % ("volScalarField", "f"), "no internalField"),
+    (field("nonuniform List<label> 2(1 2);"), "not a field type"),
+    (field("uniform (1 2);"), "malformed uniform value"),
+    (field("nonuniform List<vector> 2(1 2 3 4);"), "whole number"),
+])
+def test_unreadable_internal_fields_raise(tmp_path, text, message):
+    path = tmp_path / "f"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(FoamDataError, match=message):
+        volfield.read_internal(path)
+
+
+def test_a_missing_file_is_named(tmp_path):
+    with pytest.raises(FoamDataError, match="no field file at"):
+        volfield.read_internal(tmp_path / "absent")
+    assert issubclass(FoamDataError, ValueError)
 
 
 # --------------------------------------------------------------------------- #
@@ -62,3 +372,10 @@ def test_cai2012_readers_still_raise_their_own_error(tmp_path):
     (tmp_path / "0").mkdir()
     with pytest.raises(cai_post.PostError, match="wrote nothing"):
         cai_post.latest_time(tmp_path)
+
+
+def test_markelov_reader_keeps_file_not_found(tmp_path):
+    from plumetools.markelov1999 import foamfields as markelov_fields
+
+    with pytest.raises(FileNotFoundError, match="no field file"):
+        markelov_fields.read_patch_field(tmp_path / "absent", "inflow")

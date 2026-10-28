@@ -61,14 +61,13 @@ Cai's reported error *trend*, not against his numbers as tolerances.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from plumetools.cai2012 import analytical
-from plumetools.foamio import times
+from plumetools.foamio import times, volfield
 from plumetools.foamio.errors import FoamDataError
 
 #: Averaged fields this module reads, and whether each is a vector.
@@ -88,9 +87,6 @@ class PostError(FoamDataError):
 # reading OpenFOAM fields
 # --------------------------------------------------------------------------- #
 
-_LIST_HEAD = re.compile(r"internalField\s+(uniform|nonuniform)", re.S)
-
-
 def read_internal_field(path: Path) -> np.ndarray:
     """Read the ``internalField`` of an OpenFOAM volume field.
 
@@ -105,48 +101,13 @@ def read_internal_field(path: Path) -> np.ndarray:
     Raises:
         PostError: if the file is missing or has no readable internal field.
 
-    A purpose-built parser rather than a general dictionary reader: it only has
-    to find one list, and it has to survive the ``boundaryField`` block that
-    follows -- which is where the legacy line-offset parsers in this repository
-    went wrong (findings RB-03, RB-04).
+    Parsed by :mod:`plumetools.foamio.volfield`, the one field parser every
+    family shares.
     """
-    path = Path(path)
-    if not path.is_file():
-        raise PostError(f"no field file at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-
-    head = _LIST_HEAD.search(text)
-    if not head:
-        raise PostError(f"{path}: no internalField entry")
-
-    if head.group(1) == "uniform":
-        token = re.search(r"internalField\s+uniform\s+(\([^)]*\)|[-+0-9.eE]+)\s*;",
-                          text)
-        if not token:
-            raise PostError(f"{path}: malformed uniform internalField")
-        value = token.group(1)
-        if value.startswith("("):
-            return np.asarray([[float(v) for v in re.findall(r"[-+0-9.eE]+", value)]],
-                              dtype=np.float64)
-        return np.asarray([float(value)], dtype=np.float64)
-
-    kind = re.search(r"internalField\s+nonuniform\s+List<(\w+)>", text)
-    if not kind:
-        raise PostError(f"{path}: nonuniform internalField with no List<> type")
-
-    start = text.index("(", head.start())
-    depth, i = 0, start
-    while i < len(text):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    payload = text[start + 1:i]
-    values = np.fromstring(payload.replace("(", " ").replace(")", " "), sep=" ")
-    return values.reshape(-1, 3) if kind.group(1) == "vector" else values
+    try:
+        return volfield.read_internal_field(path)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
 
 
 def latest_time(case_dir: Path) -> str:
