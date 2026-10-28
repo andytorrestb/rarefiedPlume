@@ -1,0 +1,213 @@
+#!/bin/bash
+# Run the OpenFOAM stages of one hybrid case. Python steps write inputs and read
+# outputs; this script only runs OpenFOAM tools, logs them, and resumes.
+#
+#   ./Allrun <case-dir> setup --profile NAME [--config FILE] [-np N]
+#   ./Allrun <case-dir> cfd   [-np N] [--subdir cfd|cfd_bgXe-YY]
+#   ./Allrun <case-dir> post-cfd                     # cfd-report, breakdown, interface
+#   ./Allrun <case-dir> dsmc  [-np N]                # dsmc-setup, mesh, fields, solve
+#   ./Allrun <case-dir> post-dsmc                    # dsmc-post, reference, report
+#   ./Allrun <case-dir> crossings [-np N]            # exact exits: N extra steps,
+#                                                    # written every step
+#   ./Allrun <case-dir> all   --profile NAME [-np N] # every stage in order
+#
+# Every solver stage RESUMES from the newest time that every rank wrote
+# completely (python -m plumetools.foamio.checkpoints plan); re-running a stage
+# after an interruption continues it. A stage that has reached endTime is not
+# re-run. Nothing is deleted: to start over, remove the case directory.
+#
+# Requirements: a sourced OpenFOAM v2512 environment (rhoCentralFoam, dsmcFoam,
+# subsetMesh, ...), libhybridPlumeThermo.so and libplumeDsmcBoundaryModels.so
+# built IN THIS ENVIRONMENT (applications/*/Allwmake), and plumetools importable.
+# The rank count is never "all visible cores": it is -np, else the profile's
+# resources.max_ranks.
+#
+# Options:
+#   --allow-unsuitable   build the DSMC region even if the interface fails its
+#                        criteria. The outcome stays recorded as unsuitable and
+#                        every report is labelled a machinery smoke test.
+
+set -uo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
+
+die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ $# -ge 2 ] || { awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0"; exit 2; }
+CASE=$1; STAGE=$2; shift 2
+PROFILE=""; CONFIG="$HERE/hybrid.yaml"; NP=""; SUBDIR=cfd; ALLOW=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --profile) shift; PROFILE=${1:?} ;;
+        --config)  shift; CONFIG=${1:?} ;;
+        -np)       shift; NP=${1:?} ;;
+        --subdir)  shift; SUBDIR=${1:?} ;;
+        --allow-unsuitable) ALLOW=--allow-unsuitable ;;
+        *) die "unknown option '$1'" ;;
+    esac
+    shift
+done
+
+mkdir -p "$CASE" && CASE=$(cd "$CASE" && pwd)
+have python3 && PYTHON=python3 || PYTHON=python
+export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
+$PYTHON -c "import plumetools.hybridplume" 2>/dev/null || die "plumetools is not importable"
+HP="$PYTHON -m plumetools.hybridplume"
+
+# hyStrath ships its own decomposePar on the user PATH, which aborts on every
+# case; OpenFOAM's own must win.
+[ -n "${FOAM_APPBIN:-}" ] && export PATH="$FOAM_APPBIN:$PATH"
+
+run() {   # run <logname> <command...>  -- in the current directory
+    local log="log.$1"; shift
+    echo "==> $* (-> $PWD/$log)"
+    if ! "$@" > "$log" 2>&1; then
+        grep -A12 "FOAM FATAL" "$log" | head -30 >&2 || tail -25 "$log" >&2
+        die "'$1' failed; see $PWD/$log"
+    fi
+}
+
+need_lib() {
+    local lib=$1 d
+    for d in "${FOAM_USER_LIBBIN:-}" "${FOAM_SITE_LIBBIN:-}" "${FOAM_LIBBIN:-}"; do
+        [ -n "$d" ] && [ -f "$d/$lib" ] && return 0
+    done
+    die "$lib is not built in this environment; run the Allwmake under $REPO/applications"
+}
+
+ranks() {
+    if [ -n "$NP" ]; then echo "$NP"; return; fi
+    $PYTHON - "$CASE" <<'EOF'
+import sys, yaml, pathlib
+doc = yaml.safe_load((pathlib.Path(sys.argv[1]) / "hybrid.resolved.yaml").read_text())
+print(int(doc["config"].get("resources", {}).get("max_ranks", 1)))
+EOF
+}
+
+cfg_value() {   # cfg_value <dotted.key> <default>
+    $PYTHON - "$CASE" "$1" "$2" <<'EOF'
+import sys, yaml, pathlib
+doc = yaml.safe_load((pathlib.Path(sys.argv[1]) / "hybrid.resolved.yaml").read_text())["config"]
+node = doc
+for part in sys.argv[2].split("."):
+    node = node.get(part) if isinstance(node, dict) else None
+print(sys.argv[3] if node is None else node)
+EOF
+}
+
+solve() {   # solve <app> [logname] -- in a case directory with a mesh; resumes
+    local app=$1 logname=${2:-$1} n
+    n=$(ranks)
+    eval "$($PYTHON -m plumetools.foamio.checkpoints plan . --np "$n")" \
+        || die "the saved state of $PWD cannot be continued as it is"
+    if $PYTHON -m plumetools.foamio.checkpoints finished . >/dev/null 2>&1; then
+        echo "==> $PWD has reached endTime; not re-running"; return 0
+    fi
+    if [ "$n" -gt 1 ]; then
+        have mpirun || die "mpirun not on PATH"
+        foamDictionary system/decomposeParDict -entry numberOfSubdomains -set "$n" >/dev/null
+        case "$DECOMPOSE" in
+            none)   echo "    processor dirs already hold t = $PROC_TIME" ;;
+            latest) [ "$RECONSTRUCT_FIRST" -eq 1 ] && run reconstructPar.resume reconstructPar -newTimes
+                    run decomposePar decomposePar -force -latestTime ;;
+            *)      run decomposePar decomposePar -force ;;
+        esac
+        run "$logname" mpirun -np "$n" "$app" -parallel
+        run "reconstructPar.$logname" reconstructPar -newTimes
+    else
+        run "$logname" "$app"
+    fi
+}
+
+stage_setup() {
+    [ -n "$PROFILE" ] || die "setup needs --profile"
+    $HP setup "$CASE" --config "$CONFIG" --profile "$PROFILE" ${NP:+--np $NP} >/dev/null \
+        || die "setup failed"
+    echo "==> $CASE set up from profile $PROFILE (results/setup.json)"
+}
+
+stage_cfd() {
+    need_lib libhybridPlumeThermo.so
+    cd "$CASE/$SUBDIR" || die "no $CASE/$SUBDIR; run the setup stage first"
+    if [ ! -f constant/polyMesh/owner ]; then
+        run blockMesh blockMesh
+        run topoSet topoSet
+        run createPatch createPatch -overwrite
+        run checkMesh checkMesh
+        $HP check-mesh "$CASE" --subdir "$SUBDIR" >/dev/null || die "source patch check failed"
+    fi
+    if [ "$(cfg_value interface.mode automatic)" = none ] && [ "$SUBDIR" = cfd ]; then
+        echo "==> interface.mode is none (full DSMC): mesh built, no CFD precursor solved"
+        return 0
+    fi
+    solve rhoCentralFoam
+}
+
+stage_crossings() {
+    # Extend a FINISHED DSMC run by N steps written every step, then measure every
+    # exit exactly (python -m plumetools.hybridplume crossings). The main run's
+    # controlDict is kept as system/controlDict.main.
+    cd "$CASE/dsmc" || die "no $CASE/dsmc"
+    local n dt end
+    n=$(cfg_value dsmc.crossing_window_steps 0)
+    [ "$n" -gt 0 ] 2>/dev/null || n=20
+    [ -f system/controlDict.main ] || cp system/controlDict system/controlDict.main
+    end=$(sed -n 's/^endTime *\([^;]*\);.*/\1/p' system/controlDict.main)
+    dt=$(sed -n 's/^deltaT *\([^;]*\);.*/\1/p' system/controlDict.main)
+    local newend
+    newend=$($PYTHON -c "print(repr($end + $n*$dt))")
+    foamDictionary system/controlDict -entry endTime -set "$newend" >/dev/null
+    foamDictionary system/controlDict -entry writeInterval -set 1 >/dev/null
+    echo "==> crossing window: $n steps written every step, to t = $newend"
+    solve dsmcFoam dsmcFoam.crossings
+    $HP crossings "$CASE" >/dev/null || die "crossings analysis failed"
+}
+
+stage_post_cfd() {
+    if [ "$(cfg_value interface.mode automatic)" = none ]; then
+        $HP interface "$CASE" >/dev/null || die "interface failed"   # records full_dsmc
+        return 0
+    fi
+    $HP cfd-report "$CASE" >/dev/null || die "cfd-report failed"
+    $HP breakdown "$CASE" >/dev/null || die "breakdown failed"
+    $HP interface "$CASE" $ALLOW || true    # an unsuitable verdict is a result
+}
+
+stage_dsmc() {
+    need_lib libplumeDsmcBoundaryModels.so
+    $HP dsmc-setup "$CASE" ${NP:+--np $NP} >/dev/null || die "dsmc-setup refused (see results/interface.json)"
+    cd "$CASE/dsmc" || die "no $CASE/dsmc"
+    # dsmc-setup copied the CFD mesh, appended a zero-face 'interface' patch of
+    # type patch (subsetMesh would otherwise create it as 'empty') and wrote the
+    # set of cells the DSMC keeps. subsetMesh removes the retained continuum.
+    if [ -f constant/polyMesh/sets/continuumComplement ] && [ ! -f log.subsetMesh ]; then
+        run subsetMesh subsetMesh continuumComplement -patch interface -overwrite
+    fi
+    if [ ! -f 0/boundaryT ]; then
+        run checkMesh checkMesh
+        $HP dsmc-fields "$CASE" >/dev/null || die "dsmc-fields failed"
+    fi
+    if [ ! -d "$(ls -d [0-9]* 2>/dev/null | sort -g | tail -1)/lagrangian" ] \
+       && [ ! -d processor0 ]; then
+        run dsmcInitialise dsmcInitialise
+    fi
+    solve dsmcFoam
+}
+
+stage_post_dsmc() {
+    $HP dsmc-post "$CASE" >/dev/null || die "dsmc-post failed"
+    $HP reference "$CASE" >/dev/null || die "reference failed"
+    $HP report "$CASE" || die "report failed"
+}
+
+case "$STAGE" in
+    setup)     stage_setup ;;
+    cfd)       stage_cfd ;;
+    post-cfd)  stage_post_cfd ;;
+    dsmc)      stage_dsmc ;;
+    post-dsmc) stage_post_dsmc ;;
+    crossings) stage_crossings ;;
+    all)       stage_setup; ( stage_cfd ); stage_post_cfd; ( stage_dsmc ); stage_post_dsmc ;;
+    *) die "unknown stage '$STAGE'" ;;
+esac

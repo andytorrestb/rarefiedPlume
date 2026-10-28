@@ -71,59 +71,24 @@ have() { command -v "$1" >/dev/null 2>&1; }
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
 case_reached_end() {
-    "$PYTHON" - "$1" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-case = Path(sys.argv[1])
-control = case / "system" / "controlDict"
-entries = {}
-for line in control.read_text(encoding="utf-8").splitlines():
-    match = re.match(r"\s*(endTime|deltaT)\s+([^;]+);", line)
-    if match:
-        entries[match.group(1)] = float(match.group(2))
-
-times = []
-for parent in (case, *case.glob("processor[0-9]*")):
-    if not parent.is_dir():
-        continue
-    for entry in parent.iterdir():
-        if entry.is_dir():
-            try:
-                value = float(entry.name)
-            except ValueError:
-                continue
-            if value > 0.0:
-                times.append(value)
-
-latest = max(times, default=None)
-end = entries.get("endTime")
-delta = entries.get("deltaT", 0.0)
-sys.exit(0 if latest is not None and end is not None
-         and latest >= end - 0.5 * delta else 1)
-PY
+    # Only a checkpoint every rank wrote completely counts: a case whose job was
+    # killed while writing its last time has not finished.
+    "$PYTHON" -m plumetools.foamio.checkpoints finished "$1"
 }
 
-mapfile -t CASES < <($PYTHON - "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
-import sys
-import yaml
-
-wanted = set(sys.argv[1:])
-document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
-paths = [entry["path"] for entry in document.get("cases", [])]
-if wanted:
-    missing = sorted(wanted - set(paths))
-    if missing:
-        # A typo'd --only that silently ran nothing would look exactly like a
-        # study that finished instantly.
-        sys.exit(f"--only names no generated case: {missing}\n"
-                 f"the manifest has: {paths}")
-    paths = [p for p in paths if p in wanted]
-for path in paths:
-    print(path)
-PY
-) || die "could not read manifest.yaml"
+# The WHOLE manifest is read and checked before any case is touched, and the
+# listing is captured before mapfile: a failure inside `< <(...)` never reaches
+# a `||`, so paths printed before it would have run as if they were the study.
+# A mistyped --only is refused there too: one that silently ran nothing would
+# look exactly like a study that finished instantly.
+MANIFEST_ARGS=(manifest.yaml)
+if [ ${#ONLY[@]} -gt 0 ]; then
+    MANIFEST_ARGS+=(--only "${ONLY[@]}")
+fi
+LISTING=$($PYTHON -m plumetools.casemanifest "${MANIFEST_ARGS[@]}") \
+    || die "could not read manifest.yaml (see above)"
+CASES=()
+[ -z "$LISTING" ] || mapfile -t CASES <<< "$LISTING"
 
 [ ${#CASES[@]} -gt 0 ] || die "manifest.yaml lists no cases"
 

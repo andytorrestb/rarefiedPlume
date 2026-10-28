@@ -21,6 +21,7 @@ from plumetools.cai2012.gas import (
     VhsSpecies, knudsen_from_number_density, number_density_from_kn,
     speed_from_speed_ratio,
 )
+from plumetools.foamio.times import time_names
 
 REQUESTED_KN = (100., 10., 1., .1, .01, .001, .0001)
 
@@ -193,9 +194,7 @@ def inventory(root, *, families=("cai2012", "cai2012-kn-extension")):
             compare = load_yaml(result / "comparison.yaml")
             convergence = load_yaml(result / "convergence.yaml")
             available = sorted(p.name for p in result.glob("*.csv")) if result.is_dir() else []
-            frames = sorted((p for p in case.iterdir() if p.is_dir()
-                             and _number(p.name) is not None and float(p.name) > 0),
-                            key=lambda p: float(p.name))
+            frames = [case / name for name in time_names(case)]
             field_times = [p.name for p in frames if (p / "rhoNMean").is_file()]
             geometry_times = [p.name for p in frames if (p / "C").is_file() and (p / "V").is_file()]
             record = {"path": relative, "family": family, "source_type": source_type,

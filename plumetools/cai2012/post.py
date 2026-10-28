@@ -61,13 +61,14 @@ Cai's reported error *trend*, not against his numbers as tolerances.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from plumetools.cai2012 import analytical
+from plumetools.foamio import times, volfield
+from plumetools.foamio.errors import FoamDataError
 
 #: Averaged fields this module reads, and whether each is a vector.
 REQUIRED_FIELDS = {
@@ -78,16 +79,13 @@ REQUIRED_FIELDS = {
 }
 
 
-class PostError(ValueError):
+class PostError(FoamDataError):
     """A required field or time directory is missing, or is unreadable."""
 
 
 # --------------------------------------------------------------------------- #
 # reading OpenFOAM fields
 # --------------------------------------------------------------------------- #
-
-_LIST_HEAD = re.compile(r"internalField\s+(uniform|nonuniform)", re.S)
-
 
 def read_internal_field(path: Path) -> np.ndarray:
     """Read the ``internalField`` of an OpenFOAM volume field.
@@ -103,48 +101,33 @@ def read_internal_field(path: Path) -> np.ndarray:
     Raises:
         PostError: if the file is missing or has no readable internal field.
 
-    A purpose-built parser rather than a general dictionary reader: it only has
-    to find one list, and it has to survive the ``boundaryField`` block that
-    follows -- which is where the legacy line-offset parsers in this repository
-    went wrong (findings RB-03, RB-04).
+    Parsed by :mod:`plumetools.foamio.volfield`, the one field parser every
+    family shares.
     """
-    path = Path(path)
-    if not path.is_file():
-        raise PostError(f"no field file at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        return volfield.read_internal_field(path)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
 
-    head = _LIST_HEAD.search(text)
-    if not head:
-        raise PostError(f"{path}: no internalField entry")
 
-    if head.group(1) == "uniform":
-        token = re.search(r"internalField\s+uniform\s+(\([^)]*\)|[-+0-9.eE]+)\s*;",
-                          text)
-        if not token:
-            raise PostError(f"{path}: malformed uniform internalField")
-        value = token.group(1)
-        if value.startswith("("):
-            return np.asarray([[float(v) for v in re.findall(r"[-+0-9.eE]+", value)]],
-                              dtype=np.float64)
-        return np.asarray([float(value)], dtype=np.float64)
+def read_cell_values(path: Path, n_cells: int,
+                     what: str = "cells in the cell centres") -> np.ndarray:
+    """A field's ``internalField`` with one value per cell.
 
-    kind = re.search(r"internalField\s+nonuniform\s+List<(\w+)>", text)
-    if not kind:
-        raise PostError(f"{path}: nonuniform internalField with no List<> type")
+    A ``uniform`` entry is expanded; a list must hold ``n_cells`` values.
 
-    start = text.index("(", head.start())
-    depth, i = 0, start
-    while i < len(text):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    payload = text[start + 1:i]
-    values = np.fromstring(payload.replace("(", " ").replace(")", " "), sep=" ")
-    return values.reshape(-1, 3) if kind.group(1) == "vector" else values
+    Args:
+        path: the field file.
+        n_cells: the cells the caller's cell centres describe.
+        what: what ``n_cells`` counts, for the message.
+
+    Raises:
+        PostError: for a list of any other length -- a field from another mesh.
+    """
+    try:
+        return volfield.read_internal(path).over(n_cells, what)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
 
 
 def latest_time(case_dir: Path) -> str:
@@ -155,22 +138,10 @@ def latest_time(case_dir: Path) -> str:
             the solver never wrote anything, and there is nothing to
             post-process.
     """
-    case_dir = Path(case_dir)
-    times = []
-    for entry in case_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry.name))
-    if not times:
-        raise PostError(
-            f"{case_dir} has no time directory past 0; the solver wrote nothing. "
-            f"Run ./Allrun first.")
-    return max(times)[1]
+    try:
+        return times.latest_time(case_dir)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
 
 
 @dataclass(frozen=True)
@@ -260,16 +231,17 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
             f"which ./Allpost runs. Without them there is no way to say where a "
             f"sampled value is.")
     centres = read_internal_field(centres_path)
+    n_cells = centres.shape[0]
+
+    what = f"cells in the cell centres {centres_path}"
 
     volumes_path = geometry_dir / "V"
     if volumes_path.is_file():
-        volumes = read_internal_field(volumes_path)
+        volumes = read_cell_values(volumes_path, n_cells, what)
     else:
         # Unweighted rather than absent: a graded mesh makes this a real
         # approximation, so it is reported by the caller, not hidden.
-        volumes = np.ones(centres.shape[0], dtype=np.float64)
-    if volumes.size == 1:
-        volumes = np.full(centres.shape[0], float(volumes[0]))
+        volumes = np.ones(n_cells, dtype=np.float64)
 
     values = {}
     for name in REQUIRED_FIELDS:
@@ -279,20 +251,12 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
                 f"no {name} at {path}. It is written by the fieldAverage "
                 f"function object in system/controlDict; a run that ended before "
                 f"dsmc.average_start_s produces none.")
-        array = read_internal_field(path)
-        if array.shape[0] == 1 and centres.shape[0] > 1:
-            array = np.broadcast_to(array, (centres.shape[0],) + array.shape[1:])
-        elif array.shape[0] != centres.shape[0]:
-            # Only reachable when the geometry came from somewhere else, and
-            # the one failure mode that matters: a cell count that disagrees
-            # means these densities belong to a different mesh, and pairing
-            # them positionally would put every sample in the wrong place
-            # while producing a plot that looks entirely ordinary.
-            raise PostError(
-                f"{path} has {array.shape[0]:,} values but the cell centres in "
-                f"{centres_path} describe {centres.shape[0]:,} cells. These are "
-                f"not the same mesh.")
-        values[name] = np.asarray(array, dtype=np.float64)
+        # A cell count that disagrees means these densities belong to a
+        # different mesh, and pairing them positionally would put every sample
+        # in the wrong place while producing a plot that looks entirely
+        # ordinary -- so only a uniform entry is expanded.
+        values[name] = np.asarray(read_cell_values(path, n_cells, what),
+                                  dtype=np.float64)
 
     rho_m = values["rhoMMean"]
     momentum = values["momentumMean"]

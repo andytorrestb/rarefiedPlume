@@ -40,6 +40,8 @@ from pathlib import Path
 
 import numpy as np
 
+from plumetools.foamio.times import time_directories
+
 #: Relative change across the window above which a region is not stationary.
 #: An analysis parameter, not a physical constant: the default is the size of
 #: the far-field deficit the short transient produced in cases/cai2012, so a
@@ -80,18 +82,9 @@ def sampled_frames(case_dir: Path, average_start_s: float) -> list[str]:
     same one-part-in-1e9 tolerance: the write schedule is counted in steps and
     the first sampled frame can land a rounding below the start.
     """
-    times = []
-    for entry in Path(case_dir).iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if (value > 0.0 and value >= float(average_start_s) * (1.0 - 1.0e-9)
-                and (entry / "rhoNMean").is_file()):
-            times.append((value, entry.name))
-    return [name for _, name in sorted(times)]
+    start = float(average_start_s) * (1.0 - 1.0e-9)
+    return [name for value, name in time_directories(case_dir)
+            if value >= start and (Path(case_dir) / name / "rhoNMean").is_file()]
 
 
 def geometry_time(case_dir: Path, times: list[str]) -> str | None:

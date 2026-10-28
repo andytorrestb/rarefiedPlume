@@ -41,10 +41,14 @@ No Python needs editing to change a parameter.
 plumetools/          the analytical model and OpenFOAM I/O, as a package
   sourceflow.py        equations E1-E8, pure functions -- the LEGACY model
   geometry.py          centroids, normals, spherical coordinates
-  mesh/                polyMesh parsing
-  foamio/              0/ field writers, mesh dictionary generators
+  mesh/                polyMesh parsing: boundary, points and faces (streamed),
+                       boundary-patch geometry
+  foamio/              OpenFOAM files, shared by every family: field reading
+                       (volfield), time directories, restart checkpoints across
+                       ranks, patch types, 0/ writers, mesh dictionaries
     primitives.py        searchable sphere/cylinder/cone/box, shared by the
                          families that mesh with snappyHexMesh
+  casemanifest.py      the case list a study's runner scripts read, checked whole
   config.py            case.yaml loading and validation
   inflow.py            orchestration
   markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
@@ -268,6 +272,12 @@ archived output is not achievable. See
 
 ## Documentation
 
+- [`docs/plumetools-architecture.md`](docs/plumetools-architecture.md) — which
+  module owns what, how data flows from `case.yaml` to a verdict, and where a
+  new diagnostic, mesh or study variation goes
+- [`docs/refactor-2026-10-27.md`](docs/refactor-2026-10-27.md) — the
+  maintainability refactor: changed names and commands, the five defects fixed,
+  the evidence, and how to recover the pre-refactor cases
 - [`docs/markelov1999-case.md`](docs/markelov1999-case.md) — the AIAA 99-3455
   family: the model, the geometry, and every assumption with its reasoning
 - [`docs/plume-field-inflow.md`](docs/plume-field-inflow.md) — the custom DSMC

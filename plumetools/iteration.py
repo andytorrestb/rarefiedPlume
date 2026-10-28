@@ -53,6 +53,8 @@ from pathlib import Path
 
 import yaml
 
+from plumetools.foamio.times import time_names, time_value
+
 #: The files that ARE a case, at the top of its directory.
 CASE_INPUTS = ("case.yaml", "*.yaml", "All*", "*.foam")
 
@@ -82,11 +84,7 @@ class Iteration:
 
 
 def _is_time(name: str) -> bool:
-    try:
-        float(name)
-    except ValueError:
-        return False
-    return True
+    return time_value(name) is not None
 
 
 def _sha256(path: Path) -> str | None:
@@ -97,11 +95,8 @@ def times(case_dir: Path) -> list[str]:
     """Numeric time directories past 0, in a case and its ``processor0``."""
     found = set()
     for base in (Path(case_dir), Path(case_dir) / "processor0"):
-        if base.is_dir():
-            found |= {entry.name for entry in base.iterdir()
-                      if entry.is_dir() and _is_time(entry.name)
-                      and float(entry.name) > 0.0}
-    return sorted(found, key=float)
+        found |= set(time_names(base, missing_ok=True))
+    return sorted(found, key=lambda name: (float(name), name))
 
 
 def resumable_state(case_dir: Path) -> list[str]:

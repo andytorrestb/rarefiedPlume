@@ -58,6 +58,7 @@ from pathlib import Path
 import numpy as np
 
 from plumetools.cai2012.post import PostError, read_internal_field
+from plumetools.foamio.times import time_directories
 
 #: Fraction of ``n0`` below which a cell is outside the plume Cai draws.
 #:
@@ -504,17 +505,7 @@ def common_times(long_dir: Path, short_dir: Path) -> list[str]:
     answer.
     """
     def times(directory: Path) -> dict:
-        found = {}
-        for entry in Path(directory).iterdir():
-            if not entry.is_dir():
-                continue
-            try:
-                value = float(entry.name)
-            except ValueError:
-                continue
-            if value > 0.0:
-                found[entry.name] = value
-        return found
+        return {name: value for value, name in time_directories(directory)}
 
     left, right = times(long_dir), times(short_dir)
     shared = set(left) & set(right)

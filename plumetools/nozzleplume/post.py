@@ -69,14 +69,21 @@ part and for the whole plate.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from plumetools.foamio.errors import FoamDataError
+from plumetools.foamio.times import latest_time
+from plumetools.foamio.volfield import (  # noqa: F401 -- re-exported
+    read_internal,
+    read_internal_field,
+    read_patch,
+    read_patch_field,
+)
+from plumetools.mesh.patches import read_patches
 from plumetools.nozzleplume.constants import BOLTZMANN_J_PER_K
-from plumetools.nozzleplume.meshread import read_patches
 
 #: Averaged cell fields the centreline needs, and whether each is a vector.
 CENTRELINE_FIELDS = {
@@ -86,133 +93,11 @@ CENTRELINE_FIELDS = {
     "linearKEMean": False,
 }
 
-
-class PostError(ValueError):
-    """A required field or time directory is missing, or is unreadable."""
-
-
-# --------------------------------------------------------------------------- #
-# reading OpenFOAM fields
-# --------------------------------------------------------------------------- #
-
-def latest_time(case_dir: Path) -> str:
-    """The largest numeric time directory in a case, past ``0``.
-
-    Raises:
-        PostError: if there is none -- the solver wrote nothing.
-    """
-    times = []
-    for entry in Path(case_dir).iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry.name))
-    if not times:
-        raise PostError(
-            f"{case_dir} has no time directory past 0; the solver wrote nothing. "
-            f"Run ./Allrun first.")
-    return max(times)[1]
-
-
-def _values(text: str, start: int, what: str) -> np.ndarray:
-    """Parse the ``uniform`` or ``nonuniform List<>`` value that follows ``start``.
-
-    Returns ``(n,)`` for scalars and ``(n, 3)`` for vectors; a ``uniform`` value
-    comes back with ``n = 1`` for the caller to broadcast.
-
-    The end of a list is found with ``str.find``, not by walking the text: an
-    OpenFOAM list holds no semicolon, so the first one after its opening
-    parenthesis closes the entry, and the last ``)`` before that closes the
-    list. A field of half a million cells is tens of megabytes, and a Python
-    loop over its characters takes longer than everything else here combined.
-    """
-    head = re.compile(r"\s*(uniform|nonuniform)\s*").match(text, start)
-    if not head:
-        raise PostError(f"{what}: expected 'uniform' or 'nonuniform'")
-
-    semicolon = text.find(";", head.end())
-    if semicolon < 0:
-        raise PostError(f"{what}: unterminated entry")
-
-    if head.group(1) == "uniform":
-        token = text[head.end():semicolon].strip()
-        numbers = np.asarray(
-            [float(v) for v in token.strip("()").split()], dtype=np.float64)
-        return numbers.reshape(1, 3) if token.startswith("(") else numbers
-
-    kind = re.compile(r"List<(\w+)>").match(text, head.end())
-    if not kind:
-        raise PostError(f"{what}: nonuniform value with no List<> type")
-    opening = text.find("(", kind.end(), semicolon)
-    if opening < 0:
-        # 'nonuniform List<scalar> 0' -- an empty list, written with no payload.
-        return np.empty((0, 3) if kind.group(1) == "vector" else (0,))
-    closing = text.rfind(")", opening, semicolon)
-    payload = text[opening + 1:closing].replace("(", " ").replace(")", " ")
-    numbers = np.fromstring(payload, dtype=np.float64, sep=" ")
-    return numbers.reshape(-1, 3) if kind.group(1) == "vector" else numbers
-
-
-def read_internal_field(path: Path) -> np.ndarray:
-    """Read the ``internalField`` of an OpenFOAM volume field.
-
-    Returns:
-        ``(n_cells,)`` for a scalar field, ``(n_cells, 3)`` for a vector one. A
-        ``uniform`` entry becomes a one-element array.
-
-    Raises:
-        PostError: if the file is missing or has no readable internal field.
-    """
-    path = Path(path)
-    if not path.is_file():
-        raise PostError(f"no field file at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    match = re.search(r"^internalField", text, re.M)
-    if not match:
-        raise PostError(f"{path}: no internalField entry")
-    return _values(text, match.end(), f"{path}: internalField")
-
-
-def read_patch_field(path: Path, patch: str) -> np.ndarray:
-    """Read one patch's values out of an OpenFOAM field file.
-
-    Returns:
-        ``(n,)`` for a scalar field or ``(n, 3)`` for a vector field. A
-        ``uniform`` entry comes back with one row.
-
-    Raises:
-        PostError: if the file or the patch is missing, or the patch has no
-            ``value`` entry -- which is what a ``zeroGradient`` boundary
-            condition looks like on disk, and means the data was never written
-            rather than that it was zero.
-    """
-    path = Path(path)
-    if not path.is_file():
-        raise PostError(f"no field file at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-
-    start = text.find("boundaryField")
-    if start < 0:
-        raise PostError(f"{path}: no boundaryField block")
-    entry = re.compile(rf"^\s*{re.escape(patch)}\s*$", re.M).search(text, start)
-    if not entry:
-        raise PostError(f"{path}: patch {patch!r} is not in the boundaryField")
-
-    # The patch's own dictionary: braces balance, and list payloads hold none.
-    body_start = text.index("{", entry.end())
-    body_end = text.index("}", body_start)
-    value = re.compile(r"^\s*value\s", re.M).search(text, body_start, body_end)
-    if not value:
-        raise PostError(
-            f"{path}: patch {patch!r} has no 'value' entry. A zeroGradient "
-            f"boundary condition writes none, which means the solver's data for "
-            f"this patch was discarded at write time rather than being zero -- "
-            f"fD and q must be 'calculated' on a wall.")
-    return _values(text, value.end() - 1, f"{path}: patch {patch!r}")
+#: The error this module raises: the shared reader's, under the name callers
+#: of this module have always caught. :func:`latest_time`,
+#: :func:`read_internal_field` and :func:`read_patch_field` are the shared
+#: readers in :mod:`plumetools.foamio`.
+PostError = FoamDataError
 
 
 # --------------------------------------------------------------------------- #
@@ -377,15 +262,8 @@ def plate_loads(case_dir: Path, cfg, geom, *, time: str | None = None) -> PlateL
                 f"no {field} at {path}. It is written by the fieldAverage "
                 f"function object once the run passes dsmc.average_start_s; a "
                 f"run that ended before then has none.")
-        values = read_patch_field(path, name)
-        if values.shape[0] == 1 and patch.n_faces > 1:
-            values = np.repeat(values, patch.n_faces, axis=0)
-        if values.shape[0] != patch.n_faces:
-            raise PostError(
-                f"{path} has {values.shape[0]} values on patch {name!r} but the "
-                f"mesh has {patch.n_faces} faces there. These are not the same "
-                f"mesh.")
-        fields[field] = values
+        fields[field] = read_patch(path, name).over(
+            patch.n_faces, f"faces on patch {name!r} in the mesh")
 
     return PlateLoads(
         time=time,
@@ -474,24 +352,14 @@ def centreline(case_dir: Path, cfg, geom, exit_state, *,
             f"which ./Allpost runs.")
     centres = read_internal_field(centres_path)
     n_cells = centres.shape[0]
+    what = "cells in the cell centres C"
 
     volumes_path = directory / "V"
-    volumes = (read_internal_field(volumes_path) if volumes_path.is_file()
-               else np.ones(n_cells))
-    if volumes.size == 1:
-        volumes = np.full(n_cells, float(volumes[0]))
+    volumes = (read_internal(volumes_path).over(n_cells, what)
+               if volumes_path.is_file() else np.ones(n_cells))
 
-    values = {}
-    for name in CENTRELINE_FIELDS:
-        array = read_internal_field(directory / name)
-        if array.shape[0] == 1 and n_cells > 1:
-            array = np.repeat(array, n_cells, axis=0)
-        if array.shape[0] != n_cells:
-            raise PostError(
-                f"{directory / name} has {array.shape[0]:,} values but the cell "
-                f"centres describe {n_cells:,} cells. These are not the same "
-                f"mesh.")
-        values[name] = array
+    values = {name: read_internal(directory / name).over(n_cells, what)
+              for name in CENTRELINE_FIELDS}
 
     inside, index, edges = centreline_tube(
         centres, volumes if volumes_path.is_file() else None, cfg, geom)

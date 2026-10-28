@@ -354,12 +354,29 @@ counts, the region and definitions) and `results/overlap_bins.csv`.
 | `interface-infeasible` | no admissible sphere, or a decision missing | guard refuses (exit 2) |
 | `unsuitable-for-production` | a production case misses a numerical criterion | label refuses (exit 3) unless `run_mode: exploratory` |
 | `pending-coupling-validation` | numerically sound, no passed overlap at this threshold | label refuses unless exploratory |
-| `production-candidate` | everything met and `validation_evidence` passed at the same B | runs, unmarked |
+| `production-candidate` | everything met and `validation_evidence` passed for the same coupling (below) | runs, unmarked |
 | `interface-validation` | an overlap run | runs if numerically sound (or exploratory), marked NON-PRODUCTION |
 | `development-smoke` | mechanics only | runs, marked NON-PRODUCTION |
 
 `numerical.status` and `coupling_validation.status` are reported separately.
 The direct-exit cases' gates are unchanged.
+
+**What evidence counts** (`plumetools/cai2012ext/interface_evidence.py`, since
+2026-10-27). `Alloverlap.py` records in `overlap.yaml` the coupling it tested,
+and a production case may rest on a `pass` only if every one of these is
+recorded and equal to its own: the model, `purpose: interface-validation`, the
+Bird definition and threshold, the core half-angle, the tail treatment, the
+angular exponent offset, and the source problem (D, S0, T0, the gas and its
+collision model). The Knudsen number, R, the mesh, the time step and the weight
+are recorded but never compared: validating at Kn = 0.01 and carrying the
+verdict to 1e-3 and 1e-4 is the design. A pass for another coupling reports
+`incompatible` (with the items), and evidence that does not say which coupling
+it tested -- anything written before 2026-10-27 -- reports
+`insufficient-provenance`; re-running `Alloverlap.py` on the validation case
+rewrites it from the same fields. Before 2026-10-27 a `pass` with a matching
+threshold was enough. The core angle is the one conservative choice here: the
+overlap region is confined to the injected core and the excluded tail shapes
+what reaches it, so a pass at one angle is not taken to validate another.
 
 ---
 
@@ -415,7 +432,8 @@ python -m plumetools.cai2012ext.interface_case collect . --output results/interf
    `python -m plumetools.cai2012ext.interface_case collect <case>` regenerates it.
    Copy those small files (and `results/overlap.yaml`) back — no fields needed.
 6. Production: set `validation_evidence` in `interfaces.yaml` to the passing
-   `overlap.yaml` at the chosen B (a provenance key: `--refresh`, not a
+   `overlap.yaml` for the same coupling -- B, Bird definition, core angle,
+   closure, tails and source problem; see section 9 (a provenance key: `--refresh`, not a
    conflict), regenerate, then `runMesh.sh`, `runCase.sh`, `runPost.sh` for
    `Kn0p001_np1x_sphere`, `Kn0p0001_np1x_sphere`. Without passed evidence the
    label step refuses them.

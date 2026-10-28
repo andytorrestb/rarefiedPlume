@@ -48,8 +48,9 @@ from pathlib import Path
 import numpy as np
 
 from plumetools import geometry as facegeom
+from plumetools.foamio import volfield
+from plumetools.foamio.times import time_names
 from plumetools.inflow import read_patch_geometry
-from plumetools.markelov1999.foamfields import read_patch_field
 from plumetools.markelov1999.geometry import MarkelovGeometry, cylinder_surface_angles
 from plumetools.mesh.boundary import read_boundary
 from plumetools.mesh.polymesh import read_faces, read_points
@@ -340,18 +341,8 @@ def latest_time_dir(case_dir: Path) -> Path | None:
     Time ``0`` is excluded: it holds the initial fields, and an average field is
     not written there.
     """
-    case_dir = Path(case_dir)
-    times = []
-    for entry in case_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry))
-    return max(times)[1] if times else None
+    names = time_names(case_dir)
+    return Path(case_dir) / names[-1] if names else None
 
 
 def angular_difference_deg(a, b: float) -> np.ndarray:
@@ -396,15 +387,19 @@ def wall_pressure(case_dir: Path, cfg, geom: MarkelovGeometry, *,
             f"post-process. Has the solver run?")
 
     patch = cfg.post.cylinder_patch
-    values = read_patch_field(Path(time_dir) / field, patch)
+    path = Path(time_dir) / field
+    if not path.is_file():
+        raise FileNotFoundError(f"no field file at {path}")
+    entry = volfield.read_patch(path, patch)
 
     _labels, faces, points = read_patch_geometry(case_dir, patch)
     centres = facegeom.centroids(faces, points)
     areas = facegeom.areas(faces, points)
     normals = facegeom.normals(faces, points)
 
-    if len(values) == 1 and len(faces) > 1:
-        values = np.repeat(values, len(faces), axis=0)
+    # Only a uniform entry stands for every face; a list must hold one per face.
+    values = (np.repeat(entry.values, len(faces), axis=0) if entry.uniform
+              else entry.values)
     if len(values) != len(faces):
         raise ValueError(
             f"{field} on patch {patch!r} has {len(values)} values but the mesh "
