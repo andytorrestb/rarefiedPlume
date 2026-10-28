@@ -1,4 +1,4 @@
-"""hybridplume: configuration, generated dictionaries and refusals."""
+"""hybridplume: configuration, generated dictionaries, resources and refusals."""
 
 from __future__ import annotations
 
@@ -59,3 +59,13 @@ def test_cfd_case_uses_vhs_transport_and_caps_the_viscous_step(tmp_path):
     assert tm["max_delta_t_s"] <= tm["viscous_dt_limit_s"] * (1 + 1e-12)
     p = (tmp_path / "0" / "p").read_text()
     assert "waveTransmissive" in p and f"{src.pressure:.10g}" in p
+
+
+def test_resource_estimate_counts_parcels_not_only_cells():
+    from plumetools.hybridplume import resources
+    cfg = config.load(STUDY, "smoke-kn0p01")
+    src = config.build_source(cfg)
+    est = resources.assess_configuration(cfg, src, hm.plan(cfg, src))["full_dsmc"]
+    assert est["parcels"] > 0 and est["memory_GB"] > 0
+    assert est["dt_s"] <= est["dt_courant_s"] * (1 + 1e-12)
+    assert "cell_over_mfp" in est and "occupancy" in est
