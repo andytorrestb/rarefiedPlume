@@ -76,7 +76,12 @@ import numpy as np
 
 from plumetools.foamio.errors import FoamDataError
 from plumetools.foamio.times import latest_time
-from plumetools.foamio.volfield import read_internal_field, read_patch_field
+from plumetools.foamio.volfield import (  # noqa: F401 -- re-exported
+    read_internal,
+    read_internal_field,
+    read_patch,
+    read_patch_field,
+)
 from plumetools.mesh.patches import read_patches
 from plumetools.nozzleplume.constants import BOLTZMANN_J_PER_K
 
@@ -257,15 +262,8 @@ def plate_loads(case_dir: Path, cfg, geom, *, time: str | None = None) -> PlateL
                 f"no {field} at {path}. It is written by the fieldAverage "
                 f"function object once the run passes dsmc.average_start_s; a "
                 f"run that ended before then has none.")
-        values = read_patch_field(path, name)
-        if values.shape[0] == 1 and patch.n_faces > 1:
-            values = np.repeat(values, patch.n_faces, axis=0)
-        if values.shape[0] != patch.n_faces:
-            raise PostError(
-                f"{path} has {values.shape[0]} values on patch {name!r} but the "
-                f"mesh has {patch.n_faces} faces there. These are not the same "
-                f"mesh.")
-        fields[field] = values
+        fields[field] = read_patch(path, name).over(
+            patch.n_faces, f"faces on patch {name!r} in the mesh")
 
     return PlateLoads(
         time=time,
@@ -354,24 +352,14 @@ def centreline(case_dir: Path, cfg, geom, exit_state, *,
             f"which ./Allpost runs.")
     centres = read_internal_field(centres_path)
     n_cells = centres.shape[0]
+    what = "cells in the cell centres C"
 
     volumes_path = directory / "V"
-    volumes = (read_internal_field(volumes_path) if volumes_path.is_file()
-               else np.ones(n_cells))
-    if volumes.size == 1:
-        volumes = np.full(n_cells, float(volumes[0]))
+    volumes = (read_internal(volumes_path).over(n_cells, what)
+               if volumes_path.is_file() else np.ones(n_cells))
 
-    values = {}
-    for name in CENTRELINE_FIELDS:
-        array = read_internal_field(directory / name)
-        if array.shape[0] == 1 and n_cells > 1:
-            array = np.repeat(array, n_cells, axis=0)
-        if array.shape[0] != n_cells:
-            raise PostError(
-                f"{directory / name} has {array.shape[0]:,} values but the cell "
-                f"centres describe {n_cells:,} cells. These are not the same "
-                f"mesh.")
-        values[name] = array
+    values = {name: read_internal(directory / name).over(n_cells, what)
+              for name in CENTRELINE_FIELDS}
 
     inside, index, edges = centreline_tube(
         centres, volumes if volumes_path.is_file() else None, cfg, geom)

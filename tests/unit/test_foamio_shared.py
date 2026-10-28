@@ -325,6 +325,73 @@ def test_a_missing_file_is_named(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# what is refused: the malformed-field defect
+# --------------------------------------------------------------------------- #
+#
+# Before 2026-10-27 a list declaring four values but holding one came back as
+# one value, and every caller expanded any one-row result across the mesh.
+
+def write(tmp_path, text, name="f"):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_list_shorter_than_it_declares_is_refused(tmp_path):
+    path = write(tmp_path, field("nonuniform List<scalar>\n4\n(\n7.5\n)\n;"))
+    with pytest.raises(FoamDataError, match="declares 4 values but holds 1"):
+        volfield.read_internal(path)
+
+
+def test_a_vector_list_is_counted_in_vectors(tmp_path):
+    path = write(tmp_path, field("nonuniform List<vector> 3((1 2 3) (4 5 6));"))
+    with pytest.raises(FoamDataError, match="declares 3 values but holds 2"):
+        volfield.read_internal(path)
+
+
+def test_only_a_uniform_entry_is_expanded(tmp_path):
+    uniform = volfield.read_internal(write(tmp_path, field("uniform 2;")))
+    np.testing.assert_array_equal(uniform.over(4, "cells"), [2.0] * 4)
+    vector = volfield.read_internal(write(tmp_path, field("uniform (1 2 3);"), "g"))
+    assert vector.over(3, "cells").shape == (3, 3)
+    one = volfield.read_internal(write(tmp_path, field("nonuniform List<scalar> 1(2);"), "h"))
+    with pytest.raises(FoamDataError, match="holds 1 values, but there are 4 cells. "
+                                            "These are not the same mesh"):
+        one.over(4, "cells")
+    np.testing.assert_array_equal(one.over(1, "cells"), [2.0])
+
+
+def test_the_rarefaction_reader_no_longer_broadcasts_a_short_list(tmp_path):
+    """The trigger as first observed: a malformed field copied across the mesh."""
+    from plumetools.rarefaction import foam
+
+    path = write(tmp_path, field("nonuniform List<scalar>\n4\n(\n7.5\n)\n;"))
+    with pytest.raises(FoamDataError, match="declares 4"):
+        foam._cell_values(path, 4)
+    listed = write(tmp_path, field("nonuniform List<scalar> 1(7.5);"), "g")
+    with pytest.raises(FoamDataError, match="not the same mesh"):
+        foam._cell_values(listed, 4)
+    np.testing.assert_array_equal(
+        foam._cell_values(write(tmp_path, field("uniform 7.5;"), "h"), 4), [7.5] * 4)
+
+
+@pytest.mark.parametrize("text,message", [
+    (field("nonuniform List<scalar> 3(1 x 3);"), "not a number"),
+    (field("nonuniform List<scalar>;"), "no list"),
+    (field("uniform 0;").replace("format      ascii;", "format      binary;"),
+     "binary format"),
+])
+def test_unreadable_payloads_are_refused(tmp_path, text, message):
+    with pytest.raises(FoamDataError, match=message):
+        volfield.read_internal(write(tmp_path, text))
+
+
+def test_a_comment_mentioning_binary_is_not_the_format(tmp_path):
+    text = field("uniform 3;").replace("FoamFile", "// format binary; would be refused\nFoamFile")
+    np.testing.assert_array_equal(volfield.read_internal_field(write(tmp_path, text)), [3.0])
+
+
+# --------------------------------------------------------------------------- #
 # time directories
 # --------------------------------------------------------------------------- #
 

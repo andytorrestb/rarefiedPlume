@@ -51,7 +51,7 @@ from plumetools.foamio.errors import FoamDataError
 from plumetools.foamio.patchfields import patch_field_type
 from plumetools.foamio.primitives import BANNER, SEPARATOR, write_lines
 from plumetools.foamio.times import latest_time
-from plumetools.foamio.volfield import read_internal_field
+from plumetools.foamio.volfield import read_internal
 from plumetools.mesh.boundary import read_boundary
 from plumetools.mesh.patches import face_geometry
 from plumetools.mesh.polymesh import read_faces_flat, read_label_list, read_points_array
@@ -127,14 +127,7 @@ class CaseData:
 # --------------------------------------------------------------------------- #
 
 def _cell_values(path: Path, n_cells: int) -> np.ndarray:
-    values = read_internal_field(path)
-    if values.shape[0] == 1 and n_cells > 1:
-        values = np.repeat(values, n_cells, axis=0)
-    if values.shape[0] != n_cells:
-        raise PostError(
-            f"{path} has {values.shape[0]:,} values but constant/polyMesh has "
-            f"{n_cells:,} cells. These are not the same mesh.")
-    return values
+    return read_internal(path).over(n_cells, "cells in constant/polyMesh")
 
 
 def read_window(case_dir: Path, time: str, base_names) -> tuple:

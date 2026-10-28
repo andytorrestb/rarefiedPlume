@@ -110,6 +110,26 @@ def read_internal_field(path: Path) -> np.ndarray:
         raise PostError(str(exc)) from None
 
 
+def read_cell_values(path: Path, n_cells: int,
+                     what: str = "cells in the cell centres") -> np.ndarray:
+    """A field's ``internalField`` with one value per cell.
+
+    A ``uniform`` entry is expanded; a list must hold ``n_cells`` values.
+
+    Args:
+        path: the field file.
+        n_cells: the cells the caller's cell centres describe.
+        what: what ``n_cells`` counts, for the message.
+
+    Raises:
+        PostError: for a list of any other length -- a field from another mesh.
+    """
+    try:
+        return volfield.read_internal(path).over(n_cells, what)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
+
+
 def latest_time(case_dir: Path) -> str:
     """The largest numeric time directory in a case.
 
@@ -211,16 +231,17 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
             f"which ./Allpost runs. Without them there is no way to say where a "
             f"sampled value is.")
     centres = read_internal_field(centres_path)
+    n_cells = centres.shape[0]
+
+    what = f"cells in the cell centres {centres_path}"
 
     volumes_path = geometry_dir / "V"
     if volumes_path.is_file():
-        volumes = read_internal_field(volumes_path)
+        volumes = read_cell_values(volumes_path, n_cells, what)
     else:
         # Unweighted rather than absent: a graded mesh makes this a real
         # approximation, so it is reported by the caller, not hidden.
-        volumes = np.ones(centres.shape[0], dtype=np.float64)
-    if volumes.size == 1:
-        volumes = np.full(centres.shape[0], float(volumes[0]))
+        volumes = np.ones(n_cells, dtype=np.float64)
 
     values = {}
     for name in REQUIRED_FIELDS:
@@ -230,20 +251,12 @@ def read_case(case_dir: Path, species_mass_kg: float, *,
                 f"no {name} at {path}. It is written by the fieldAverage "
                 f"function object in system/controlDict; a run that ended before "
                 f"dsmc.average_start_s produces none.")
-        array = read_internal_field(path)
-        if array.shape[0] == 1 and centres.shape[0] > 1:
-            array = np.broadcast_to(array, (centres.shape[0],) + array.shape[1:])
-        elif array.shape[0] != centres.shape[0]:
-            # Only reachable when the geometry came from somewhere else, and
-            # the one failure mode that matters: a cell count that disagrees
-            # means these densities belong to a different mesh, and pairing
-            # them positionally would put every sample in the wrong place
-            # while producing a plot that looks entirely ordinary.
-            raise PostError(
-                f"{path} has {array.shape[0]:,} values but the cell centres in "
-                f"{centres_path} describe {centres.shape[0]:,} cells. These are "
-                f"not the same mesh.")
-        values[name] = np.asarray(array, dtype=np.float64)
+        # A cell count that disagrees means these densities belong to a
+        # different mesh, and pairing them positionally would put every sample
+        # in the wrong place while producing a plot that looks entirely
+        # ordinary -- so only a uniform entry is expanded.
+        values[name] = np.asarray(read_cell_values(path, n_cells, what),
+                                  dtype=np.float64)
 
     rho_m = values["rhoMMean"]
     momentum = values["momentumMean"]

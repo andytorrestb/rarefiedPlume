@@ -22,6 +22,17 @@ Shapes: a scalar field is ``(n,)``; every other type carries a component axis,
 :attr:`FieldValues.uniform` -- a caller that needs one value per cell expands it
 with :meth:`FieldValues.over`, which is the only place a value is broadcast.
 
+What is refused
+---------------
+OpenFOAM writes a list whose values are all equal as ``uniform``, so a uniform
+entry is ordinary and is expanded. A *list* is never expanded: one whose length
+differs from the count it declares, or from the cells or faces it is read for,
+is an error -- a truncated or hand-edited file, or a field from another mesh --
+and so is a payload that is not all numbers, and a file in ``binary`` format.
+Before 2026-10-27 the readers returned whatever numbers they found and every
+caller expanded any one-row result, so a list declaring four values but holding
+one was read as uniform and copied across the mesh.
+
 Finding the entry
 -----------------
 ``internalField`` and ``boundaryField`` are found where a keyword can start --
@@ -38,6 +49,7 @@ and most of a minute.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +72,8 @@ _BOUNDARY = re.compile(r"(?:^|[;{}])[ \t]*boundaryField\b", re.M)
 _BRACES = re.compile(r"[{}]")
 _VALUE = re.compile(r"^[ \t]*value\b", re.M)
 _NO_PARENS = str.maketrans("()", "  ")
+#: ``format binary;`` in the FoamFile header, anchored so a comment cannot match.
+_BINARY_FORMAT = re.compile(r"^\s*format\s+binary\s*;", re.M)
 
 
 @dataclass(frozen=True)
@@ -93,6 +107,45 @@ class FieldValues:
     @property
     def n_components(self) -> int:
         return COMPONENTS[self.value_type]
+
+    def over(self, n: int, what: str) -> np.ndarray:
+        """The values for ``n`` cells or faces.
+
+        A ``uniform`` entry is repeated ``n`` times; this is the only place a
+        value is ever broadcast. A list must already hold exactly ``n``.
+
+        Args:
+            n: how many cells or faces the caller has.
+            what: what ``n`` counts, for the message -- e.g. ``"cells in
+                constant/polyMesh"``.
+
+        Raises:
+            FoamDataError: for a list of any other length.
+        """
+        if self.uniform:
+            return np.repeat(self.values, n, axis=0)
+        if self.n_values != n:
+            raise FoamDataError(
+                f"{self.source} holds {self.n_values:,} values, but there are "
+                f"{n:,} {what}. These are not the same mesh.")
+        return self.values
+
+
+def _numbers(payload: str, source: str) -> np.ndarray:
+    """Every number in a list payload; a token that is not one is an error.
+
+    numpy >= 2 raises on such a token; older numpy warned and stopped there,
+    returning what it had read, so both are turned into the same error.
+    """
+    if not payload or payload.isspace():
+        return np.empty(0, dtype=np.float64)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            return np.fromstring(payload, dtype=np.float64, sep=" ")
+    except (ValueError, DeprecationWarning):
+        raise FoamDataError(
+            f"{source}: the list holds something that is not a number") from None
 
 
 def _uniform(token: str, source: str) -> FieldValues:
@@ -144,22 +197,28 @@ def parse_value(text: str, start: int, source: str) -> FieldValues:
     opening = text.find("(", kind.end(), end)
     if opening < 0:
         # 'nonuniform List<scalar> 0;' -- an empty list, written with no payload.
+        if declared is None:
+            raise FoamDataError(f"{source}: nonuniform value with no list")
         numbers = np.empty(0, dtype=np.float64)
     else:
         closing = text.rfind(")", opening, end)
         payload = text[opening + 1:closing]
         if value_type != "scalar":
             payload = payload.translate(_NO_PARENS)
-        numbers = (np.fromstring(payload, dtype=np.float64, sep=" ")
-                   if payload.strip() else np.empty(0, dtype=np.float64))
+        numbers = _numbers(payload, source)
 
-    if value_type == "scalar":
-        return FieldValues(numbers, False, value_type, declared, source)
     k = COMPONENTS[value_type]
     if numbers.size % k:
         raise FoamDataError(
             f"{source}: {numbers.size} numbers is not a whole number of "
             f"{k}-component {value_type} values")
+    n = numbers.size // k
+    if declared is not None and n != declared:
+        raise FoamDataError(
+            f"{source}: the list declares {declared:,} values but holds {n:,}; "
+            f"the file is truncated or was edited by hand")
+    if value_type == "scalar":
+        return FieldValues(numbers, False, value_type, declared, source)
     return FieldValues(numbers.reshape(-1, k), False, value_type, declared, source)
 
 
@@ -167,7 +226,15 @@ def _read(path: Path) -> str:
     path = Path(path)
     if not path.is_file():
         raise FoamDataError(f"no field file at {path}")
-    return path.read_text(encoding="utf-8", errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    header_end = text.find("}")
+    if _BINARY_FORMAT.search(text, 0, header_end if header_end >= 0 else 4096):
+        raise FoamDataError(
+            f"{path}: this field is in OpenFOAM's binary format, and this reader "
+            f"parses ASCII only. Set 'writeFormat ascii;' in system/controlDict "
+            f"for new output, or convert this case in place with "
+            f"'foamFormatConvert'.")
+    return text
 
 
 def read_internal(path: Path) -> FieldValues:

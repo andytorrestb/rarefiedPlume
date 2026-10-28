@@ -516,22 +516,16 @@ def load_case(row, max_bytes=DEFAULT_MAX_BYTES):
         if size * 4 > max_bytes:
             raise InventoryError(f"OpenFOAM input size exceeds conservative array cap {max_bytes}; use HPC configuration")
         centres = np.asarray(post.read_internal_field(geom_dir / "C"), dtype=float)
-        volumes = np.asarray(post.read_internal_field(geom_dir / "V"), dtype=float)
-        if volumes.size == 1:
-            volumes = np.full(len(centres), float(volumes[0]))
+        volumes = np.asarray(post.read_cell_values(geom_dir / "V", len(centres)), dtype=float)
         state = row["exit_state"]
-        density = np.asarray(post.read_internal_field(time_dir / "rhoNMean"), dtype=float)
-        if density.size == 1:
-            density = np.full(len(centres), float(density[0]))
+        density = np.asarray(post.read_cell_values(time_dir / "rhoNMean", len(centres)), dtype=float)
         density = density / state["n0_per_m3"]
         points = np.column_stack((centres[:, 0], np.hypot(centres[:, 1], centres[:, 2]))) / state["D_m"]
         temperature = None
         occupied = density > 0
         parcel_path = time_dir / "dsmcRhoNMean"
         if parcel_path.is_file():
-            count = np.asarray(post.read_internal_field(parcel_path), dtype=float)
-            if count.size == 1:
-                count = np.full(len(centres), float(count[0]))
+            count = np.asarray(post.read_cell_values(parcel_path, len(centres)), dtype=float)
             metadata["parcel_count"] = count
             occupied = np.isfinite(count) & (count > 0)
         if all((time_dir / name).is_file() for name in post.REQUIRED_FIELDS):

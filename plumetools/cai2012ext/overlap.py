@@ -269,12 +269,14 @@ def frames(case_dir: Path, t_start: float) -> list[str]:
 def geometry(case_dir: Path, names: list[str]):
     """``(centres, volumes)`` from the newest frame that has ``C``."""
     for name in reversed(names):
-        if (Path(case_dir) / name / "C").is_file():
-            centres = post.read_internal_field(Path(case_dir) / name / "C")
+        c_path = Path(case_dir) / name / "C"
+        if c_path.is_file():
+            centres = post.read_internal_field(c_path)
             v_path = Path(case_dir) / name / "V"
             if not v_path.is_file():
                 raise post.PostError(f"{case_dir}/{name}: no V; ./Allpost writes it")
-            return centres, post.read_internal_field(v_path)
+            return centres, post.read_cell_values(
+                v_path, centres.shape[0], f"cells in the cell centres {c_path}")
     raise post.PostError(f"{case_dir}: no frame has cell centres; run ./Allpost")
 
 
@@ -305,12 +307,7 @@ def bin_volumes(cfg: OverlapConfig, diameter_m: float) -> np.ndarray:
 def _read(case_dir: Path, name: str, selected) -> dict:
     values = {}
     for field in FIELDS:
-        array = post.read_internal_field(Path(case_dir) / name / field)
-        if array.shape[0] == 1:
-            array = np.broadcast_to(array, (selected.size,) + array.shape[1:])
-        if array.shape[0] != selected.size:
-            raise post.PostError(f"{case_dir}/{name}/{field}: {array.shape[0]} "
-                                 f"values for {selected.size} cells")
+        array = post.read_cell_values(Path(case_dir) / name / field, selected.size)
         values[field] = np.array(array[selected], dtype=np.float64)
     return values
 
@@ -381,8 +378,6 @@ def run_bins(case_dir: Path, cfg: OverlapConfig, *, diameter_m: float,
     if not names:
         raise post.PostError(f"{case_dir}: no sampled frame after {t_s:g} s")
     centres, volumes = geometry(case_dir, names)
-    if volumes.size == 1:
-        volumes = np.full(centres.shape[0], float(volumes[0]))
     selected, index = bin_index(centres, cfg, diameter_m)
     n_bins = bin_volumes(cfg, diameter_m).size
     vol = volumes[selected]
