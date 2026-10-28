@@ -1,0 +1,26 @@
+#!/bin/bash
+#
+# Build the hybrid plume's thermophysical instantiation (psiThermo with
+# tabulated transport) into $FOAM_USER_LIBBIN/libhybridPlumeThermo.so.
+#
+#   ./Allwmake            build
+#   ./Allwmake -j8        forward wmake options
+#
+# Requires a sourced OpenFOAM environment; verified against OpenFOAM v2512.
+# Build it separately in every environment (WSL, the HPC system): a library
+# compiled against one OpenFOAM build is not portable to another.
+
+set -euo pipefail
+cd "${0%/*}" || exit 1
+
+die() { echo "" >&2; echo "Allwmake: $*" >&2; exit 1; }
+
+command -v wmake >/dev/null 2>&1 || die "wmake is not on PATH; source OpenFOAM first."
+[ -n "${FOAM_USER_LIBBIN:-}" ] || die "FOAM_USER_LIBBIN is not set; source OpenFOAM first."
+
+echo "==> OpenFOAM ${WM_PROJECT_VERSION:-unknown} (${WM_OPTIONS:-unknown})"
+wmake "$@" libso hybridPlumeThermo
+
+LIB="$FOAM_USER_LIBBIN/libhybridPlumeThermo.so"
+[ -f "$LIB" ] || die "wmake reported success but $LIB does not exist"
+echo "Built $LIB"
