@@ -23,6 +23,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``crossings``       exact exits over a per-step parcel window after the run
 ``overlap``         hybrid vs a full-DSMC case on the same mesh, cell by cell
 ``reference``       the collisionless reference at the report stations
+``report``          collect everything into results/summary.json + plots
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -958,6 +959,16 @@ def overlap(case_dir: Path, reference: str | None = None, **_) -> dict:
         "T_full_over_Te": prof["T_full"] / source.temperature_K})
     write_json(res / "overlap.json", doc)
     return doc
+
+
+def report(case_dir: Path, **_) -> dict:
+    """Collect every step's JSON into results/summary.json and draw the plots."""
+    from . import report as rep
+    case_dir = Path(case_dir)
+    doc = rep.summarise(case_dir)
+    rep.plots(case_dir)
+    write_json(results_dir(case_dir) / "summary.json", doc)
+    return {k: doc[k] for k in ("label", "stages_present", "headline") if k in doc}
 
 
 def dsmc_fields(case_dir: Path) -> dict:
