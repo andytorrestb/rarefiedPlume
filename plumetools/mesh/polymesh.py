@@ -11,6 +11,7 @@ multi-million-cell octree needs (see :mod:`plumetools.rarefaction.foam`).
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -126,29 +127,188 @@ def read_face_range(case_dir: Path, start_face: int, n_faces: int) -> list[list[
     payload of a file OpenFOAM wrote carries no comments to strip. A line in the
     requested range that is not a face is still an error, so a payload that did
     carry one would stop the read rather than be mis-parsed.
+
+    The file is streamed (:func:`read_face_ranges`): the faces before the range
+    are skipped without being kept, so memory is the result's, not the file's.
+    """
+    return read_face_ranges(case_dir, [(start_face, n_faces)])[0]
+
+
+#: Bytes read per step while streaming a list file.
+_CHUNK = 1 << 22
+
+
+class _ListLines:
+    """The lines of a list payload, from an open binary file: skip, or take.
+
+    Skipping counts and splits newlines inside fixed-size byte chunks -- C
+    loops, no object per skipped line -- so passing over a million interior
+    faces costs about what reading them did, and holds one chunk, not the file.
+    """
+
+    def __init__(self, handle):
+        self._handle = handle
+        self._buffer = b""
+
+    def skip(self, n: int) -> bool:
+        """Discard ``n`` lines; ``False`` if the file ends first."""
+        while n > 0:
+            have = self._buffer.count(b"\n")
+            if have >= n:
+                self._buffer = self._buffer.split(b"\n", n)[-1]
+                return True
+            n -= have
+            self._buffer = self._buffer[self._buffer.rfind(b"\n") + 1:]
+            more = self._handle.read(_CHUNK)
+            if not more:
+                return False
+            self._buffer += more
+        return True
+
+    def take(self, n: int) -> list[bytes]:
+        """The next ``n`` lines, or as many as there are before the file ends."""
+        have = self._buffer.count(b"\n")
+        chunks = [self._buffer]
+        while have < n:
+            more = self._handle.read(_CHUNK)
+            if not more:
+                break
+            have += more.count(b"\n")
+            chunks.append(more)
+        parts = b"".join(chunks).split(b"\n", n)
+        if len(parts) > n:
+            self._buffer = parts.pop()
+        else:
+            # The file ended: what follows its last newline is a line only if
+            # it holds something.
+            self._buffer = b""
+            if parts and not parts[-1]:
+                parts.pop()
+        return parts
+
+
+def _parse_face(raw: str, path: Path, index: int) -> list[int]:
+    raw = raw.strip()
+    open_paren = raw.find("(")
+    close_paren = raw.rfind(")")
+    if open_paren < 0 or close_paren < open_paren:
+        raise ValueError(f"{path}: face {index}: expected 'N(a b c ...)', got {raw!r}")
+    labels = [int(v) for v in raw[open_paren + 1:close_paren].split()]
+    declared = raw[:open_paren].strip()
+    if declared and int(declared) != len(labels):
+        raise ValueError(
+            f"{path}: face {index}: declared {declared} vertices, found {len(labels)}")
+    return labels
+
+
+@contextmanager
+def _face_lines(case_dir: Path):
+    """``(path, count, lines)``: the faces file, its declared length, and a
+    :class:`_ListLines` positioned at face 0.
+
+    The file stays open for the ``with`` block and is closed after it: the
+    reader's lifetime is the caller's, and nothing is cached between calls.
+    Line endings may be LF or CRLF.
     """
     path = Path(case_dir) / "constant" / "polyMesh" / "faces"
-    text = read_text(path)
-    opening = text.find("\n(\n")
-    if opening < 0:
-        raise ValueError(f"{path}: no '<count> ( ... )' list block found")
-    count, _ = find_list_block(strip_comments(text[:opening + 3]), path)
-    if start_face < 0 or n_faces < 0 or start_face + n_faces > count:
-        raise ValueError(
-            f"{path}: faces {start_face} .. {start_face + n_faces} requested, but "
-            f"the mesh has {count}")
-    lines = text[opening + 3:].split("\n")
+    if not path.is_file():
+        raise FileNotFoundError(f"expected an OpenFOAM file at {path}")
+    with open(path, "rb") as handle:
+        header = []
+        for line in handle:
+            if line.strip() == b"(":
+                break
+            header.append(line)
+        else:
+            raise ValueError(f"{path}: no '<count> ( ... )' list block found")
+        text = b"".join(header).decode("utf-8", errors="replace").replace("\r\n", "\n")
+        count, _ = find_list_block(strip_comments(text + "(\n"), path)
+        yield path, count, _ListLines(handle)
 
-    faces: list[list[int]] = []
-    for i in range(start_face, start_face + n_faces):
-        raw = lines[i].strip()
-        open_paren = raw.find("(")
-        close_paren = raw.rfind(")")
-        if open_paren < 0 or close_paren < open_paren:
+
+def _take(lines: _ListLines, path: Path, first: int, n: int) -> list[list[int]]:
+    raw = lines.take(n)
+    if len(raw) < n:
+        raise ValueError(f"{path}: the list ends before face {first + len(raw)}")
+    return [_parse_face(line.decode("utf-8", errors="replace"), path, first + i)
+            for i, line in enumerate(raw)]
+
+
+def _skip(lines: _ListLines, path: Path, first: int, n: int) -> None:
+    if not lines.skip(n):
+        raise ValueError(f"{path}: the list ends before face {first + n}")
+
+
+def read_face_ranges(case_dir: Path, ranges) -> list[list[list[int]]]:
+    """Several contiguous ranges of faces, in one pass over the file.
+
+    Args:
+        case_dir: an OpenFOAM case directory.
+        ranges: ``(start_face, n_faces)`` pairs -- one per patch, say.
+
+    Returns:
+        One list of point-label lists per range, in the order given.
+
+    Raises:
+        ValueError: if a range runs past the end of the list, or a line in one
+            is malformed.
+
+    The faces outside every range are skipped at C speed and never kept, so
+    reading every boundary patch of a mesh costs one pass over its ``faces``
+    file and the memory of the boundary faces alone.
+    """
+    ranges = [(int(start), int(n)) for start, n in ranges]
+    with _face_lines(case_dir) as (path, count, lines):
+        for start, n in ranges:
+            if start < 0 or n < 0 or start + n > count:
+                raise ValueError(
+                    f"{path}: faces {start} .. {start + n} requested, but the "
+                    f"mesh has {count}")
+        # Overlapping ranges are read once, as their union.
+        spans = []
+        for start, end in sorted((s, s + n) for s, n in ranges if n):
+            if spans and start <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], end)
+            else:
+                spans.append([start, end])
+        parsed, position = [], 0
+        for start, end in spans:
+            _skip(lines, path, position, start - position)
+            parsed.append((start, _take(lines, path, start, end - start)))
+            position = end
+    out = []
+    for start, n in ranges:
+        span_start, faces = next(((s, f) for s, f in parsed
+                                  if s <= start and start + n <= s + len(f)),
+                                 (start, []))
+        out.append(faces[start - span_start:start - span_start + n])
+    return out
+
+
+def read_faces_at(case_dir: Path, labels) -> list[list[int]]:
+    """The faces with the given global labels, in the order given, in one pass.
+
+    For a ``faceSet``, whose labels need not be contiguous. Only the faces
+    asked for are kept.
+
+    Raises:
+        ValueError: for a label outside the list or a malformed line among
+            those asked for.
+    """
+    labels = [int(label) for label in labels]
+    wanted = sorted(set(labels))
+    found = {}
+    with _face_lines(case_dir) as (path, count, lines):
+        if wanted and (wanted[0] < 0 or wanted[-1] >= count):
             raise ValueError(
-                f"{path}: face {i}: expected 'N(a b c ...)', got {raw!r}")
-        faces.append([int(v) for v in raw[open_paren + 1:close_paren].split()])
-    return faces
+                f"{path}: face labels {wanted[0]} .. {wanted[-1]} requested, but "
+                f"the mesh has {count}")
+        position = 0
+        for label in wanted:
+            _skip(lines, path, position, label - position)
+            found[label] = _take(lines, path, label, 1)[0]
+            position = label + 1
+    return [found[label] for label in labels]
 
 
 # --------------------------------------------------------------------------- #

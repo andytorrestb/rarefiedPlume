@@ -21,7 +21,7 @@ from plumetools import geometry, sourceflow
 from plumetools.config import CaseConfig
 from plumetools.constants import AMU_TO_KG
 from plumetools.mesh.boundary import read_boundary, require_patch
-from plumetools.mesh.polymesh import read_faces, read_points
+from plumetools.mesh.polymesh import read_face_range, read_faces_at, read_points
 from plumetools.mesh.sets import read_face_set
 
 
@@ -80,7 +80,6 @@ def read_patch_geometry(case_dir: Path, patch_name: str):
     """
     case_dir = Path(case_dir)
     patch = require_patch(read_boundary(case_dir), patch_name)
-    all_faces = read_faces(case_dir)
     points = read_points(case_dir)
 
     set_path = case_dir / "constant" / "polyMesh" / "sets" / patch_name
@@ -91,10 +90,15 @@ def read_patch_geometry(case_dir: Path, patch_name: str):
                 f"faceSet {patch_name!r} has {len(labels)} faces but the boundary "
                 f"declares {patch.n_faces}; re-run topoSet"
             )
+        faces = read_faces_at(case_dir, labels)
     else:
         labels = list(range(patch.start_face, patch.start_face + patch.n_faces))
+        faces = read_face_range(case_dir, patch.start_face, patch.n_faces)
 
-    return labels, [all_faces[i] for i in labels], points
+    # Only the patch's faces are read -- one streamed pass over the file -- not
+    # every face of the mesh, which on a snappyHexMesh mesh is gigabytes of
+    # Python lists for a patch of a few thousand faces.
+    return labels, faces, points
 
 
 def compute_inflow(case_dir: Path, cfg: CaseConfig) -> InflowResult:

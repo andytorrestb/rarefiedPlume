@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from plumetools.mesh.boundary import read_boundary
-from plumetools.mesh.polymesh import read_face_range, read_points
+from plumetools.mesh.polymesh import read_face_ranges, read_points_array
 
 
 @dataclass(frozen=True)
@@ -103,22 +103,27 @@ def read_patches(case_dir: Path, names) -> dict:
     Raises:
         KeyError: for a patch the mesh does not have, listing the ones it does.
 
-    The points are read once and shared; the faces are read patch by patch
-    through :func:`plumetools.mesh.polymesh.read_face_range`, which does not
-    convert the interior faces it is not asked for.
+    The points are read once and shared, and so is the one pass over
+    ``faces`` that collects every requested patch
+    (:func:`plumetools.mesh.polymesh.read_face_ranges`), which keeps none of the
+    interior faces it passes over. The points come from
+    :func:`~plumetools.mesh.polymesh.read_points_array`: the same values as
+    :func:`~plumetools.mesh.polymesh.read_points` bit for bit (checked on the
+    537 065 points of the R-4D mesh), without a Python loop per point.
     """
     case_dir = Path(case_dir)
+    names = list(names)
     boundary = read_boundary(case_dir)
     absent = sorted(name for name in names if name not in boundary)
     if absent:
         raise KeyError(
             f"patch(es) {absent} not in the mesh; it has {sorted(boundary)}")
 
-    points = read_points(case_dir)
+    points = read_points_array(case_dir)
+    ranges = read_face_ranges(case_dir, [(boundary[name].start_face,
+                                          boundary[name].n_faces) for name in names])
     out = {}
-    for name in names:
-        info = boundary[name]
-        faces = read_face_range(case_dir, info.start_face, info.n_faces)
+    for name, faces in zip(names, ranges):
         centres, area_vectors = face_geometry(faces, points)
         used = np.unique(np.asarray(
             [label for face in faces for label in face], dtype=np.int64))
