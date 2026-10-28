@@ -24,6 +24,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``overlap``         hybrid vs a full-DSMC case on the same mesh, cell by cell
 ``reference``       the collisionless reference at the report stations
 ``report``          collect everything into results/summary.json + plots
+``hpc``             resumable batch scripts sized from the resource estimates
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -958,6 +959,33 @@ def overlap(case_dir: Path, reference: str | None = None, **_) -> dict:
         "T_hybrid_over_Te": prof["T_hybrid"] / source.temperature_K,
         "T_full_over_Te": prof["T_full"] / source.temperature_K})
     write_json(res / "overlap.json", doc)
+    return doc
+
+
+def hpc(case_dir: Path, scheduler: str = "pbs", np: int | None = None, **_) -> dict:
+    """Write resumable batch scripts sized from the latest resource estimates."""
+    from . import hpc as hpc_mod
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    res = results_dir(case_dir)
+    est = {}
+    setup_doc = json.loads((res / "setup.json").read_text()) if (res / "setup.json").is_file() else {}
+    est["cfd"] = (setup_doc.get("resources", {}).get("cfd", {}) or {}).get(
+        "runtime_estimate_s_at_max_ranks")
+    for name in ("dsmc_setup.json", "interface.json"):
+        p = res / name
+        if p.is_file():
+            d = json.loads(p.read_text())
+            e = d.get("run", {}).get("estimate") or d.get("dsmc_estimate")
+            if e:
+                est["dsmc"] = e.get("runtime_estimate_s_at_max_ranks")
+                break
+    else:
+        est["dsmc"] = setup_doc.get("resources", {}).get("full_dsmc", {}).get(
+            "runtime_estimate_s_at_max_ranks")
+    doc = hpc_mod.write_scripts(case_dir, Path(__file__).resolve().parents[2], cfg,
+                                scheduler, np, est)
+    write_json(res / "hpc_scripts.json", doc)
     return doc
 
 

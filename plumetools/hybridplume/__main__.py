@@ -27,8 +27,8 @@ def main(argv=None) -> int:
                    help="write a background-floor sensitivity copy instead of cfd/")
 
     for name in ("check-mesh", "cfd-report", "breakdown", "interface", "dsmc-setup",
-                 "dsmc-fields", "dsmc-post", "crossings", "overlap", "reference",
-                 "report"):
+                 "dsmc-fields", "dsmc-post", "crossings", "overlap", "reference", "report",
+                 "hpc"):
         p = sub.add_parser(name)
         p.add_argument("case")
         if name in ("check-mesh",):
@@ -46,6 +46,9 @@ def main(argv=None) -> int:
         if name == "overlap":
             p.add_argument("--reference", required=True,
                            help="a full-DSMC case directory on the same mesh")
+        if name == "hpc":
+            p.add_argument("--scheduler", default="slurm", choices=("slurm", "pbs", "none"))
+            p.add_argument("--np", type=int)
 
     args = ap.parse_args(argv)
     try:
