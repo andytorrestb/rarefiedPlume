@@ -20,6 +20,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``dsmc-setup``      DSMC dictionaries + the cellSet that subsetMesh removes
 ``dsmc-fields``     map CFD states onto the DSMC inflow faces; write 0/
 ``dsmc-post``       moments, measured fluxes, budgets, comparisons
+``reference``       the collisionless reference at the report stations
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -775,6 +776,48 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
                        "repeats; independence comes from blocks, not seeds"})
     write_json(res / "dsmc_post.json", doc)
     return doc
+
+
+def reference(case_dir: Path, **_) -> dict:
+    """The collisionless reference at the report stations, with quadrature checks."""
+    from . import collisionless, post
+    from plumetools.cai2012 import analytical
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    pts = collisionless.centreline_and_angular_points(source)
+    res = results_dir(case_dir)
+    out = {"label": cfg.get("label", cfg.profile),
+           "status": "exact only in the collisionless limit (Kn -> infinity)"}
+    for name, p in (("centreline", pts["centreline"]), ("arc_r10D", pts["arc"])):
+        ref = collisionless.converged(p, source)
+        cf = analytical.moments(p[:, 0], p[:, 1], p[:, 2], source.radius_m, source.speed_ratio)
+        cols = {"x": p[:, 0], "y": p[:, 1], "z": p[:, 2], "n_over_ne": ref["n_over_ne"],
+                "U_over_ae": ref["U_over_ae"], "T_over_Te": ref["T_over_Te"],
+                "Tdir_over_Te": ref["T_directional"] / source.temperature_K,
+                "quadrature_rel_change": ref["quadrature_rel_change"]}
+        if name == "arc_r10D":
+            cols["angle_deg"] = pts["arc_angle_deg"]
+        post.write_csv(res / f"reference_{name}.csv", cols)
+        out[name] = {
+            "points": int(p.shape[0]),
+            "max_quadrature_rel_change": float(np.max(ref["quadrature_rel_change"])),
+            "vs_cai2012_closed_form": {
+                "n": post.compare(ref["n_over_ne"], cf["n_over_n0"]),
+                "T": post.compare(ref["T_over_Te"], cf["T_over_T0"]),
+                "Ux": post.compare(ref["U_over_ae"][:, 0], cf["U_sqrt_beta0"][:, 0])}}
+    # rotational symmetry: same (x, r) at two azimuths, not on a quadrature axis
+    p1 = np.array([[0.3 * source.diameter_m, 0.4 * source.diameter_m, 0.0]])
+    ang = np.radians(37.0)
+    p2 = np.array([[p1[0, 0], 0.4 * source.diameter_m * np.cos(ang),
+                    0.4 * source.diameter_m * np.sin(ang)]])
+    r1 = collisionless.reference(p1, source)
+    r2 = collisionless.reference(p2, source)
+    out["rotational_symmetry_rel_diff"] = {
+        "n": float(abs(r1["n"][0] / r2["n"][0] - 1)),
+        "T": float(abs(r1["T"][0] / r2["T"][0] - 1))}
+    write_json(res / "reference.json", out)
+    return out
 
 
 def dsmc_fields(case_dir: Path) -> dict:
