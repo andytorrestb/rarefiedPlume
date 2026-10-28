@@ -182,3 +182,5 @@ dist/
 # (compile it separately in every environment; never commit the objects)
 applications/thermophysicalModels/hybridPlumeThermo/lnInclude/
 applications/thermophysicalModels/hybridPlumeThermo/Make/linux64*/
+# hybridplume case directories are generated under cases/cai2012-hybrid/runs/
+cases/cai2012-hybrid/runs/
