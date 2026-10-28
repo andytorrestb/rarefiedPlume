@@ -1,11 +1,12 @@
 """Streamed reads and writes give byte-for-byte what the whole-file versions gave.
 
-Two paths stopped holding a whole file in memory on 2026-10-27:
+Three paths stopped holding a whole file in memory on 2026-10-27:
 
 * face ranges and face-set labels of ``constant/polyMesh/faces``
   (:mod:`plumetools.mesh.polymesh`), used for every patch read;
 * the per-cell values of a rarefaction diagnostic field
-  (:func:`plumetools.rarefaction.foam._write_streamed`).
+  (:func:`plumetools.rarefaction.foam._write_streamed`);
+* the log summaries ``interface_case collect`` brings back from a cluster.
 
 Each is checked here against the code it replaced.
 """
@@ -17,6 +18,7 @@ import random
 import numpy as np
 import pytest
 
+from plumetools.cai2012ext import interface_case
 from plumetools.foamio.primitives import write_lines
 from plumetools.mesh import polymesh
 from plumetools.rarefaction import foam
@@ -112,3 +114,33 @@ def test_streamed_field_is_byte_identical_to_the_list_of_lines(tmp_path, monkeyp
     foam._write_streamed(tmp_path / "new", head, values, tail)
     write_lines(tmp_path / "old", head + [f"{v:.10g}" for v in values.tolist()] + tail)
     assert (tmp_path / "new").read_bytes() == (tmp_path / "old").read_bytes()
+
+
+# --------------------------------------------------------------------------- #
+# the log summary
+# --------------------------------------------------------------------------- #
+
+def legacy_summary(path):
+    """interface_case.collect's per-log summary as it was at the tag."""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return {"lines": len(lines), "tail": lines[-15:],
+            "memory_lines": [x for x in lines if "MB" in x or "memory" in x.lower()][-5:],
+            "execution_time": [x for x in lines if x.startswith("ExecutionTime")][-1:]}
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_log_summary_matches_reading_the_whole_file(tmp_path, ending):
+    body = []
+    for step in range(60):
+        body += [f"Time = {step}", f"    Memory {step} MB", "",
+                 f"ExecutionTime = {step}.5 s  ClockTime = {step} s"]
+    text = ending.join(body) + ending + "form\x0cfeed" + ending + "MeMoRy" + ending + "no newline"
+    path = tmp_path / "log.dsmcFoam"
+    path.write_bytes(text.encode("utf-8") + b"\xff bad byte")
+    assert interface_case.log_summary(path) == legacy_summary(path)
+
+
+def test_an_empty_log_summarises_as_empty(tmp_path):
+    path = tmp_path / "log.dsmcFoam"
+    path.write_text("")
+    assert interface_case.log_summary(path) == legacy_summary(path)

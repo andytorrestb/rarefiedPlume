@@ -42,6 +42,7 @@ import hashlib
 import json
 import math
 import sys
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1136,13 +1137,31 @@ def collect(case_dir: Path) -> dict:
                 "output.log", "error.log"):
         path = case_dir / log
         if path.is_file():
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            out.setdefault("logs", {})[log] = {
-                "lines": len(lines), "tail": lines[-15:],
-                "memory_lines": [x for x in lines if "MB" in x or "memory" in x.lower()][-5:],
-                "execution_time": [x for x in lines if x.startswith("ExecutionTime")][-1:],
-            }
+            out.setdefault("logs", {})[log] = log_summary(path)
     return out
+
+
+def log_summary(path: Path) -> dict:
+    """A log's line count, last 15 lines, last 5 memory lines, last ExecutionTime.
+
+    One streamed pass holding only those few lines: a ``log.dsmcFoam`` from a
+    long run is gigabytes, and reading it whole to keep twenty lines of it
+    needed several times its size in memory. Lines are split exactly as
+    ``str.splitlines`` splits the whole text.
+    """
+    count = 0
+    tail, memory, execution = deque(maxlen=15), deque(maxlen=5), deque(maxlen=1)
+    with open(path, encoding="utf-8", errors="replace", newline="") as handle:
+        for physical in handle:
+            for line in physical.splitlines():
+                count += 1
+                tail.append(line)
+                if "MB" in line or "memory" in line.lower():
+                    memory.append(line)
+                if line.startswith("ExecutionTime"):
+                    execution.append(line)
+    return {"lines": count, "tail": list(tail), "memory_lines": list(memory),
+            "execution_time": list(execution)}
 
 
 def _summarise(key: str, doc):
