@@ -97,13 +97,13 @@ render_midplane() {
 
 have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
 
-mapfile -t CASES < <($PYTHON - <<'PY'
-import yaml
-document = yaml.safe_load(open("manifest.yaml", encoding="utf-8"))
-for entry in document.get("cases", []):
-    print(entry["path"])
-PY
-) || die "could not read manifest.yaml"
+# The WHOLE manifest is read and checked before any case is touched, and the
+# listing is captured before mapfile: a failure inside `< <(...)` never reaches
+# a `||`, so paths printed before it would have run as if they were the study.
+LISTING=$($PYTHON -m plumetools.casemanifest manifest.yaml) \
+    || die "could not read manifest.yaml (see above)"
+CASES=()
+[ -z "$LISTING" ] || mapfile -t CASES <<< "$LISTING"
 
 if [ "$VIZ_ONLY" -eq 1 ]; then
     render_midplane || die "rendering failed"
