@@ -27,7 +27,7 @@ def main(argv=None) -> int:
                    help="write a background-floor sensitivity copy instead of cfd/")
 
     for name in ("check-mesh", "cfd-report", "breakdown", "interface", "dsmc-setup",
-                 "dsmc-fields", "dsmc-post", "reference"):
+                 "dsmc-fields", "dsmc-post", "crossings", "reference"):
         p = sub.add_parser(name)
         p.add_argument("case")
         if name in ("check-mesh",):

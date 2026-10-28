@@ -20,6 +20,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``dsmc-setup``      DSMC dictionaries + the cellSet that subsetMesh removes
 ``dsmc-fields``     map CFD states onto the DSMC inflow faces; write 0/
 ``dsmc-post``       moments, measured fluxes, budgets, comparisons
+``crossings``       exact exits over a per-step parcel window after the run
 ``reference``       the collisionless reference at the report stations
 ==================  ==========================================================
 
@@ -775,6 +776,59 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
                        "seeded deterministically, so a rerun on the same decomposition "
                        "repeats; independence comes from blocks, not seeds"})
     write_json(res / "dsmc_post.json", doc)
+    return doc
+
+
+def crossings(case_dir: Path, **_) -> dict:
+    """Exact exits over the per-step window written by the Allrun 'crossings' stage."""
+    from . import particles
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    res = results_dir(case_dir)
+    setup_doc = json.loads((res / "dsmc_setup.json").read_text())
+    dt = float(setup_doc["run"]["dt_s"])
+    t_end = float(setup_doc["run"]["end_time_s"])
+    dsmc_dir = case_dir / "dsmc"
+    times = [t for t in _time_dirs(dsmc_dir) if float(t) >= t_end * (1 - 1e-9)]
+    # Measured 2026-10-28: every dsmcFoam restart with plumeFieldInflow injects a
+    # burst (~+1300 parcels over ~10 steps on smoke-kn1em3, identical inflow
+    # fields, with or without per-step writes). The first steps after the
+    # restart are therefore discarded; the insertion series is reported.
+    discard = int(cfg.get("dsmc.crossing_discard_steps", 12))
+    times = times[discard:]
+    if len(times) < 3:
+        raise WorkflowError("too few per-step snapshots after the post-restart discard "
+                            f"({discard}); run a longer 'crossings' window")
+    snaps = [(float(t), particles.read_cloud(dsmc_dir / t)) for t in times]
+    cfd_mesh = read_mesh(case_dir / "cfd")
+    retained = (np.load(res / "retained.npy") if (res / "retained.npy").is_file()
+                else np.zeros(cfd_mesh.n_cells, bool))
+    plan = mesh_mod.plan(cfg, source)
+    in_region = particles.lattice_lookup(cfd_mesh.cell_centres, retained,
+                                         tuple(plan.edges(a) for a in range(3)))
+    lo = cfd_mesh.points.min(axis=0)
+    hi = cfd_mesh.points.max(axis=0)
+    doc = particles.crossing_window(snaps, dt, float(setup_doc["run"]["weight"]), source.gas,
+                                    (lo, hi), in_region, source.radius_m)
+    inserted = particles.inserted_from_log(dsmc_dir / "log.dsmcFoam.crossings")
+    doc["discarded_post_restart_steps"] = discard
+    if inserted.size:
+        w = float(setup_doc["run"]["weight"])
+        doc["insertion_series_after_restart"] = inserted.tolist()
+        doc["injected_from_log"] = {
+            "steps": int(min(inserted.size, doc["steps"])),
+            "mass_kg_s": float(inserted[-doc["steps"]:].sum() * w * source.gas.mass_kg
+                               / doc["duration_s"])}
+        itf_path = res / "interface.json"
+        if itf_path.is_file():
+            itf = json.loads(itf_path.read_text())
+            if "fluxes" in itf:
+                doc["expected_from_cfd_maxwellian_kg_s"] = {
+                    "forward": itf["fluxes"]["maxwellian_forward"]["mass"],
+                    "reverse": itf["fluxes"]["maxwellian_reverse"]["mass"]}
+    write_json(res / "crossing_window.json", doc)
     return doc
 
 
