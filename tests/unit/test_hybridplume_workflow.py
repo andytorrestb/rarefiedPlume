@@ -1,4 +1,4 @@
-"""hybridplume: configuration, the mesh plan and its refusals."""
+"""hybridplume: configuration, generated dictionaries and refusals."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plumetools.hybridplume import config
+from plumetools.hybridplume import cfd, config
 from plumetools.hybridplume import mesh as hm
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,3 +43,19 @@ def test_departures_from_paper_are_labelled():
     cfg = config.load(STUDY, "smoke-kn1em3")
     dep = config.departures_from_paper(cfg)
     assert dep["source.knudsen"]["label"].startswith("extension")
+
+
+def test_cfd_case_uses_vhs_transport_and_caps_the_viscous_step(tmp_path):
+    cfg = config.load(STUDY, "smoke-kn0p01")
+    src = config.build_source(cfg)
+    plan = hm.plan(cfg, src)
+    out = cfd.write_case(tmp_path, cfg, src, plan)
+    assert out["transport_table_max_rel_error"] < 1e-4
+    thermo = (tmp_path / "constant" / "thermophysicalProperties").read_text()
+    assert "transport       tabulated;" in thermo and "sutherland" not in thermo
+    ctrl = (tmp_path / "system" / "controlDict").read_text()
+    assert 'libs ("libhybridPlumeThermo.so");' in ctrl
+    tm = out["timing"]
+    assert tm["max_delta_t_s"] <= tm["viscous_dt_limit_s"] * (1 + 1e-12)
+    p = (tmp_path / "0" / "p").read_text()
+    assert "waveTransmissive" in p and f"{src.pressure:.10g}" in p
