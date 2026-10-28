@@ -19,6 +19,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``interface``       select (automatic/manual/none) and assess the surface
 ``dsmc-setup``      DSMC dictionaries + the cellSet that subsetMesh removes
 ``dsmc-fields``     map CFD states onto the DSMC inflow faces; write 0/
+``dsmc-post``       moments, measured fluxes, budgets, comparisons
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -496,6 +497,283 @@ def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
            "inflow_patches": patches, "dsmc_cells": int(keep.sum()),
            "source_faces_injected_by_dsmc": src_left, "run": run.describe(), "ranks": ranks}
     write_json(res / "dsmc_setup.json", doc)
+    return doc
+
+
+def _time_dirs(case: Path) -> list:
+    from plumetools.foamio.times import time_names
+    return sorted(time_names(case), key=float)
+
+
+def _log_series(log: Path, pattern: str) -> np.ndarray:
+    import re
+    if not log.is_file():
+        return np.empty(0)
+    return np.array([float(v) for v in re.findall(pattern, log.read_text(errors="replace"))])
+
+
+def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
+    """Sampled DSMC solution, measured injection/return, budgets, comparisons."""
+    from . import collisionless, halfrange, mapping, particles, post, resources
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    gas = source.gas
+    res = results_dir(case_dir)
+    dsmc_dir = case_dir / "dsmc"
+    setup_doc = json.loads((res / "dsmc_setup.json").read_text())
+    run = setup_doc["run"]
+    weight, dt = float(run["weight"]), float(run["dt_s"])
+    t_end, t_avg = float(run["end_time_s"]), float(run["average_start_s"])
+    times = [t for t in _time_dirs(dsmc_dir) if float(t) <= t_end * (1 + 1e-9)]
+    if not times or float(times[-1]) <= t_avg:
+        raise WorkflowError(f"{dsmc_dir} has not reached its averaging window "
+                            f"(start {t_avg:.4e} s)")
+    t_final = time or times[-1]
+    dmesh = read_mesh(dsmc_dir)
+    sizes = dmesh.cell_size()
+    doc = {"label": cfg.get("label", cfg.profile), "time": t_final,
+           "smoke_only": setup_doc.get("smoke_only", False),
+           "interface_status": setup_doc.get("interface_status")}
+
+    # -- fieldAverage moments ------------------------------------------------
+    fa = post.dsmc_fieldaverage(dsmc_dir / t_final, gas)
+    occ = fa["parcels_per_step"]
+    doc["sampling"] = {
+        "average_start_s": t_avg, "end_s": float(t_final),
+        "steps_averaged": int(round((float(t_final) - t_avg) / dt)),
+        "parcels_per_cell_per_step": {"median": float(np.median(occ)),
+                                      "volume_fraction_below_1": float(
+                                          dmesh.cell_volumes[occ < 1].sum()
+                                          / dmesh.cell_volumes.sum())},
+        "weight_check": {"max_rel": float(np.nanmax(np.abs(
+            fa["n"][occ > 0] * dmesh.cell_volumes[occ > 0] / occ[occ > 0] / weight - 1)))},
+    }
+    if "n_cv_per_step" in fa:
+        cv = fa["n_cv_per_step"]
+        doc["sampling"]["n_cv_per_step_median"] = float(np.nanmedian(cv[occ > 1]))
+
+    # -- stationarity from the log ------------------------------------------
+    log = dsmc_dir / "log.dsmcFoam"
+    nmol = _log_series(log, r"Number of molecules\s*=\s*([0-9.eE+]+)")
+    if nmol.size > 10:
+        q = max(2, nmol.size // 4)
+        doc["stationarity"] = {"parcels_last_quarter_rel_change":
+                               float((nmol[-1] - nmol[-q]) / nmol[-1]),
+                               "parcels_final": float(nmol[-1])}
+    # -- measured vs expected injection ---------------------------------------
+    inserted = particles.inserted_from_log(log)
+    n_window = int(round((float(t_final) - t_avg) / dt))
+    expected = 0.0
+    if (res / "interface_fields.npz").is_file() and "interface" in setup_doc["inflow_patches"]:
+        f = mapping.load(res / "interface_fields.npz")
+        expected += float(np.dot(halfrange.incoming_flux(
+            f["numberDensity"], f["velocity"], f["translationalTemperature"], f["faceNormal"],
+            gas.gas_constant)["mass"], f["faceArea"]))
+    if "source" in setup_doc["inflow_patches"]:
+        sl = dmesh.patch_slice(mesh_mod.PATCHES["source"])
+        a_src = float(np.linalg.norm(dmesh.face_areas[sl], axis=1).sum())
+        expected += halfrange.gross_source_number_flux(
+            source.number_density, source.speed_ratio, source.thermal_speed) * a_src
+    if inserted.size >= n_window > 0:
+        measured = float(inserted[-n_window:].mean()) * weight / dt
+        doc["injection"] = {
+            "expected_gross_number_rate_per_s": expected,
+            "measured_gross_number_rate_per_s": measured,
+            "relative_difference": measured / expected - 1.0 if expected > 0 else None,
+            "expected_counting_stderr_rel": 1.0 / np.sqrt(inserted[-n_window:].sum()),
+            "note": "gross half-range injection, NOT the net continuum mass transport"}
+
+    # -- tensor moments from parcel snapshots, in independent blocks ----------
+    snaps = [t for t in times if float(t) >= t_avg - 1e-12 * t_end]
+    n_blocks = int(cfg.get("dsmc.uncertainty_blocks", 4))
+    blocks = np.array_split(np.array(snaps), max(1, min(n_blocks, len(snaps))))
+    total = particles.MomentAccumulator(dmesh.n_cells)
+    per_block = []
+    for blk in blocks:
+        acc = particles.MomentAccumulator(dmesh.n_cells)
+        for t in blk:
+            cl = particles.read_cloud(dsmc_dir / t)
+            acc.add(cl, weight)
+            total.add(cl, weight)
+        per_block.append(acc.fields(dmesh.cell_volumes, gas))
+    lag = total.fields(dmesh.cell_volumes, gas)
+    doc["snapshot_moments"] = {"snapshots": lag["snapshots"], "blocks": len(blocks)}
+
+    # -- profiles, on the full mesh: DSMC cells scattered into CFD numbering ----
+    # In a hybrid case the axis may lie inside the retained CFD region, so the
+    # profile is taken on the WHOLE CFD mesh: "hybrid" = CFD where retained,
+    # DSMC elsewhere; the DSMC-only and CFD-only columns are kept beside it.
+    dsmc_fields_ = {"n_fa": fa["n"], "T_fa": fa["T"], "U_fa": fa["U"], "n_lag": lag["n"],
+                    "T_lag": lag["T"], "Tpar_lag": lag["T_parallel"],
+                    "Tperp_lag": lag["T_perpendicular"]}
+    for k, name in (("n", "n_lag_se"), ("T", "T_lag_se")):
+        dsmc_fields_[name] = particles.block_statistics([b[k] for b in per_block])["stderr"]
+    cell_map = res / "dsmc_to_cfd_cells.npy"
+    t_cfd = _latest_or_none(case_dir / "cfd") if (case_dir / "cfd").is_dir() else None
+    hybrid = cell_map.is_file() and t_cfd is not None and float(t_cfd) > 0
+    if hybrid:
+        from . import breakdown as bd
+        cmesh = read_mesh(case_dir / "cfd")
+        cm = np.load(cell_map)
+        centres, volumes, n_all = cmesh.cell_centres, cmesh.cell_volumes, cmesh.n_cells
+        fields = {}
+        for k, v in dsmc_fields_.items():
+            full = np.full((n_all,) + np.shape(v)[1:], np.nan)
+            full[cm] = v
+            fields[k] = full
+        st = bd.read_state(case_dir / "cfd", t_cfd, gas)
+        fields["n_cfd"] = st.rho / gas.mass_kg
+        fields["T_cfd"] = st.T
+        fields["U_cfd"] = st.U
+        retained_c = (np.load(res / "retained.npy") if (res / "retained.npy").is_file()
+                      else np.zeros(n_all, bool))
+        fields["n_hyb"] = np.where(retained_c, fields["n_cfd"], fields["n_fa"])
+        fields["T_hyb"] = np.where(retained_c, fields["T_cfd"], fields["T_fa"])
+        fields["U_hyb"] = np.where(retained_c[:, None], fields["U_cfd"], fields["U_fa"])
+        from .breakdown import write_fields as _wf
+        _wf(case_dir / "cfd", t_cfd, cmesh, {
+            "hybrid_n_over_ne": fields["n_hyb"] / source.number_density,
+            "hybrid_T_over_Te": fields["T_hyb"] / source.temperature_K,
+            "hybrid_Ux_over_ae": fields["U_hyb"][:, 0] / source.thermal_speed,
+            "dsmc_n_over_ne": fields["n_fa"] / source.number_density})
+        h = float(np.min(cmesh.cell_size()[:, 1]))
+    else:
+        centres, volumes, n_all = dmesh.cell_centres, dmesh.cell_volumes, dmesh.n_cells
+        fields = dict(dsmc_fields_)
+        h = float(np.min(sizes[:, 1]))
+    axis = post.axis_cells(centres, h * 0.51)
+    ref = collisionless.reference(centres[axis], source)
+    for k in ("n", "T", "U"):
+        full = np.full((n_all,) + np.shape(ref[k])[1:], np.nan)
+        full[axis] = ref[k]
+        fields[f"{k}_ref"] = full
+    prof = post.line_profile(centres, volumes, axis, fields)
+    norm = {"x_over_D": prof["x"] / source.diameter_m}
+    for k, v in prof.items():
+        if k == "x":
+            continue
+        if k.startswith("n_"):
+            norm[k + "_over_ne"] = v / source.number_density
+        elif k.startswith(("T", "Tpar", "Tperp")):
+            norm[k + "_over_Te"] = v / source.temperature_K
+        elif k.startswith("U_"):
+            norm[k + "_over_ae"] = v / source.thermal_speed
+    post.write_csv(res / "centreline.csv", norm)
+    cmp = {
+        "dsmc_fieldaverage_vs_collisionless": {
+            "n": post.compare(prof["n_fa"], prof["n_ref"]),
+            "T": post.compare(prof["T_fa"], prof["T_ref"]),
+            "Ux": post.compare(prof["U_fa"][:, 0], prof["U_ref"][:, 0])},
+        "dsmc_snapshot_vs_fieldaverage": {
+            "n": post.compare(prof["n_lag"], prof["n_fa"]),
+            "T": post.compare(prof["T_lag"], prof["T_fa"])},
+    }
+    if "n_cfd" in prof:
+        cmp["dsmc_vs_cfd_precursor"] = {
+            "n": post.compare(prof["n_fa"], prof["n_cfd"]),
+            "T": post.compare(prof["T_fa"], prof["T_cfd"]),
+            "Ux": post.compare(prof["U_fa"][:, 0], prof["U_cfd"][:, 0])}
+        cmp["hybrid_vs_collisionless"] = {
+            "n": post.compare(prof["n_hyb"], prof["n_ref"]),
+            "T": post.compare(prof["T_hyb"], prof["T_ref"])}
+    cmp["note"] = ("the collisionless reference is exact only in the collisionless limit; a "
+                   "collisional difference is physics, not numerical error")
+    doc["centreline_comparison"] = cmp
+    doc["centreline_snapshot_stderr_rel_median"] = {
+        "n": float(np.nanmedian(prof["n_lag_se"] / prof["n_lag"])),
+        "T": float(np.nanmedian(prof["T_lag_se"] / prof["T_lag"]))}
+
+    # -- azimuthal structure (unaveraged spread reported) -----------------------
+    d = source.diameter_m
+    good = occ >= 5
+    doc["azimuthal"] = {
+        name: {k: v for k, v in post.azimuthal_statistics(
+            dmesh.cell_centres, vals, 0.25 * d, 0.1 * d, mask=good).items()
+               if k in ("max_rel_std", "median_rel_std")}
+        for name, vals in (("n", fa["n"]), ("T", fa["T"]))}
+    doc["azimuthal"]["note"] = ("relative std over azimuth within (x, r) bins of cells with "
+                                ">= 5 parcels/step; includes sampling noise and the "
+                                "Cartesian staircase")
+    # -- off-axis rings and the spherical arc, azimuthally averaged for reporting -
+    # Rings: cells whose radius is within half a cell of r0, grouped by x; the
+    # unaveraged azimuthal spread of the same cells is in "azimuthal" above.
+    c = centres
+    r_cell = np.hypot(c[:, 1], c[:, 2])
+    off = {}
+    for r0 in cfg.get("post.off_axis_r_over_D", [0.25, 0.5, 0.75]):
+        ring = np.abs(r_cell - float(r0) * d) <= 0.5 * h
+        if ring.sum() < 4:
+            continue
+        ref_r = collisionless.reference(c[ring], source)
+        rf = {"n": np.full(n_all, np.nan), "T": np.full(n_all, np.nan)}
+        rf["n"][ring], rf["T"][ring] = ref_r["n"], ref_r["T"]
+        pr = post.line_profile(c, volumes, ring, {
+            "n": fields.get("n_hyb", fields["n_fa"]), "T": fields.get("T_hyb", fields["T_fa"]),
+            "n_ref": rf["n"], "T_ref": rf["T"]})
+        post.write_csv(res / f"offaxis_r{float(r0):g}D.csv", {
+            "x_over_D": pr["x"] / d, "n_over_ne": pr["n"] / source.number_density,
+            "T_over_Te": pr["T"] / source.temperature_K,
+            "n_ref_over_ne": pr["n_ref"] / source.number_density,
+            "T_ref_over_Te": pr["T_ref"] / source.temperature_K})
+        off[f"r{float(r0):g}D"] = {"n_vs_collisionless": post.compare(pr["n"], pr["n_ref"]),
+                                   "T_vs_collisionless": post.compare(pr["T"], pr["T_ref"])}
+    doc["off_axis"] = off
+    r_arc = float(cfg.get("post.arc_r_over_D", 10.0)) * d
+    reach = min(float(c[:, 0].max()), float(r_cell.max()))
+    if reach >= r_arc:
+        shell = np.abs(np.linalg.norm(c, axis=1) - r_arc) <= 0.5 * h
+        ang = np.degrees(np.arctan2(r_cell[shell], c[shell, 0]))
+        doc["arc"] = {"r_over_D": r_arc / d, "cells": int(shell.sum()),
+                      "angle_range_deg": [float(ang.min()), float(ang.max())]}
+    else:
+        doc["arc"] = {"r_over_D": r_arc / d, "available": False,
+                      "reason": f"domain reaches {reach / d:.2f} D on the axis/radius; "
+                                "the reference arc is in reference_arc_r10D.csv"}
+
+    # transverse momentum symmetry: net y, z momentum of the sampled field
+    mom = (fa["rho"][:, None] * fa["U"] * dmesh.cell_volumes[:, None])
+    mom = np.where(np.isfinite(mom), mom, 0.0)
+    doc["transverse_momentum_over_axial"] = (mom[:, 1:].sum(0) / mom[:, 0].sum()).tolist()
+
+    # -- returns through the interface (estimate from snapshots) --------------
+    if "interface" in setup_doc["inflow_patches"]:
+        sl = dmesh.patch_slice("interface")
+        faces = np.arange(sl.start, sl.stop)
+        a = np.linalg.norm(dmesh.face_areas[faces], axis=1)
+        n_out = dmesh.face_areas[faces] / a[:, None]
+        rates = []
+        for t in snaps:
+            est = particles.cell_half_range_estimate(
+                particles.read_cloud(dsmc_dir / t), dmesh.owner[faces], n_out, a,
+                dmesh.cell_volumes, weight, gas.mass_kg)
+            rates.append(est["mass_kg_s"])
+        itf = json.loads((res / "interface.json").read_text())
+        exp_ret = itf["fluxes"]["maxwellian_reverse"]["mass"]
+        doc["return_flux"] = {
+            "estimated_mass_kg_s": float(np.mean(rates)),
+            "estimate_stderr_kg_s": float(np.std(rates, ddof=1) / np.sqrt(len(rates)))
+            if len(rates) > 1 else None,
+            "expected_from_cfd_maxwellian_kg_s": exp_ret,
+            "forward_injection_expected_kg_s": itf["fluxes"]["maxwellian_forward"]["mass"],
+            "method": "cell half-range estimator from snapshots (an ESTIMATE); run the "
+                      "'crossings' stage for exact per-step crossings"}
+    cw = res / "crossing_window.json"
+    if cw.is_file():
+        doc["crossing_window"] = json.loads(cw.read_text())
+
+    # -- resources measured -------------------------------------------------
+    doc["measured_performance"] = resources.measured_rates(
+        log, float(particles.read_cloud(dsmc_dir / t_final).size), dmesh.n_cells,
+        int(setup_doc["ranks"]))
+    doc["rank_imbalance"] = resources.rank_imbalance(dsmc_dir, t_final)
+    doc["run_record"] = _run_record(dsmc_dir, cfg, extra={
+        "averaging_interval_s": [t_avg, float(t_final)], "particle_weight": weight,
+        "random_seed": "not configurable in standard dsmcFoam: each rank's Random is "
+                       "seeded deterministically, so a rerun on the same decomposition "
+                       "repeats; independence comes from blocks, not seeds"})
+    write_json(res / "dsmc_post.json", doc)
     return doc
 
 
