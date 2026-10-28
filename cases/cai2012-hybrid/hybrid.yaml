@@ -1,0 +1,197 @@
+# Steady one-way hybrid CFD -> DSMC free plume, full 3-D Cartesian.
+#
+# Configuration attribution: Cai, C. and Wang, L., "Numerical Validations for a
+# Set of Collisionless Rocket Plume Solutions", J. Spacecraft and Rockets 49(1),
+# 2012, DOI 10.2514/1.A32046. Reproduced in 3-D; Cai's axisymmetric numerics are
+# NOT reproduced.
+#
+# Every value is labelled:
+#   [PAPER]       stated by Cai & Wang (2012)
+#   [REPO]        inherited from this repository (plumetools.cai2012)
+#   [BIRD]        Bird (1994), Molecular Gas Dynamics, Table A1
+#   [ASSUMPTION]  a modelling choice made here
+#   [NUMERICAL]   a numerical setting; see the sensitivity section of the docs
+#
+# Profiles overlay `base`: `python -m plumetools.hybridplume ... --profile NAME`.
+# `smoke` profiles are INTENTIONALLY UNDER-RESOLVED and are labelled so in every
+# report they produce; they test the machinery, not the physics.
+
+schema: hybridplume/1
+default_profile: smoke-kn0p01
+
+base:
+  source:
+    diameter_m: 0.2            # [PAPER]
+    speed_ratio: 2.0           # [PAPER] S0 = Ue / sqrt(2 R Te)
+    temperature_K: 300.0       # [ASSUMPTION] Cai validates normalised fields only
+    knudsen: 0.01              # [PAPER] Kne = lambda_e / D (overridden per profile)
+    mean_free_path_convention: vhs   # [ASSUMPTION] Bird eq 4.76 with eq 4.62 viscosity
+
+  gas:
+    name: Ar                   # [PAPER]
+    mass_kg: 6.63e-26          # [REPO]
+    diameter_m: 4.17e-10       # [REPO] = [BIRD]
+    t_ref_K: 273.0             # [REPO] = [BIRD]
+    omega: 0.81                # [BIRD] the Cai family uses 0.74 (the N2 tutorial value)
+    prandtl: 0.6666666666666666  # monatomic Eucken value
+    provenance:
+      mass_kg: "repository plumetools.cai2012.gas.ARGON"
+      diameter_m: "Bird 1994 Table A1 argon VHS; same as repository"
+      t_ref_K: "Bird 1994 Table A1; same as repository"
+      omega: "Bird 1994 Table A1 argon; departs from the repository's 0.74"
+
+  domain:
+    x_max_over_D: 2.5          # [ASSUMPTION] per profile
+    half_width_over_D: 1.25    # [ASSUMPTION] per profile
+
+  mesh:
+    core_cell_over_D: 0.05     # [NUMERICAL]
+    max_outer_expansion: 8.0
+
+  cfd:
+    solver: rhoCentralFoam
+    # Vacuum floor. Measured on 2026-10-28 (docs/hybridplume.md, "CFD robustness"):
+    # vanLeer reconstruction drives T negative in the lip expansion at floors of
+    # 1e-2..1e-4; cold floors (30 K) fail in the startup shock; Minmod at 300 K
+    # runs at 1e-3 and 1e-4 with the explicit viscous step cap below.
+    background_pressure_ratio: 1.0e-3    # [NUMERICAL] p_bg / pe; NOT an ambient gas
+    background_temperature_K: 300.0      # [NUMERICAL]
+    background_sensitivity_ratios: [1.0e-4]
+    viscous_dt_factor: 0.25              # [NUMERICAL] dt <= f dx^2 rho_bg / mu(T_bg)
+    max_courant: 0.2
+    end_time_transits: 3.0
+    writes_per_transit: 4
+    reconstruction_limiter: Minmod       # [NUMERICAL] see above
+    l_inf_over_D: 1.0
+
+  breakdown:
+    mean_free_path_convention: vhs
+    thresholds:                # [NUMERICAL] sensitivity-study settings, NOT validity boundaries
+      Kn_GLL: 0.05
+      B_exp: 0.05
+    sensitivity_factors: [0.5, 1.0, 2.0]
+    lip_exclusion_over_D: 0.05   # cells this close to the lip circle are reported separately
+    overlap_ceiling_factor: 2.0  # an overlap layer is DSMC-side cells below factor x threshold
+
+  interface:
+    mode: automatic              # automatic | manual | none (full DSMC)
+    criteria:                    # [NUMERICAL] the suitability policy; see docs
+      max_return_mass_fraction: 0.05
+      max_subsonic_normal_area_fraction: 0.25
+      max_outer_boundary_contact_fraction: 0.0
+      min_overlap_layers: 1
+    allow_unsuitable: false
+    manual:
+      type: sphere
+      radius_over_D: 0.6
+      centre_over_D: [0.0, 0.0, 0.0]
+
+  dsmc:
+    backend: dsmcFoam
+    collisions: true
+    binary_collision_model: VariableHardSphere
+    parcels_per_cell_target: 20    # in the densest DSMC cell, sets the weight
+    max_courant: 0.2               # on (U + 3 sigma)
+    max_dt_over_collision_time: 0.5
+    startup_transits: 2.0
+    sample_transits: 3.0
+    writes_per_transit: 4
+    random_seed: 0                 # documented; standard dsmcFoam seeds itself
+    lagrangian_moments: true       # directional temperatures from written parcels
+    crossing_window_steps: 52      # per-step parcel writes for exact crossings (incl. discard)
+    crossing_discard_steps: 12     # post-restart insertion burst, measured; see docs
+
+  resources:
+    max_ranks: 8
+    max_memory_GB: 8.0
+    bytes_per_parcel: 300
+    bytes_per_cell: 2500
+    seconds_per_parcel_step: 4.0e-6       # measured 2026-10-28: WSL, /mnt/c, 4 ranks, smoke-kn1em3
+    seconds_per_cfd_cell_step: 3.0e-6
+
+profiles:
+
+  # --- laptop smoke tests: full 3-D, deliberately coarse, labelled ------------
+  smoke-kn0p01:
+    label: "SMOKE (intentionally under-resolved): Kne 0.01, D/20 cells"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
+    mesh: {core_cell_over_D: 0.05}
+    cfd: {end_time_transits: 4.0}
+    resources: {max_ranks: 8, max_memory_GB: 8.0}
+
+  smoke-kn0p01-coarse:
+    label: "SMOKE (intentionally under-resolved): Kne 0.01, D/10 cells"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
+    mesh: {core_cell_over_D: 0.1}
+    resources: {max_ranks: 4, max_memory_GB: 8.0}
+
+  smoke-kn0p01-coarse-full:
+    label: "SMOKE (intentionally under-resolved): Kne 0.01, D/10 cells, FULL DSMC (overlap reference)"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
+    mesh: {core_cell_over_D: 0.1}
+    interface: {mode: none}
+    resources: {max_ranks: 4, max_memory_GB: 8.0}
+
+  smoke-collisionless:
+    label: "SMOKE: collisionless DSMC (collisions disabled) vs the analytical reference"
+    source: {knudsen: 100.0}
+    domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
+    mesh: {core_cell_over_D: 0.05}
+    interface: {mode: none}
+    dsmc: {collisions: false, parcels_per_cell_target: 40, startup_transits: 3.0,
+           sample_transits: 4.0}
+
+  smoke-kn1em3:
+    label: "SMOKE (intentionally under-resolved): Kne 1e-3 extension, D/20 cells"
+    source: {knudsen: 1.0e-3}
+    domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
+    mesh: {core_cell_over_D: 0.05}
+
+  # --- scientific verification (HPC scale unless stated) ----------------------
+  verification-collisionless:
+    label: "VERIFICATION: collisionless, r/D = 10 arc reachable"
+    source: {knudsen: 100.0}
+    domain: {x_max_over_D: 10.5, half_width_over_D: 10.5}
+    mesh: {core_cell_over_D: 0.025, core_x_over_D: 3.0, core_half_over_D: 1.5,
+           outer_cells: 60}
+    interface: {mode: none}
+    dsmc: {collisions: false, parcels_per_cell_target: 40, startup_transits: 3.0,
+           sample_transits: 6.0}
+    resources: {max_ranks: 64, max_memory_GB: 200.0}
+
+  verification-kn0p1:
+    label: "VERIFICATION: Cai Kne 0.1, full DSMC"
+    source: {knudsen: 0.1}
+    domain: {x_max_over_D: 10.5, half_width_over_D: 10.5}
+    mesh: {core_cell_over_D: 0.025, core_x_over_D: 3.0, core_half_over_D: 1.5,
+           outer_cells: 60}
+    interface: {mode: none}
+    resources: {max_ranks: 96, max_memory_GB: 400.0}
+
+  verification-kn0p01:
+    label: "VERIFICATION: Cai Kne 0.01, CFD precursor + automatic interface"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 6.0, half_width_over_D: 4.0}
+    mesh: {core_cell_over_D: 0.01, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 60}
+    resources: {max_ranks: 192, max_memory_GB: 1200.0}
+
+  # --- production extensions (HPC) --------------------------------------------
+  production-kn1em3:
+    label: "EXTENSION Kne 1e-3: hybrid, HPC"
+    source: {knudsen: 1.0e-3}
+    domain: {x_max_over_D: 8.0, half_width_over_D: 5.0}
+    mesh: {core_cell_over_D: 0.01, core_x_over_D: 4.0, core_half_over_D: 1.5,
+           outer_cells: 80}
+    resources: {max_ranks: 192, max_memory_GB: 1200.0}
+
+  production-kn1em4:
+    label: "EXTENSION Kne 1e-4: hybrid, HPC"
+    source: {knudsen: 1.0e-4}
+    domain: {x_max_over_D: 10.0, half_width_over_D: 6.0}
+    mesh: {core_cell_over_D: 0.0075, core_x_over_D: 5.0, core_half_over_D: 1.5,
+           outer_cells: 80}
+    resources: {max_ranks: 192, max_memory_GB: 1200.0}
