@@ -21,6 +21,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``dsmc-fields``     map CFD states onto the DSMC inflow faces; write 0/
 ``dsmc-post``       moments, measured fluxes, budgets, comparisons
 ``crossings``       exact exits over a per-step parcel window after the run
+``overlap``         hybrid vs a full-DSMC case on the same mesh, cell by cell
 ``reference``       the collisionless reference at the report stations
 ==================  ==========================================================
 
@@ -872,6 +873,91 @@ def reference(case_dir: Path, **_) -> dict:
         "T": float(abs(r1["T"][0] / r2["T"][0] - 1))}
     write_json(res / "reference.json", out)
     return out
+
+
+def overlap(case_dir: Path, reference: str | None = None, **_) -> dict:
+    """Hybrid vs a full-DSMC case on the SAME mesh, cell by cell.
+
+    Three regions, kept apart: the retained CFD region (CFD vs full DSMC: is
+    the continuum solution valid where it was kept?), the hybrid's DSMC region
+    (hybrid DSMC vs full DSMC: what the frozen interface did), and the axis.
+    The sampling-noise floor is estimated as cv_step / sqrt(steps) -- a lower
+    bound, since successive DSMC steps are correlated.
+    """
+    from . import breakdown as bd
+    from . import post
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    if not reference:
+        raise WorkflowError("overlap needs --reference <full-DSMC case directory>")
+    ref_dir = Path(reference)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    gas = source.gas
+    res = results_dir(case_dir)
+    cmesh = read_mesh(case_dir / "cfd")
+    fmesh = read_mesh(ref_dir / "dsmc")
+    if fmesh.n_cells != cmesh.n_cells or not np.allclose(
+            fmesh.cell_centres, cmesh.cell_centres, rtol=0, atol=1e-9):
+        raise WorkflowError("the reference is not on the same mesh as this case's CFD")
+    hyb_post = json.loads((res / "dsmc_post.json").read_text())
+    ref_post = json.loads((ref_dir / "results" / "dsmc_post.json").read_text())
+    full = post.dsmc_fieldaverage(ref_dir / "dsmc" / ref_post["time"], gas)
+    hyb = post.dsmc_fieldaverage(case_dir / "dsmc" / hyb_post["time"], gas)
+    cm = np.load(res / "dsmc_to_cfd_cells.npy")
+    retained = np.load(res / "retained.npy")
+    st = bd.read_state(case_dir / "cfd", _latest(case_dir / "cfd"), gas)
+    hyb_n = np.full(cmesh.n_cells, np.nan)
+    hyb_t = np.full(cmesh.n_cells, np.nan)
+    hyb_n[cm], hyb_t[cm] = hyb["n"], hyb["T"]
+    occ_ref = full["parcels_per_step"]
+    good = occ_ref >= float(cfg.get("dsmc.overlap_min_parcels_per_step", 1.0))
+    v = cmesh.cell_volumes
+
+    def stats(a, b, mask):
+        m = mask & np.isfinite(a) & np.isfinite(b) & (b > 0)
+        if not m.any():
+            return {"cells": 0}
+        rel = a[m] / b[m] - 1.0
+        w = v[m] / v[m].sum()
+        return {"cells": int(m.sum()), "volume_weighted_mean_rel": float(np.sum(w * rel)),
+                "volume_weighted_mean_abs_rel": float(np.sum(w * np.abs(rel))),
+                "p95_abs_rel": float(np.percentile(np.abs(rel), 95))}
+
+    noise = {k: (d["sampling"].get("n_cv_per_step_median") or float("nan"))
+             / np.sqrt(max(d["sampling"]["steps_averaged"], 1))
+             for k, d in (("hybrid", hyb_post), ("reference", ref_post))}
+    doc = {
+        "label": cfg.get("label", cfg.profile), "reference_case": str(ref_dir),
+        "reference_label": ref_post.get("label"),
+        "interface_status": hyb_post.get("interface_status"),
+        "retained_cfd_vs_full_dsmc": {
+            "n": stats(st.rho / gas.mass_kg, full["n"], retained & good),
+            "T": stats(st.T, full["T"], retained & good)},
+        "hybrid_dsmc_vs_full_dsmc_in_dsmc_region": {
+            "n": stats(hyb_n, full["n"], ~retained & good),
+            "T": stats(hyb_t, full["T"], ~retained & good)},
+        "sampling_noise_floor_rel_lower_bound": noise,
+        "note": "a smoke comparison on an under-resolved mesh measures the machinery; "
+                "its differences are not a physical accuracy statement",
+    }
+    h = float(np.min(cmesh.cell_size()[:, 1]))
+    axis = post.axis_cells(cmesh.cell_centres, 0.51 * h)
+    hyb_full_n = np.where(retained, st.rho / gas.mass_kg, hyb_n)
+    hyb_full_t = np.where(retained, st.T, hyb_t)
+    prof = post.line_profile(cmesh.cell_centres, v, axis,
+                             {"n_hybrid": hyb_full_n, "n_full": full["n"],
+                              "T_hybrid": hyb_full_t, "T_full": full["T"]})
+    doc["centreline_hybrid_vs_full"] = {"n": post.compare(prof["n_hybrid"], prof["n_full"]),
+                                        "T": post.compare(prof["T_hybrid"], prof["T_full"])}
+    post.write_csv(res / "overlap_centreline.csv", {
+        "x_over_D": prof["x"] / source.diameter_m,
+        "n_hybrid_over_ne": prof["n_hybrid"] / source.number_density,
+        "n_full_over_ne": prof["n_full"] / source.number_density,
+        "T_hybrid_over_Te": prof["T_hybrid"] / source.temperature_K,
+        "T_full_over_Te": prof["T_full"] / source.temperature_K})
+    write_json(res / "overlap.json", doc)
+    return doc
 
 
 def dsmc_fields(case_dir: Path) -> dict:
