@@ -75,6 +75,8 @@ from pathlib import Path
 
 import numpy as np
 
+from plumetools.foamio.errors import FoamDataError
+from plumetools.foamio.times import latest_time
 from plumetools.nozzleplume.constants import BOLTZMANN_J_PER_K
 from plumetools.nozzleplume.meshread import read_patches
 
@@ -87,36 +89,15 @@ CENTRELINE_FIELDS = {
 }
 
 
-class PostError(ValueError):
-    """A required field or time directory is missing, or is unreadable."""
+#: The error this module raises: the shared readers', under the name
+#: callers of this module have always caught. :func:`latest_time` is the
+#: shared one in :mod:`plumetools.foamio.times`.
+PostError = FoamDataError
 
 
 # --------------------------------------------------------------------------- #
 # reading OpenFOAM fields
 # --------------------------------------------------------------------------- #
-
-def latest_time(case_dir: Path) -> str:
-    """The largest numeric time directory in a case, past ``0``.
-
-    Raises:
-        PostError: if there is none -- the solver wrote nothing.
-    """
-    times = []
-    for entry in Path(case_dir).iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry.name))
-    if not times:
-        raise PostError(
-            f"{case_dir} has no time directory past 0; the solver wrote nothing. "
-            f"Run ./Allrun first.")
-    return max(times)[1]
-
 
 def _values(text: str, start: int, what: str) -> np.ndarray:
     """Parse the ``uniform`` or ``nonuniform List<>`` value that follows ``start``.

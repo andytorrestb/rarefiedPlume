@@ -54,6 +54,7 @@ from plumetools.cai2012ext import (
     policy,
     provenance,
 )
+from plumetools.foamio.times import time_directories
 
 #: Files whose content is a physical input, compared as parsed YAML.
 #: ``interface.yaml`` exists only in interface-mode cases; a direct-exit case
@@ -75,22 +76,6 @@ STATUS_CONFLICT = "conflict"
 # solver output
 # --------------------------------------------------------------------------- #
 
-def _numeric_positive_dirs(directory: Path) -> list[Path]:
-    found = []
-    if not directory.is_dir():
-        return found
-    for entry in directory.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            found.append(entry)
-    return found
-
-
 def has_solver_output(case_dir: Path) -> bool:
     """Whether a case holds anything a solver run produced.
 
@@ -100,10 +85,10 @@ def has_solver_output(case_dir: Path) -> bool:
     results too.
     """
     case_dir = Path(case_dir)
-    if _numeric_positive_dirs(case_dir):
+    if time_directories(case_dir, missing_ok=True):
         return True
     for processor in case_dir.glob("processor[0-9]*"):
-        if _numeric_positive_dirs(processor):
+        if time_directories(processor, missing_ok=True):
             return True
     return (case_dir / "log.dsmcFoam").is_file()
 

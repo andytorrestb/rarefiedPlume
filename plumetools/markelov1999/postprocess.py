@@ -48,6 +48,7 @@ from pathlib import Path
 import numpy as np
 
 from plumetools import geometry as facegeom
+from plumetools.foamio.times import time_names
 from plumetools.inflow import read_patch_geometry
 from plumetools.markelov1999.foamfields import read_patch_field
 from plumetools.markelov1999.geometry import MarkelovGeometry, cylinder_surface_angles
@@ -340,18 +341,8 @@ def latest_time_dir(case_dir: Path) -> Path | None:
     Time ``0`` is excluded: it holds the initial fields, and an average field is
     not written there.
     """
-    case_dir = Path(case_dir)
-    times = []
-    for entry in case_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry))
-    return max(times)[1] if times else None
+    names = time_names(case_dir)
+    return Path(case_dir) / names[-1] if names else None
 
 
 def angular_difference_deg(a, b: float) -> np.ndarray:

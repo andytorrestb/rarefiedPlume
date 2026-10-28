@@ -47,15 +47,20 @@ from pathlib import Path
 
 import numpy as np
 
+from plumetools.foamio.errors import FoamDataError
 from plumetools.foamio.primitives import BANNER, SEPARATOR, write_lines
+from plumetools.foamio.times import latest_time
 from plumetools.mesh.boundary import read_boundary
 from plumetools.mesh.polymesh import read_faces_flat, read_label_list, read_points_array
 from plumetools.nozzleplume.foamfields import patch_field_type
 from plumetools.nozzleplume.meshread import face_geometry
-from plumetools.nozzleplume.post import PostError, latest_time, read_internal_field
+from plumetools.nozzleplume.post import read_internal_field
 from plumetools.rarefaction.core import CellGraph
 
 GENERATOR = "plumetools.rarefaction"
+
+#: The shared readers' error, under the name this module has always exported.
+PostError = FoamDataError
 
 #: Patch types across which a cell sees its own mirror image.
 MIRROR_PATCH_TYPES = ("symmetry", "symmetryPlane", "empty")

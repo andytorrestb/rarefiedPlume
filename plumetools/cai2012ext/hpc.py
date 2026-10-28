@@ -53,6 +53,7 @@ from pathlib import Path
 from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012ext import feasibility, generation, interface, policy
 from plumetools.cai2012ext import interface_case
+from plumetools.foamio.times import time_directories
 
 MARKER = "NON-PRODUCTION"
 
@@ -158,20 +159,9 @@ def reached_end(case_dir: Path) -> bool:
         if match:
             entries[match.group(1)] = float(match.group(2))
 
-    times = []
-    for parent in (case, *case.glob("processor[0-9]*")):
-        if not parent.is_dir():
-            continue
-        for entry in parent.iterdir():
-            if entry.is_dir():
-                try:
-                    value = float(entry.name)
-                except ValueError:
-                    continue
-                if value > 0.0:
-                    times.append(value)
-
-    latest = max(times, default=None)
+    latest = max((value for parent in (case, *case.glob("processor[0-9]*"))
+                  for value, _ in time_directories(parent, missing_ok=True)),
+                 default=None)
     end = entries.get("endTime")
     delta = entries.get("deltaT", 0.0)
     return latest is not None and end is not None and latest >= end - 0.5 * delta

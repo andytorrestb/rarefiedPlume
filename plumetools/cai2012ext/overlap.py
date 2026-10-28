@@ -78,6 +78,7 @@ import yaml
 
 from plumetools.cai2012 import post
 from plumetools.cai2012ext import interface
+from plumetools.foamio.times import time_directories
 
 K_BOLTZMANN = 1.380649e-23
 
@@ -261,15 +262,8 @@ def average_start(case_dir: Path) -> float:
 
 def frames(case_dir: Path, t_start: float) -> list[str]:
     """Sampled time directories, oldest first."""
-    out = []
-    for entry in Path(case_dir).iterdir():
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if entry.is_dir() and value > t_start * (1 + 1e-9) and (entry / "rhoNMean").is_file():
-            out.append((value, entry.name))
-    return [name for _, name in sorted(out)]
+    return [name for _, name in time_directories(case_dir, after=t_start * (1 + 1e-9))
+            if (Path(case_dir) / name / "rhoNMean").is_file()]
 
 
 def geometry(case_dir: Path, names: list[str]):

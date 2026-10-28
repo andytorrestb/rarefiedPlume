@@ -74,6 +74,7 @@ from pathlib import Path
 import yaml
 
 from plumetools.cai2012.dictionaries import AVERAGED_FIELDS
+from plumetools.foamio.times import time_directories
 
 #: Dictionaries a case generates from its own ``case.yaml``.
 #:
@@ -637,19 +638,7 @@ def case_is_complete(case_dir: Path) -> bool:
     ``case.yaml``, and doing that under finished output would leave results
     whose inputs no longer describe them.
     """
-    case_dir = Path(case_dir)
-    if not case_dir.is_dir():
-        return False
-    for entry in case_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            return True
-    return False
+    return bool(time_directories(case_dir, missing_ok=True))
 
 
 def _merge(target: dict, updates: dict, where: str) -> None:

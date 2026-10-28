@@ -68,6 +68,8 @@ from pathlib import Path
 import numpy as np
 
 from plumetools.cai2012 import analytical
+from plumetools.foamio import times
+from plumetools.foamio.errors import FoamDataError
 
 #: Averaged fields this module reads, and whether each is a vector.
 REQUIRED_FIELDS = {
@@ -78,7 +80,7 @@ REQUIRED_FIELDS = {
 }
 
 
-class PostError(ValueError):
+class PostError(FoamDataError):
     """A required field or time directory is missing, or is unreadable."""
 
 
@@ -155,22 +157,10 @@ def latest_time(case_dir: Path) -> str:
             the solver never wrote anything, and there is nothing to
             post-process.
     """
-    case_dir = Path(case_dir)
-    times = []
-    for entry in case_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            times.append((value, entry.name))
-    if not times:
-        raise PostError(
-            f"{case_dir} has no time directory past 0; the solver wrote nothing. "
-            f"Run ./Allrun first.")
-    return max(times)[1]
+    try:
+        return times.latest_time(case_dir)
+    except FoamDataError as exc:
+        raise PostError(str(exc)) from None
 
 
 @dataclass(frozen=True)
