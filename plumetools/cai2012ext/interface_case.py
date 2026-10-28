@@ -55,8 +55,8 @@ from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012.geometry import from_config as cai_geometry
 from plumetools.cai2012ext import feasibility, interface, interface_mesh, policy
 from plumetools.foamio import volfield
+from plumetools.foamio.patchfields import nonuniform_value_entry
 from plumetools.inflow import read_patch_geometry
-from plumetools.markelov1999 import foamfields as markelov_fields
 from plumetools.mesh.boundary import read_boundary
 
 STATUS_INFEASIBLE = "interface-infeasible"
@@ -905,7 +905,7 @@ def verify_mesh(derived: Derived) -> dict:
 # --------------------------------------------------------------------------- #
 
 def _nonuniform(patch: str, list_type: str, rows) -> list[str]:
-    return markelov_fields._nonuniform_entry(patch, list_type, rows)
+    return nonuniform_value_entry(patch, list_type, rows)
 
 
 def write_inflow(derived: Derived) -> tuple[list[Path], dict]:

@@ -48,16 +48,14 @@ from pathlib import Path
 import numpy as np
 
 from plumetools.foamio import volfield
+from plumetools.foamio.patchfields import (  # noqa: F401 -- re-exported
+    CONSTRAINT_PATCH_TYPES,
+    nonuniform_value_entry,
+    patch_field_type,
+)
 from plumetools.foamio.primitives import BANNER, SEPARATOR, write_lines
 
 GENERATOR = "plumetools.markelov1999.foamfields"
-
-#: Geometric patch types whose patchField type must match exactly. OpenFOAM
-#: rejects anything else with "inconsistent patch and patchField types".
-CONSTRAINT_PATCH_TYPES = frozenset({
-    "symmetry", "symmetryPlane", "empty", "wedge", "cyclic", "cyclicAMI",
-    "processor", "processorCyclic", "nonuniformTransformCyclic",
-})
 
 #: Fields ``DSMCCloud`` requires in ``0/`` but ``dsmcInitialise`` does not create.
 #: ``(name, class, dimensions, uniform internal value, needs values on walls)``.
@@ -97,28 +95,8 @@ def _header(field_class: str, object_name: str, note: str) -> list[str]:
     ]
 
 
-def patch_field_type(geometric_type: str) -> str:
-    """The patchField type a given geometric patch type requires.
-
-    Constraint patches must carry a patchField of their own name; OpenFOAM fails
-    with "inconsistent patch and patchField types" otherwise.
-    """
-    return geometric_type if geometric_type in CONSTRAINT_PATCH_TYPES else "zeroGradient"
-
-
 def _nonuniform_entry(patch: str, list_type: str, values) -> list[str]:
-    values = list(values)
-    return [
-        f"    {patch}",
-        "    {",
-        "        type            fixedValue;",
-        f"        value           nonuniform List<{list_type}>",
-        f"        {len(values)}",
-        "        (",
-        *values,
-        "        );",
-        "    }",
-    ]
+    return nonuniform_value_entry(patch, list_type, values)
 
 
 def _uniform_entry(patch: str, bc_type: str, value: str | None) -> list[str]:

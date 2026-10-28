@@ -1,4 +1,4 @@
-"""The shared OpenFOAM readers: plumetools.foamio.{volfield,times}.
+"""The shared OpenFOAM readers: plumetools.foamio.{volfield,times,patchfields}.
 
 One field parser replaced three -- ``nozzleplume.post``, ``cai2012.post`` and
 ``markelov1999.foamfields`` -- so the corpus below is the union of what those
@@ -14,7 +14,7 @@ import re
 import numpy as np
 import pytest
 
-from plumetools.foamio import times, volfield
+from plumetools.foamio import patchfields, times, volfield
 from plumetools.foamio.errors import FoamDataError
 
 
@@ -349,6 +349,34 @@ def test_a_missing_directory_raises_unless_allowed(tmp_path):
     with pytest.raises(FileNotFoundError):
         times.time_directories(tmp_path / "absent")
     assert times.time_directories(tmp_path / "absent", missing_ok=True) == []
+
+
+# --------------------------------------------------------------------------- #
+# patch entries
+# --------------------------------------------------------------------------- #
+
+def test_constraint_patches_keep_their_type():
+    assert patchfields.patch_field_type("symmetry") == "symmetry"
+    assert patchfields.patch_field_type("empty") == "empty"
+    assert patchfields.patch_field_type("patch") == "zeroGradient"
+    assert patchfields.patch_field_type("wall") == "zeroGradient"
+
+
+def test_the_nonuniform_entry_is_written_as_before():
+    """Verbatim what markelov1999.foamfields._nonuniform_entry wrote at the tag."""
+    rows = ["            1e+20", "            2.5"]
+    assert patchfields.nonuniform_value_entry("nozzle", "scalar", rows) == [
+        "    nozzle",
+        "    {",
+        "        type            fixedValue;",
+        "        value           nonuniform List<scalar>",
+        "        2",
+        "        (",
+        "            1e+20",
+        "            2.5",
+        "        );",
+        "    }",
+    ]
 
 
 # --------------------------------------------------------------------------- #
