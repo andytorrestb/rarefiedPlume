@@ -111,9 +111,17 @@ def test_the_manifest_records_every_verdict(generated):
         assert rows[name]["purpose"] == "interface-validation"
         assert rows[name]["selection_status"] == interface.STATUS_NO_INTERFACE
         assert rows[name]["status"] == interface_case.STATUS_INFEASIBLE
+    # interfaces.yaml has stated both production cases' core angle and validity
+    # radius since 2026-10-25, so a sphere is selected and planned for each.
+    # Neither may run as production: both miss numerical criteria (the mesh
+    # budget, cell / lambda) and no overlap evidence is named.
     for name in ("Kn0p001_np1x_sphere", "Kn0p0001_np1x_sphere"):
-        assert rows[name]["selection_status"] == interface.STATUS_INCOMPLETE
-        assert not rows[name]["runnable"]
+        row = rows[name]
+        assert row["selection_status"] == interface.STATUS_ADMISSIBLE
+        assert row["status"] == interface_case.STATUS_UNSUITABLE
+        assert row["numerical_status"] == interface_case.STATUS_UNSUITABLE
+        assert row["coupling_validation"] == "pending"
+        assert not row["runnable"]
     assert rows[SMOKE]["status"] == interface_case.STATUS_SMOKE
     assert rows[SMOKE]["n_cells"] <= 50_000
     assert rows[SMOKE]["estimated_parcels"] <= 200_000
@@ -343,9 +351,34 @@ def test_guard_allows_kn_001_only_for_validation(generated, tmp_path):
     assert "Kn = 0.01 is one of Cai's" in hpc.guard(case)
 
 
-def test_guard_refuses_an_infeasible_or_incomplete_production_case(generated):
-    problem = hpc.guard(generated / "Interface" / "Kn0p001_np1x_sphere")
+def test_meshing_running_and_labelling_are_three_decisions(generated, tmp_path):
+    """The committed production interface: the guard lets it be meshed (the
+    sphere is admissible and planned), the label refuses to run it as
+    production (numerically unsuitable, coupling pending), and as an
+    exploratory run it is labelled NON-PRODUCTION."""
+    family = clone(generated, tmp_path)
+    case = family / "Interface" / "Kn0p001_np1x_sphere"
+    assert hpc.guard(case) is None
+    with pytest.raises(policy.ExtensionError, match="REFUSED"):
+        hpc.label(case)
+    assert not (case / hpc.MARKER).exists()
+    raw = yaml.safe_load((case / "interface.yaml").read_text())
+    raw["interface"]["run_mode"] = "exploratory"
+    (case / "interface.yaml").write_text(yaml.safe_dump(raw))
+    assert hpc.guard(case) is None
+    assert "unsuitable-for-production" in hpc.label(case)
+    assert (case / hpc.MARKER).is_file()
+
+
+def test_guard_refuses_an_incomplete_production_case(generated, tmp_path):
+    family = clone(generated, tmp_path)
+    case = family / "Interface" / "Kn0p001_np1x_sphere"
+    raw = yaml.safe_load((case / "interface.yaml").read_text())
+    raw["interface"]["core_half_angle_deg"] = None
+    (case / "interface.yaml").write_text(yaml.safe_dump(raw))
+    problem = hpc.guard(case)
     assert problem and "CONFIGURATION_INCOMPLETE" in problem
+    assert interface_case.derive(case).selection.status == interface.STATUS_INCOMPLETE
 
 
 def test_guard_refuses_results_from_another_mesh(meshed_smoke):
