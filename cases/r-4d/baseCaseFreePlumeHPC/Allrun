@@ -103,27 +103,6 @@ foam_entry() {
     echo "${value//[[:space:]]/}"
 }
 
-# Time directories under $1 (default .), numerically ascending, excluding 0.
-# `sort -g` rather than -n: OpenFOAM's general time format writes 2e-05, which
-# -n reads as 2.
-time_dirs() {
-    local dir=${1:-.} entry name
-    for entry in "$dir"/*/; do
-        name=${entry%/}
-        name=${name##*/}
-        case "$name" in
-            0|0.orig|constant|system|results|postProcessing|processor*) continue ;;
-        esac
-        # A time directory's name is numeric and nothing else.
-        if [ -n "$name" ] && [ -z "${name//[0-9.eE+-]/}" ]; then
-            echo "$name"
-        fi
-    done | sort -g
-}
-
-latest_time() { time_dirs "${1:-.}" | tail -1; }
-newest_of()   { printf '%s\n' "$@" | grep -v '^$' | sort -g | tail -1; }
-
 # --------------------------------------------------------------------------- #
 # preflight
 # --------------------------------------------------------------------------- #
@@ -196,15 +175,22 @@ echo "    subdomains=$NP  solve=$SOLVE"
 # Neither runs on a resume. Nothing here ever removes a time directory; ./Allclean
 # is the only thing in this case that does, and it is explicit about it.
 
-CASE_TIME=$(latest_time .)
+# The state is read from EVERY rank, not processor0 alone, by
+# plumetools.foamio.checkpoints: a time some rank wrote only partly -- a job
+# killed while writing -- is never resumed from; it stops the run here, naming
+# what is missing, and nothing is changed. To see the state without running:
+#     python -m plumetools.foamio.checkpoints report .
+RESUME=""
+CASE_TIME=""
 PROC_TIME=""
 PROC_COUNT=0
-if [ -d processor0 ]; then
-    PROC_TIME=$(latest_time processor0)
-    PROC_COUNT=$(ls -d processor[0-9]* 2>/dev/null | wc -l | tr -d " ")
+DECOMPOSE=all
+RECONSTRUCT_FIRST=0
+if [ "$SOLVE" -eq 1 ]; then
+    PLAN=$($PYTHON -m plumetools.foamio.checkpoints plan . --np "$NP") \
+        || die "the saved state of this case cannot be continued as it is (above)."
+    eval "$PLAN"    # RESUME CASE_TIME PROC_TIME PROC_COUNT DECOMPOSE RECONSTRUCT_FIRST ...
 fi
-
-RESUME=$(newest_of "$CASE_TIME" "$PROC_TIME")
 CONTINUING=0
 [ -n "$RESUME" ] && CONTINUING=1
 
@@ -330,23 +316,24 @@ if [ "$NP" -gt 1 ]; then
     # decompose. `decomposePar -force` DELETES processor*/ before it writes, so
     # running it unconditionally on a resume would throw away the run so far and
     # then re-decompose 0/ -- a restart wearing a resume's clothes.
-    DECOMPOSE=1
-    if [ "$CONTINUING" -eq 1 ] && [ "$PROC_COUNT" -eq "$NP" ] && [ -n "$PROC_TIME" ] \
-       && [ "$(newest_of "$CASE_TIME" "$PROC_TIME")" = "$PROC_TIME" ]; then
-        # The processor directories are at least as new as the reconstructed
-        # case, which is the normal state after a completed or interrupted
-        # parallel run. Nothing to do: dsmcFoam picks up its own latest time.
-        DECOMPOSE=0
-    fi
-
-    if [ "$DECOMPOSE" -eq 0 ]; then
+    if [ "$DECOMPOSE" = none ]; then
+        # Every rank holds the resume time, complete, and there are as many
+        # ranks as this run has: dsmcFoam picks the time up by itself. This is
+        # the normal state after a completed or interrupted parallel run.
         echo "==> processor0..$((NP - 1)) already hold t = $PROC_TIME; not re-decomposing"
-    elif [ "$CONTINUING" -eq 1 ]; then
+    elif [ "$DECOMPOSE" = latest ]; then
         # -latestTime: decompose ONLY the time being resumed from. Without it
         # decomposePar would also re-decompose 0/, and the solver would find two
         # candidate start times where the case has one.
         if [ "$PROC_COUNT" -ne 0 ] && [ "$PROC_COUNT" -ne "$NP" ]; then
             echo "    processor count changed ($PROC_COUNT -> $NP); re-decomposing t = $RESUME"
+        fi
+        if [ "$RECONSTRUCT_FIRST" -eq 1 ]; then
+            # decomposePar -force deletes processor*/, and they hold a newer
+            # complete state than the case directory. Keep it: reconstruct it
+            # with the old decomposition before decomposing for the new one.
+            echo "    reconstructing t = $PROC_TIME from the old decomposition first"
+            run reconstructPar.resume "$RECONSTRUCTPAR" -newTimes
         fi
         run decomposePar "$DECOMPOSEPAR" -force -latestTime $DECOMP_ARGS
     else

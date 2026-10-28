@@ -23,8 +23,8 @@ calls ``./Allrun`` itself, and around it the four steps here, through
     it listing the unresolved criteria. The case still runs; ``Allcompare.py``
     and the study table carry the label.
 ``finished``
-    exit 0 if the case already reached ``endTime`` (``processor*/`` included,
-    with ``Time::run()``'s half-step slack), 1 if not.
+    exit 0 if the case's newest checkpoint complete on every rank is at
+    ``endTime`` (``Time::run()``'s half-step slack), 1 if not.
 ``record``
     add the job's wall clock to the family's ``results/cost-model.yaml``
     through :func:`.feasibility.record_measurement`, under an exclusive
@@ -46,14 +46,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import re
 import sys
 from pathlib import Path
 
 from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012ext import direct_case, feasibility, interface, policy
 from plumetools.cai2012ext import interface_case
-from plumetools.foamio.times import time_directories
+from plumetools.foamio import checkpoints
 
 MARKER = "NON-PRODUCTION"
 
@@ -144,27 +143,17 @@ def label(case_dir: Path) -> str:
 # --------------------------------------------------------------------------- #
 
 def reached_end(case_dir: Path) -> bool:
-    """Whether the case's newest time, reconstructed or not, is at ``endTime``.
+    """Whether the case's newest COMPLETE checkpoint is at ``endTime``.
 
-    Half a time step of slack, the test ``Time::run()`` applies: ``endTime`` and
-    the time directory's name are the same number printed by two formatters.
+    :func:`plumetools.foamio.checkpoints.reached_end`: a time counts only when
+    every rank wrote all of it (the reconstructed case is one rank), with
+    ``Time::run()``'s half step of slack. A job killed while writing its last
+    time has not finished, however far one rank got.
     """
     case = Path(case_dir)
-    control = case / "system" / "controlDict"
-    if not control.is_file():
+    if not (case / "system" / "controlDict").is_file():
         return False
-    entries = {}
-    for line in control.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"\s*(endTime|deltaT)\s+([^;]+);", line)
-        if match:
-            entries[match.group(1)] = float(match.group(2))
-
-    latest = max((value for parent in (case, *case.glob("processor[0-9]*"))
-                  for value, _ in time_directories(parent, missing_ok=True)),
-                 default=None)
-    end = entries.get("endTime")
-    delta = entries.get("deltaT", 0.0)
-    return latest is not None and end is not None and latest >= end - 0.5 * delta
+    return checkpoints.reached_end(case)
 
 
 # --------------------------------------------------------------------------- #
