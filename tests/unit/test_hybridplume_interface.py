@@ -1,4 +1,9 @@
-"""hybridplume: mesh geometry, breakdown connectivity and interface extraction."""
+"""hybridplume: mesh geometry, breakdown connectivity, interface extraction, mapping.
+
+All on a Python-written 3-D hex box (``_hybridmesh``), so no OpenFOAM is needed.
+Geometric identities (closure, linear-field interpolation) are exact up to
+round-off and are checked to 1e-12 relative.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,7 @@ import pytest
 from _hybridmesh import box_mesh
 from plumetools.hybridplume import breakdown as bd
 from plumetools.hybridplume import interface as itf
+from plumetools.hybridplume import mapping
 from plumetools.hybridplume.config import from_document
 from plumetools.hybridplume.meshgeom import read_mesh
 from plumetools.hybridplume.physics import BIRD_ARGON, SourceState
@@ -159,3 +165,68 @@ def test_empty_region_is_an_explicit_outcome(mesh):
     doc = itf.assess(mesh, surf, st, g, bd.indicators(st, g, BIRD_ARGON), _cfg(), src,
                      mode="automatic")
     assert doc["status"] == itf.STATUS_NONE
+
+
+# --------------------------------------------------------------------------- #
+# mapping
+# --------------------------------------------------------------------------- #
+
+class _FakeDsmcMesh:
+    """The interface patch of a DSMC mesh: same faces, reversed, reordered."""
+
+    def __init__(self, centres, areas):
+        self.face_centres = centres
+        self.face_areas = areas
+
+    def patch_slice(self, name):
+        return slice(0, self.face_centres.shape[0])
+
+
+def _fields(mesh):
+    c = mesh.cell_centres
+    retained = itf.connected_to_source(mesh, np.linalg.norm(c, axis=1) < 0.09)
+    surf = itf.extract(mesh, retained)
+    k = surf.faces.size
+    arrays = {"rho": np.full(k, 1e-4), "T": np.full(k, 300.0),
+              "U": np.tile([700.0, 0, 0], (k, 1)), "valid": np.ones(k, bool)}
+    return surf, mapping.canonical(surf, arrays, BIRD_ARGON)
+
+
+def test_mapping_recovers_a_permutation_and_preserves_flux(mesh):
+    surf, f = _fields(mesh)
+    perm = np.random.default_rng(3).permutation(surf.faces.size)
+    fake = _FakeDsmcMesh(f["faceCentre"][perm], -(f["faceNormal"] * f["faceArea"][:, None])[perm])
+    match = mapping.match_interface(fake, f)
+    assert np.array_equal(match["rows"], perm)
+    change = mapping.flux_change(f, match, BIRD_ARGON)
+    assert abs(change["mass_rel"]) < 1e-12 and abs(change["energy_rel"]) < 1e-12
+    # constant state: forward number flux = n J1(Un) summed over areas
+    from plumetools.hybridplume import halfrange
+    j1 = halfrange.normal_moments(f["velocity"] @ np.array([1.0, 0, 0]) * 0 +
+                                  np.einsum("ij,ij->i", f["velocity"], f["faceNormal"]),
+                                  np.sqrt(2 * BIRD_ARGON.gas_constant * 300.0))[0]
+    assert change["pre_mapping"]["mass"] == pytest.approx(
+        float(np.sum(1e-4 * j1 * f["faceArea"])), rel=1e-12)
+
+
+def test_mapping_refuses_uncovered_or_invalid_faces(mesh):
+    surf, f = _fields(mesh)
+    fake = _FakeDsmcMesh(f["faceCentre"][:-1], -(f["faceNormal"] * f["faceArea"][:, None])[:-1])
+    with pytest.raises(mapping.MappingError):
+        mapping.match_interface(fake, f)
+    moved = f["faceCentre"] + [0.0, 0.003, 0.0]
+    fake = _FakeDsmcMesh(moved, -(f["faceNormal"] * f["faceArea"][:, None]))
+    with pytest.raises(mapping.MappingError):
+        mapping.match_interface(fake, f)
+    bad = dict(f)
+    bad["valid"] = f["valid"].copy()
+    bad["valid"][0] = False
+    fake = _FakeDsmcMesh(f["faceCentre"], -(f["faceNormal"] * f["faceArea"][:, None]))
+    with pytest.raises(mapping.MappingError):
+        mapping.match_interface(fake, bad)
+
+
+def test_canonical_fields_are_consistent(mesh):
+    _, f = _fields(mesh)
+    cons = mapping.consistency(f, BIRD_ARGON)
+    assert cons["max_rel_rho_vs_m_n"] < 1e-14

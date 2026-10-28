@@ -1,4 +1,4 @@
-"""hybridplume: configuration, generated dictionaries, resources and refusals."""
+"""hybridplume: configuration, generated dictionaries, and workflow refusals."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plumetools.hybridplume import cfd, config
+from plumetools.hybridplume import cfd, config, workflow
 from plumetools.hybridplume import mesh as hm
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +59,16 @@ def test_cfd_case_uses_vhs_transport_and_caps_the_viscous_step(tmp_path):
     assert tm["max_delta_t_s"] <= tm["viscous_dt_limit_s"] * (1 + 1e-12)
     p = (tmp_path / "0" / "p").read_text()
     assert "waveTransmissive" in p and f"{src.pressure:.10g}" in p
+
+
+def test_interface_step_reports_full_dsmc_for_mode_none(tmp_path):
+    case = tmp_path / "case"
+    case.mkdir()
+    cfg = config.load(STUDY, "smoke-collisionless")
+    (case / workflow.RESOLVED).write_text(yaml.safe_dump(
+        {"profile": cfg.profile, "digest": cfg.digest, "config": cfg.doc}))
+    doc = workflow.interface(case)
+    assert doc["status"] == "full_dsmc"
 
 
 def test_resource_estimate_counts_parcels_not_only_cells():

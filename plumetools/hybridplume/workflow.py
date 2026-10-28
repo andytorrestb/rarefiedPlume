@@ -16,6 +16,7 @@ Steps (``python -m plumetools.hybridplume <step> <case>``):
 ``check-mesh``      built source patch == predicted staircase (count, area)
 ``cfd-report``      budgets of the converged precursor; background sensitivity
 ``breakdown``       3-D Kn_rho, Kn_T, Kn_U, Kn_GLL, B_exp on the CFD cells
+``interface``       select (automatic/manual/none) and assess the surface
 ==================  ==========================================================
 
 OpenFOAM commands are run by ``cases/cai2012-hybrid/Allrun``, not from here:
@@ -323,4 +324,80 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
                         mask=mask, near_lip=near_lip, time=time,
                         valid=ind["valid"], **{k: ind[k] for k in bd.INDICATORS})
     write_json(results_dir(case_dir) / "breakdown.json", doc)
+    return doc
+
+
+# --------------------------------------------------------------------------- #
+# interface
+# --------------------------------------------------------------------------- #
+
+def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = False) -> dict:
+    from . import breakdown as bd
+    from . import interface as itf
+    from . import mapping, resources
+    from .cfd import background_state
+    from .meshgeom import read_mesh
+    case_dir = Path(case_dir)
+    cfg = load_case(case_dir)
+    source = config_mod.build_source(cfg)
+    gas = source.gas
+    mode = cfg.get("interface.mode", "automatic")
+    res = results_dir(case_dir)
+    if mode == "none":
+        doc = {"mode": "none", "status": itf.STATUS_FULL_DSMC,
+               "label": cfg.get("label", cfg.profile)}
+        write_json(res / "interface.json", doc)
+        return doc
+    cfd = case_dir / "cfd"
+    mesh = read_mesh(cfd)
+    bdz = res / "breakdown.npz"
+    if not bdz.is_file():
+        raise WorkflowError("run the 'breakdown' step first")
+    with np.load(bdz) as z:
+        time = time or str(z["time"])
+        ind = {k: z[k] for k in bd.INDICATORS}
+        ind["valid"] = z["valid"]
+        retained = z["retained"]
+    state = bd.read_state(cfd, time, gas)
+    grads = bd.gradients(mesh, state)
+    if mode == "manual":
+        region = itf.manual_region(mesh, cfg.require("interface.manual"), source.diameter_m)
+        retained = itf.connected_to_source(mesh, region)
+    surf = itf.extract(mesh, retained)
+    doc = itf.assess(mesh, surf, state, grads, ind, cfg, source, mode=mode)
+    arrays = doc.pop("_face_arrays", None)
+    doc["time"] = time
+    doc["label"] = cfg.get("label", cfg.profile)
+    doc["allow_unsuitable"] = bool(allow_unsuitable or cfg.get("interface.allow_unsuitable"))
+    if arrays is not None:
+        fields = mapping.canonical(surf, arrays, gas)
+        p_face = itf.face_values(mesh, surf, state.p, cfg.get("interface.face_state", "linear"))
+        doc["state_consistency"] = mapping.consistency(fields, gas, p_face)
+        mapping.save(res / "interface_fields.npz", fields)
+        itf.write_vtk(res / "interface.vtk", mesh, surf.faces, {
+            "Mn": arrays["Mn"], "Un": arrays["Un"], "rho": arrays["rho"], "T": arrays["T"],
+            "Kn_GLL_cfd_side": ind["Kn_GLL"][surf.cfd_cell],
+            "Kn_GLL_dsmc_side": ind["Kn_GLL"][surf.dsmc_cell],
+            "B_exp_cfd_side": ind["B_exp"][surf.cfd_cell],
+            "normal": surf.normal, "U": arrays["U"]})
+        doc["artifacts"] = {"surface_vtk": str(res / "interface.vtk"),
+                            "canonical_fields": str(res / "interface_fields.npz")}
+        doc["geometry"] = {
+            "centroid_m": (surf.centre * surf.area[:, None]).sum(0) / surf.area.sum(),
+            "x_range_m": [float(surf.centre[:, 0].min()), float(surf.centre[:, 0].max())],
+            "max_radius_m": float(np.hypot(surf.centre[:, 1], surf.centre[:, 2]).max()),
+        }
+    keep = ~retained
+    floor = 3.0 * background_state(cfg, source)["density_kg_m3"]
+    use = keep & (state.rho > floor) & np.isfinite(state.rho)
+    if use.any():
+        doc["dsmc_estimate"] = resources.dsmc_estimate(
+            cfg, source, number_density=state.rho[use] / gas.mass_kg, temperature=state.T[use],
+            speed=state.speed[use], volumes=mesh.cell_volumes[use],
+            sizes=mesh.cell_size()[use], length_scale_m=float(mesh.points[:, 0].max()),
+            basis="CFD state on the DSMC cells, excluding cells within 3x of the "
+                  "background floor (the DSMC there is near-vacuum)")
+        doc["dsmc_estimate"]["cells_total_in_dsmc_region"] = int(keep.sum())
+    np.save(res / "retained.npy", retained)
+    write_json(res / "interface.json", doc)
     return doc
