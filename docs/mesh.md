@@ -383,11 +383,15 @@ cd cases/3d-inflow
 numbers. It requires an explicit `--yes`, and `Allrun` never calls it.
 
 **It overwrites `constant/polyMesh`**, which is gitignored for this case. Restore
-the Pointwise mesh from its tag:
+the Pointwise mesh from history:
 
 ```bash
-git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+git checkout f83233f^ -- cases/3d-inflow/constant/polyMesh
 ```
+
+The tag `pointwise-mesh-3d-inflow`, which this page and the case scripts used
+to name, is not present in the repository or on the remote; `f83233f` is the
+commit that stopped tracking the mesh, so its parent still holds it.
 
 ### What `Allmesh` clears first
 
@@ -441,11 +445,11 @@ full path (`cases/3d-inflow/constant/polyMesh/`) precisely so it cannot generali
 **do not** rewrite it as `**/constant/polyMesh/`.
 
 3d-inflow's own Pointwise export — 99 240 tetrahedra, 2044 triangular inflow
-faces, the substrate the regression golden is bound to — is preserved on a tag
-rather than in `HEAD`:
+faces, the substrate the regression golden is bound to — is preserved in history
+rather than in `HEAD` (the tag once named for it does not exist):
 
 ```bash
-git checkout pointwise-mesh-3d-inflow -- cases/3d-inflow/constant/polyMesh
+git checkout f83233f^ -- cases/3d-inflow/constant/polyMesh
 ```
 
 Two consequences worth knowing:
