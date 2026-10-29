@@ -40,6 +40,10 @@ spell it `trapz`).
 
 ### Setting up a new machine
 
+Step-by-step instructions, including the documentation environment and
+ParaView, are in [Installation](getting-started/installation.md); this section
+records what the steps are for.
+
 ```bash
 ./Allsetup                  # all three steps below, then verifies the result
 ./Allsetup --python-only    # skip everything needing OpenFOAM
@@ -66,7 +70,7 @@ nothing to come back for, and then checks that each one imports:
 `./Allsetup --extras test,plots` narrows that — the way out if CaseFoam will not
 install. Slice imagery has no extra, because it needs ParaView and nothing pip
 can install; `./Allsetup` only reports whether `pvpython` and `ffmpeg` are there
-([below](#slice-imagery--plumetoolsviz-and-pvpython)).
+([below](#slice-imagery-with-plumetoolsviz-and-pvpython)).
 
 **Step 3 is the one that gets missed.** Nothing pip does touches it, and a case
 that needs it fails only at `./Allrun` — several steps into a study, with a
@@ -85,8 +89,9 @@ pytest -m "not needs_openfoam"
 Pinned in `pyproject.toml`: `numpy >= 1.20`, `scipy >= 1.6`, `pyyaml >= 5.4`;
 `pytest >= 7` for the test extra. Python ≥ 3.9.
 
-The full Tier 0 + regression suite runs in about two seconds on Windows and
-Linux, with no OpenFOAM installed. This is deliberate: mesh parsing, the
+The Tier 0 + regression suite runs on Windows and Linux with no OpenFOAM
+installed; the last measured run and its counts are in
+[What the tests establish](explanation/evidence.md#measured-for-this-documentation-2026-10-28). This is deliberate: mesh parsing, the
 source-flow model, and the field writers are all testable without a solver.
 
 ### Running a case — needs OpenFOAM
@@ -121,7 +126,7 @@ one-offs under `util/` import it directly and are not part of the library.
 > yet six plotting scripts require one as input (finding RP-06). The Fnum
 > resolution study cannot currently be reproduced end to end.
 
-#### Slice imagery — `plumetools.viz` and `pvpython`
+#### Slice imagery with `plumetools.viz` and `pvpython`
 
 `plumetools/viz` renders slice PNGs of any solver field through ParaView's own
 `paraview.simple`. It needs ParaView and nothing that `pip` installs:
@@ -231,8 +236,12 @@ thing happening again. Each run should record, alongside its output:
 - `pip freeze`
 - a timestamp
 
-`plumetools.run` is the intended home for writing that as `<case>/provenance.txt`.
-It is not implemented yet — the run wrappers are still a later stage.
+There is no general `plumetools.run`. Two families record provenance
+themselves: the Kn extension's manifest carries `cai2012ext.provenance` (git
+state, sources, the re-derived Knudsen number), and the hybrid family's
+`hybridplume.provenance` records repository SHAs, source hashes, solver
+binaries and the toolchain. The other families record the resolved inputs in
+their manifests and summaries but not the software versions.
 
 ## Version-pinning recommendation
 
