@@ -1,0 +1,42 @@
+/* Minimal additions to Material's defaults. */
+
+/* Figure placeholders: an empty, clearly labelled frame where a figure from a
+   real run belongs. There is deliberately no <img> inside. */
+:root {
+  --md-admonition-icon--figure: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 19H5V5h14m0-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2m-5.04 9.29-2.75 3.54-1.96-2.36L6.5 17h11z"/></svg>');
+}
+.md-typeset .admonition.figure,
+.md-typeset details.figure {
+  border-color: var(--md-default-fg-color--lighter);
+  border-style: dashed;
+}
+.md-typeset .figure > .admonition-title,
+.md-typeset .figure > summary {
+  background-color: var(--md-default-fg-color--lightest);
+}
+.md-typeset .figure > .admonition-title::before,
+.md-typeset .figure > summary::before {
+  background-color: var(--md-default-fg-color--light);
+  -webkit-mask-image: var(--md-admonition-icon--figure);
+          mask-image: var(--md-admonition-icon--figure);
+}
+
+/* Source and family line under an API page title. */
+.md-typeset .api-meta {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.75rem;
+}
+
+/* Status tags used in tables: implemented / tested / validated. */
+.md-typeset .status {
+  border-radius: 0.2rem;
+  font-size: 0.7rem;
+  padding: 0 0.3rem;
+  white-space: nowrap;
+  background-color: var(--md-default-fg-color--lightest);
+}
+
+/* Long configuration tables: let the first column hold dotted keys. */
+.md-typeset table code {
+  word-break: normal;
+}
