@@ -184,3 +184,8 @@ applications/thermophysicalModels/hybridPlumeThermo/lnInclude/
 applications/thermophysicalModels/hybridPlumeThermo/Make/linux64*/
 # hybridplume case directories are generated under cases/cai2012-hybrid/runs/
 cases/cai2012-hybrid/runs/
+
+# Documentation: the locally built site and its own environment
+# (docs/development/documentation.md). Nothing built is committed.
+/site/
+/.venv-docs/
