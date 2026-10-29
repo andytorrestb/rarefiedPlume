@@ -9,7 +9,7 @@ from an archived case directory.
 | Status | Cases |
 |---|---|
 | **ARCHIVED** — frozen, do not modify | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` (27 dirs) · `wake-cylinder` (6 dirs) |
-| **ACTIVE** — under refactor | `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
+| **ACTIVE** | `3d-inflow` (reference) · `cai2012` · `cai2012-health` · `cai2012-kn-extension` · `cai2012-virtual-collision` · `cai2012-hybrid` · `markelov1999` · `r-4d` · `iss_solar_panels{,_2,_3}` and `solar_panel_particle_resolution_study/Fnum_*` (still unconverted legacy copies) — see the [case catalog](../docs/reference/case-catalog.md) |
 
 Archived cases are one-off studies kept for historical record. They are **not** deleted,
 **not** refactored, and **not** fixed. Their results stand as produced.
@@ -37,7 +37,8 @@ PNG or `.dat` for a verified result.
 ## Known findings in archived cases
 
 Verified by reading the code and measuring the committed meshes at tag
-`pre-refactor-baseline`. None of these are fixed.
+`pre-refactor-baseline` (commit `7997ccc`; the tag itself is not present in the
+repository). None of these are fixed.
 
 | ID | Sev | Case | Finding |
 |---|---|---|---|
