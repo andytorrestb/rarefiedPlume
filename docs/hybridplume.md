@@ -10,7 +10,8 @@ is reproduced in 3-D; its axisymmetric numerics are **not**.
 Everything is full three-dimensional Cartesian: no wedge, no symmetry plane, no
 empty patch, no radial weighting. The configuration loader refuses those keys.
 
-Case family: [`cases/cai2012-hybrid/`](../cases/cai2012-hybrid/README.md).
+Case family: [`cases/cai2012-hybrid/`](../cases/cai2012-hybrid/README.md); how to run it:
+[the tutorial](tutorials/cai2012-hybrid.md).
 
 ---
 
@@ -315,28 +316,11 @@ imposed; the numbers are reported, with their noise floors where measurable.
 
 ## 11. Reproduction
 
-Laptop (WSL, 32 GB host, 15 GB VM; never all cores):
-
-```bash
-source /usr/lib/openfoam/openfoam2512/etc/bashrc; export PATH="$FOAM_APPBIN:$PATH"
-applications/thermophysicalModels/Allwmake   # libhybridPlumeThermo.so, once per environment
-applications/dsmcBoundaryModels/Allwmake     # libplumeDsmcBoundaryModels.so
-C=cases/cai2012-hybrid/runs/kn0p01c
-cases/cai2012-hybrid/Allrun $C setup --profile smoke-kn0p01-coarse -np 4
-cases/cai2012-hybrid/Allrun $C cfd -np 4
-cases/cai2012-hybrid/Allrun $C post-cfd [--allow-unsuitable]
-cases/cai2012-hybrid/Allrun $C dsmc -np 4
-cases/cai2012-hybrid/Allrun $C post-dsmc
-cases/cai2012-hybrid/Allrun $C crossings -np 4      # optional, exact exits
-python -m plumetools.hybridplume overlap $C --reference cases/cai2012-hybrid/runs/kn0p01c_full
-```
-
-HPC (Rocky Linux): compile both libraries there, then
-`python -m plumetools.hybridplume hpc <case> --scheduler pbs --np 192` writes
-`<case>/hpc/run_<stage>.pbs` sourcing `cases/cai2012-kn-extension/hpc_env.sh`
-(override with `HYBRID_HPC_ENV`); `qsub` them in stage order. A walltime kill is
-resumed by resubmitting the same script. SLURM scripts carry `__SET_ME__`
-partition/account placeholders: this repository has no SLURM settings.
+The laptop and HPC command sequences — building both libraries, the staged
+`Allrun`, the overlap comparison and the generated batch scripts — are in the
+[hybrid tutorial](tutorials/cai2012-hybrid.md), the one place they are
+maintained. The smoke results above were produced with that sequence on WSL
+(32 GB host, 15 GB VM, never all cores).
 
 ## 12. Limitations
 

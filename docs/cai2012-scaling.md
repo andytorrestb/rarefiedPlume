@@ -22,29 +22,17 @@ separate; their presence cannot override the selected full-suite inputs.
 
 ## Commands and bounded execution
 
-Run from the repository root using an environment with the project dependencies,
-pytest, and optional matplotlib (`pip install -e ".[test,plots]"`). On this
-Windows workspace the available interpreter is `python`; the repository `.venv`
-contains Linux binaries and is not the Windows interpreter.
-
-```powershell
-python cases/cai2012-kn-extension/Allscale.py inventory
-python cases/cai2012-kn-extension/Allscale.py prepare
-python cases/cai2012-kn-extension/Allscale.py smoke
-python cases/cai2012-kn-extension/Allscale.py report --output cases/cai2012-kn-extension/results/scaling/full-suite/smoke
-```
+The commands — `inventory`, `prepare`, `smoke`, `fit --full`, `report`,
+`evaluate` — and what each reads and writes are in the
+[scaling tutorial](tutorials/cai2012-scaling.md), the one place they are
+maintained. What follows is why they are bounded the way they are.
 
 No arguments means inventory only. `smoke` uses **synthetic** Cai fields under a
 known axial map, two Kn values, at most 48 points per case and 8 optimizer
-evaluations per fit. It writes beneath `results/scaling/full-suite/smoke`; titles and JSON
-identify the data as synthetic. Whole-field fits require the explicit command:
+evaluations per fit, and every title and JSON file identifies the data as
+synthetic. Whole-field fits require the explicit `fit --full`.
 
-```powershell
-python cases/cai2012-kn-extension/Allscale.py fit --full
-python cases/cai2012-kn-extension/Allscale.py report
-```
-
-These commands inspect every compatible, registered available Kn. Missing input
+Those commands inspect every compatible, registered available Kn. Missing input
 fields are skipped with reasons, and an empty suitable subset is reported as
 unidentifiable. The implementation uses a serial optimizer, one BLAS/OpenMP
 thread, chunks of 64 Cai points, no interpolated Cai cache, a 512 MiB per-input
@@ -54,28 +42,11 @@ rejects core declarations above eight. A complete assessment is never the
 default laptop action. Input files are checked against uncompressed NPZ size
 before loading. Increase explicit limits only after checking HPC resources.
 
-The PBS template inherits `hpc_env.sh`, the study's `shortq` convention, and one
-node with eight cores. Submit manually on the cluster; this was **not executed**:
-
-```bash
-cd cases/cai2012-kn-extension
-qsub runScaling.sh
-# Optional predeclared sensitivity refits, also analysis only:
-python Allscale.py fit --full --sensitivities
-```
-
-`--config PATH`, `--output PATH`, and `--no-plots` work for the CLI modes.
-`report` reads stored fits and does not refit. For a portable fitted predictor,
-create a CSV headed `X,P` and evaluate without DSMC input:
-
-```powershell
-python cases/cai2012-kn-extension/Allscale.py evaluate --predictor cases/cai2012-kn-extension/results/scaling/full-suite/smoke/stratum0/exploratory/F/axial/predictor.json --points points.csv --kn 0.1 --output predictions
-```
-
-The predictor inherits the source speed ratio from its fit. Points must lie
-downstream with `X>0`, `P>=0`; the off-axis disk quadrature is undefined on the
-source plane. The 3D mapping API preserves azimuth and supports explicit solver
-axis, nozzle center, and diameter adapters.
+`report` reads stored fits and does not refit. The predictor inherits the
+source speed ratio from its fit. Points must lie downstream with `X>0`,
+`P>=0`; the off-axis disk quadrature is undefined on the source plane. The 3D
+mapping API preserves azimuth and supports explicit solver axis, nozzle center,
+and diameter adapters.
 
 ## Inventory, registration and source compatibility
 

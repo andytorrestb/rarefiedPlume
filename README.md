@@ -1,316 +1,78 @@
 # rarefiedPlume
 
-Test cases and utilities for a plume-impingement model for rarefied flows, built
-on OpenFOAM's `dsmcFoam` (verified against **v2512**).
+DSMC test cases and the `plumetools` package for rarefied plume expansion and
+impingement, on OpenFOAM's standard `dsmcFoam` (verified against **v2512**; the
+MNF `dsmcFoam+` fork is not required). Every active case is generated from one
+configuration file; post-processing compares DSMC with analytical solutions
+where they exist.
 
-A rarefied plume expands from a hemispherical inflow surface into a vacuum. The
-inflow conditions come from an analytical source-flow model evaluated per face;
-DSMC solves the field from there.
+> **No result in this repository is physically validated.** The tests show the
+> code does what it says; recorded runs show the pipelines work. Each family's
+> tutorial states what is and is not established.
 
 ## Quick start
 
 ```bash
-./Allsetup                        # pip install, build the inflow library, verify
-pytest -m "not needs_openfoam"    # 475 tests, ~4 s, no OpenFOAM required
-
-cd cases/3d-inflow
-./Allrun --no-solve               # generates 0/ inflow fields; needs no OpenFOAM
-./Allrun                          # full run; needs OpenFOAM v2512
-./Allclean                        # reset (--dry-run to preview)
+./Allsetup                              # pip install -e ".[test,plots,cases]", build the inflow library, verify
+./Allsetup --python-only                # without OpenFOAM
+python -m pytest -m "not needs_openfoam"   # the fast suite; no OpenFOAM needed
 ```
 
-`./Allsetup --python-only` skips everything needing OpenFOAM; `./Allsetup --check`
-verifies an existing setup without installing or building anything. It installs
-every pip extra — `test`, `plots`, `cases` — unless `--extras a,b` names fewer.
-By hand it is:
+Then pick a family below. Before any run, its cheap checks (dry-run
+generation, `--dict-only`, `--describe`) show what the inputs imply and cost
+without OpenFOAM.
 
-```bash
-pip install -e ".[test,plots,cases]"               # + pytest, matplotlib/pandas, CaseFoam
-cd applications/dsmcBoundaryModels && ./Allwmake   # the custom inflow model
-```
+## Case families
 
-That second step is easy to miss and pip never does it — see
-[Environment](#environment).
+| Family | What | Tutorial |
+|---|---|---|
+| [`cases/cai2012`](cases/cai2012/README.md) | Cai & Wang (2012) collisionless circular argon plume, Kn 100 / 0.1 / 0.01 × four particle levels | [docs/tutorials/cai2012.md](docs/tutorials/cai2012.md) |
+| [`cases/cai2012-health`](cases/cai2012-health/README.md) | statistical noise of the Kn = 100 answer: parcels × averaging sweep | [docs/tutorials/cai2012-health.md](docs/tutorials/cai2012-health.md) |
+| [`cases/cai2012-kn-extension`](cases/cai2012-kn-extension/README.md) | the same plume at seven decades of Kn (100 … 1e-4); interface track; field scaling | [direct](docs/tutorials/cai2012-kn-extension.md) · [interface](docs/tutorials/cai2012-interfaces.md) · [scaling](docs/tutorials/cai2012-scaling.md) |
+| [`cases/cai2012-virtual-collision`](cases/cai2012-virtual-collision/README.md) | a reduced virtual-collision model against Cai and DSMC | [docs/tutorials/cai2012-virtual-collision.md](docs/tutorials/cai2012-virtual-collision.md) |
+| [`cases/cai2012-hybrid`](cases/cai2012-hybrid/README.md) | one-way 3-D CFD → DSMC hybrid of Cai's source | [docs/tutorials/cai2012-hybrid.md](docs/tutorials/cai2012-hybrid.md) |
+| [`cases/markelov1999`](cases/markelov1999/README.md) | AIAA 99-3455: N₂ plume past a cylinder onto a plate, four reservoir pressures | [docs/tutorials/markelov1999.md](docs/tutorials/markelov1999.md) |
+| [`cases/r-4d`](cases/r-4d/README.md) | an R-4D exit-plane plume onto a plate, or free | [docs/tutorials/r-4d.md](docs/tutorials/r-4d.md) |
+| [`cases/3d-inflow`](cases/3d-inflow/README.md) | the legacy source-flow reference case (frozen model; no mesh in a fresh clone) | [docs/tutorials/3d-inflow.md](docs/tutorials/3d-inflow.md) |
+| `cases/iss_solar_panels{,_2,_3}`, `cases/solar_panel_particle_resolution_study` | unconverted legacy copies; need `dsmcFoam+`; **not runnable today** | [ISS](docs/tutorials/iss-solar-panels.md) · [particle resolution](docs/tutorials/particle-resolution.md) |
 
-All physical inputs live in [`cases/3d-inflow/case.yaml`](cases/3d-inflow/case.yaml).
-No Python needs editing to change a parameter.
+Archived, frozen historical record: `1d`, `2d-planar`, `2d-wedge`, `caseFoamEx`,
+`wake-cylinder` — see [`cases/ARCHIVE.md`](cases/ARCHIVE.md). Which cases run
+today, with what, and what blocks the rest:
+[case catalog](docs/reference/case-catalog.md).
 
-## Layout
-
-```
-plumetools/          the analytical model and OpenFOAM I/O, as a package
-  sourceflow.py        equations E1-E8, pure functions -- the LEGACY model
-  geometry.py          centroids, normals, spherical coordinates
-  mesh/                polyMesh parsing: boundary, points and faces (streamed),
-                       boundary-patch geometry
-  foamio/              OpenFOAM files, shared by every family: field reading
-                       (volfield), time directories, restart checkpoints across
-                       ranks, patch types, 0/ writers, mesh dictionaries
-    primitives.py        searchable sphere/cylinder/cone/box, shared by the
-                         families that mesh with snappyHexMesh
-  casemanifest.py      the case list a study's runner scripts read, checked whole
-  config.py            case.yaml loading and validation
-  inflow.py            orchestration
-  markelov1999/        the AIAA 99-3455 family: paper-faithful model, geometry,
-                       mesh, flux verification, resolution, checks, post
-  cai2012/             the Cai & Wang 2012 family: collisionless circular plume,
-                       its own config/gas/analytical/mesh/study/post, plus
-                       health.py (the statistical-quality sweep) and audit.py
-                       (measured parcel occupancy, determinism, the sweep table)
-  cai2012ext/          the Cai 2012 KNUDSEN EXTENSION (Kn 1e-4, 1e-3, 1, 10):
-                       policy, provenance, feasibility, idempotent generation,
-                       off-axis/angular comparisons, stationarity, and the
-                       nozzle-plume resolution diagnostics wired to a cai2012
-                       case. Imports cai2012, nozzleplume and rarefaction and
-                       edits none of them
-  nozzleplume/         the GENERAL nozzle-exit family: any exit state given
-                       directly, any single VHS gas, an optional plate, a
-                       snappyHexMesh mesh. cases/r-4d is its first case
-  viz/                 YAML-driven ParaView slice imagery; video.py and
-                       dissect.py need ffmpeg but not ParaView
-  rarefaction/         after a run: local mean free path, Knudsen numbers and
-                       mesh resolution as volume fields, and a summary for
-                       planning the next mesh. Any dsmcFoam case
-  iteration.py         the next mesh iteration of a case, in a new directory:
-                       its inputs, nothing from its run
-applications/        custom OpenFOAM code
-  dsmcBoundaryModels/  plumeFieldInflow -- per-face, patch-selected DSMC inflow
-cases/               standard OpenFOAM cases -- see the scope split below
-docs/                workflow, model reconstruction, mesh, environment
-tests/unit/          Tier 0: pure Python, no OpenFOAM
-tests/regression/    bit-exact freeze of the pre-refactor behaviour
-tests/openfoam/      Tier 2: needs_openfoam, deselected by default
-util/                one-off analysis scripts
-```
-
-Cases keep the ordinary OpenFOAM layout (`constant/`, `system/`, `0/`).
-`plumetools` is a library they call, not a framework that replaces them.
-
-## Active vs archived cases
-
-| Status | Cases |
-|---|---|
-| **Active** | `markelov1999` (AIAA 99-3455) · `cai2012` (JSR 49(1) 2012) · `cai2012-health` (statistical health of the above) · `cai2012-kn-extension` (Cai's plume at Kn 1e-4…10, not run yet) · `r-4d` (R-4D exit plume onto a plate) · `3d-inflow` (reference) · `iss_solar_panels{,_2,_3}` · `solar_panel_particle_resolution_study/Fnum_*` |
-| **Archived** | `1d` · `2d-planar` · `2d-wedge` · `caseFoamEx` · `wake-cylinder` |
-
-Archived cases are one-off studies kept for historical record. They are frozen:
-not refactored, not fixed, not deleted. Several produced results under labels
-that do not describe what was actually run — [`cases/ARCHIVE.md`](cases/ARCHIVE.md)
-records what is known to be wrong in each, so archived output is never mistaken
-for validated output.
-
-`cases/markelov1999`, `cases/cai2012`, `cases/r-4d` and `cases/3d-inflow` use
-`plumetools`. The other active cases still carry their own copy of the legacy
-script.
-
-## The AIAA 99-3455 case family
-
-`cases/markelov1999` reproduces the configuration of Lumpkin, Stewart & Markelov,
-*Study of 3D Rarefied Flow on a Flat Plate in the Wake of a Cylinder* (1999): a
-rarefied N₂ plume past a finite cylinder onto a flat plate 6 inches behind it, at
-four reservoir pressures.
-
-```bash
-./Allsetup                                         # includes CaseFoam, for case generation
-cd cases/markelov1999
-./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
-```
-
-Case generation uses [CaseFoam](https://github.com/DLR-RY/caseFOAM) to clone the
-base case into the hierarchy, as `util/caseFoam/` has since before the refactor.
-The physical values are applied afterwards by structured YAML editing rather than
-through CaseFoam's `caseData`, because that mechanism reaches a non-OpenFOAM file
-only through `'#!stringManipulation'` — whitespace-sensitive substitution.
-
-It is **new work**, not a fix of the archived `wake-cylinder` lineage, and it
-does not inherit that lineage's defects. Its source-flow model is a separate,
-explicitly named variant — `markelov1999_axisymmetric` — because
-`plumetools/sourceflow.py` is frozen to reproduce those defects and disagrees
-with the paper in six substantive places (SF-1 … SF-6 in
-[`docs/markelov1999-case.md`](docs/markelov1999-case.md)).
-
-**No result in it has been validated** against DAC or experiment.
-
-It also carries the repository's first custom OpenFOAM code:
-[`applications/dsmcBoundaryModels/plumeFieldInflow`](applications/dsmcBoundaryModels/plumeFieldInflow),
-an `InflowBoundaryModel` that injects across a named patch list with a per-face
-number density — the two things stock `FreeStream` cannot do, and the reason
-`3d-inflow` has to reflect at its outer boundary.
-
-## The Cai & Wang 2012 case family
-
-`cases/cai2012` reproduces the configuration of Cai & Wang, *Numerical
-Validations for a Set of Collisionless Rocket Plume Solutions*, JSR 49(1), 2012:
-argon expanding from a **circular nozzle exit directly into vacuum**, at
-`D = 0.2 m`, speed ratio 2, and Knudsen numbers 100, 0.1 and 0.01.
-
-```bash
-cd cases/cai2012
-./generate_cases.py && ./AllmeshCases && ./AllrunCases && ./AllpostCases
-```
-
-The physical nozzle exit **is** the DSMC inlet — no hemispherical source surface
-and no analytical inflow model — which is the structural difference from the two
-families above. `blockMesh` cannot make a disk, so the exit plane is meshed as
-one patch and `topoSet` + `createPatch` carve the circular `nozzle` out of it;
-the result is a staircase whose area is measured against `πR₀²` and checked.
-
-Only the Knudsen number is a per-case input. `λ0`, `n0`, `U0`, the cell size, the
-particle weight and `deltaT` are all derived, so a case named `Kn0p1` cannot run
-another case's density. DSMC results are compared against Cai's **collisionless
-analytical solution**, re-derived in `plumetools/cai2012/analytical.py` rather
-than digitised from his plots.
-
-It needs no CaseFoam — the study is a flat list of three cases — and it carries
-its own `case.yaml` schema, because `plumetools/config.py` validates a
-source-flow sphere and throat radius this case does not have.
-
-**No result in it has been validated** against Cai's own DSMC numbers; his
-reported errors are carried as reference values, not tolerances. See
-[`docs/cai2012-case.md`](docs/cai2012-case.md).
-
-`cases/cai2012-kn-extension` runs the same plume at four Knudsen numbers Cai did
-not report — 1e-4, 1e-3, 1 and 10, at one baseline parcel weight — with
-`cai2012-health`'s highest-resolution settings and Cai's 10⁴ t0 startup, and
-runs the nozzle-plume family's resolution diagnostics on every case. Cai's own
-0.01, 0.1 and 100 are refused at every step. Kn = 1e-3 and 1e-4 cannot be
-resolved within the cell budget and are marked unsuitable for production. See
-[`docs/cai2012-kn-extension.md`](docs/cai2012-kn-extension.md).
-
-## The nozzle-plume family and the R-4D case
-
-`plumetools/nozzleplume` is the Cai family's problem with the paper taken out of
-it: a uniform exit state on a circular nozzle exit, expanding into a vacuum box.
-The exit state is given **directly** — density, speed, temperature — rather than
-derived from a Knudsen number; the gas is any single VHS species; and there may
-be a **flat plate** in the plume, which is what needs `snappyHexMesh`.
-`plumetools/cai2012` is untouched and nothing imports it; a unit test holds the
-two packages to the same exit state for Cai's inputs.
-
-`cases/r-4d` is its first case: an R-4D exit plane (D = 0.377 m, 3187 m/s,
-498 K, 1.3e22 m⁻³ — Kn ≈ 4e-4) onto a 34.14 × 11.88 × 0.25 m plate.
-
-```bash
-cd cases/r-4d/baseCase
-./Allmesh --describe      # what case.yaml implies, and what it will cost
-./Allmesh && ./Allrun && ./Allpost
-./Allviz                  # the flow field as 2-D slices (needs pvpython)
-```
-
-`./Allpost` also writes the local mean free path, Knudsen numbers and Δ/λ into
-the sampled time directory for ParaView, with a summary of where the mesh is
-too coarse. The mesh is then changed by hand, in a **fresh iteration** —
-`python -m plumetools.iteration baseCase <new>`, edit its `case.yaml`, and
-`./Allmesh && ./Allrun` from t = 0. See
-[`docs/rarefaction-diagnostics.md`](docs/rarefaction-diagnostics.md).
-
-Everything is in one `case.yaml`, including `dsmc.n_equivalent_particles`, which
-is written to `dsmcProperties` exactly as given. At that Knudsen number the exit
-cannot be resolved — the exit cell is ~220 mean free paths — so the particle
-weight is set by what the machine can hold, and the tooling reports what each
-choice costs rather than deriving one. **No result in it has been validated.**
-See [`cases/r-4d/README.md`](cases/r-4d/README.md).
-
-## Read this before trusting the model
-
-**The source-flow model has no recoverable citation.** An exhaustive search of
-every comment, commit message and document found exactly one literature
-reference, and it covers the *archived* 1d/2d-wedge validation case (Stewart &
-Lumpkin 2012, via Jonathan S. Pitt, Aegis Aerospace, for LENS). The 3D model —
-the limiting angle, the `(γ+0.41)/(γ−1)` angular exponent, the normalisation
-integral — appears nowhere. It was reconstructed from the code.
-
-Several known defects are **deliberately frozen** so the extraction could be
-proven behaviour-preserving. Every one is a visible `LEGACY` value in `case.yaml`
-rather than a buried literal. The most consequential:
-
-- **SM-01** — the per-case stagnation pressure was never read. `calculateRhoN`
-  hard-coded 475 psi while each case set its own value and then ignored it.
-- **SM-02** — density used 300 K while velocity and temperature used the
-  configured temperature; a factor of 10 apart in the resolution-study cases.
-- **SM-03** — the model computes for N₂ while the solver simulates argon.
-  v_ℓ = 788.16 m/s instead of 558.89 m/s.
-- **SM-04** — θ is measured from +z, not from the +x plume axis.
-
-Full reconstruction, confidence classification and open questions:
-[`docs/source-flow-model.md`](docs/source-flow-model.md).
-
-## Environment
-
-### What the active cases need today
+## What the active cases need
 
 | | |
 |---|---|
-| OpenFOAM | **v2512**, the standard distribution — verified by reading its source and running the cases |
-| Solver | `dsmcFoam` / `dsmcInitialise`. **Not** the MNF fork's `dsmcFoam+` |
-| Custom code | `libplumeDsmcBoundaryModels.so`, built by `applications/dsmcBoundaryModels/Allwmake` |
-| Python | ≥ 3.9; numpy, scipy ≥ 1.6, pyyaml |
-| Post-processing | ParaView **5.10.0** (`paraview.simple`; not pip-installable) |
+| OpenFOAM | **v2512**, standard distribution (`dsmcFoam`, `dsmcInitialise`, `blockMesh`, `snappyHexMesh`, …) |
+| Custom code | `libplumeDsmcBoundaryModels.so` (`applications/dsmcBoundaryModels/Allwmake`, built by `Allsetup`); `libhybridPlumeThermo.so` for the hybrid only (`applications/thermophysicalModels/Allwmake`) |
+| Python | ≥ 3.9 with numpy, scipy ≥ 1.6, PyYAML; extras `test`, `plots`, `cases` (CaseFoam, for two generators) |
+| Imagery | ParaView's `pvpython` (not pip-installable); ffmpeg optional |
 
-The fork is not required because the one thing it provided that this work needs —
-a per-face, patch-selected inflow — is supplied instead by
-[`plumeFieldInflow`](applications/dsmcBoundaryModels/plumeFieldInflow), a peer of
-OpenFOAM's own `FreeStream` that links against the standard distribution. Run
-`./Allsetup` to install and build all of it, or `./Allsetup --check` to find out
-which piece is missing. Details in
-[`docs/solver-compatibility.md`](docs/solver-compatibility.md).
-
-### What produced the historical results
-
-| | |
-|---|---|
-| OpenFOAM | build **v1706** (recorded in `cases/wake-cylinder/5psi/sample_out.txt`) |
-| Solver | `dsmcFoam+` / `dsmcInitialise+` — the MNF fork; version not recorded |
-| Meshing | Pointwise **V18.5R2** (binary `.pw`; `cases/3d-inflow` no longer needs it) |
-
-This row is provenance, not an instruction: the archived cases still name
-`dsmcFoam+` in their `controlDict`s and are frozen that way
-([`cases/ARCHIVE.md`](cases/ARCHIVE.md)). The Python library versions behind
-those results are **unknown and unrecoverable**, so bit-level reproduction of
-archived output is not achievable. See
-[`docs/environment.md`](docs/environment.md).
+Historical results were produced with OpenFOAM v1706 and `dsmcFoam+`, whose
+build is not recoverable: [docs/environment.md](docs/environment.md).
 
 ## Documentation
 
-- [`docs/plumetools-architecture.md`](docs/plumetools-architecture.md) — which
-  module owns what, how data flows from `case.yaml` to a verdict, and where a
-  new diagnostic, mesh or study variation goes
-- [`docs/refactor-2026-10-27.md`](docs/refactor-2026-10-27.md) — the
-  maintainability refactor: changed names and commands, the five defects fixed,
-  the evidence, and how to recover the pre-refactor cases
-- [`docs/markelov1999-case.md`](docs/markelov1999-case.md) — the AIAA 99-3455
-  family: the model, the geometry, and every assumption with its reasoning
-- [`docs/plume-field-inflow.md`](docs/plume-field-inflow.md) — the custom DSMC
-  inflow boundary model, and why standard `dsmcFoam` needs one
-- [`cases/markelov1999/README.md`](cases/markelov1999/README.md) — running the
-  case family
-- [`docs/cai2012-case.md`](docs/cai2012-case.md) — the Cai & Wang 2012 family:
-  paper values, assumptions, and every difference from Cai's axisymmetric setup
-- [`cases/cai2012/README.md`](cases/cai2012/README.md) — running the collisionless
-  circular-plume family
-- [`cases/cai2012-health/README.md`](cases/cai2012-health/README.md) — how much
-  statistical noise that family's answer carries: a 3 × 3 sweep over parcels per
-  cell and averaging duration, judged through imagery
-- [`docs/cai2012-kn-extension.md`](docs/cai2012-kn-extension.md) and
-  [`cases/cai2012-kn-extension/README.md`](cases/cai2012-kn-extension/README.md)
-  — the Knudsen extension: the four configurations, what is inherited, the
-  production verdicts, the resolution diagnostics, every compared quantity, and
-  how to run only it on HPC
-- [`cases/r-4d/README.md`](cases/r-4d/README.md) — the R-4D plume-on-a-plate
-  case: what was given, what was assumed, what it costs to run, and what has and
-  has not been checked
-- [`docs/mesh.md`](docs/mesh.md) — geometry, the 5-block O-grid, and why
-  generation had to wait for the centroid fix
-- [`docs/source-flow-model.md`](docs/source-flow-model.md) — the equations, units,
-  conventions, and what could not be verified
-- [`docs/rarefaction-diagnostics.md`](docs/rarefaction-diagnostics.md) — mean
-  free path, Knudsen numbers and mesh resolution from a sampled run; the
-  run → inspect → remesh → start-fresh workflow; adding a diagnostic
-- [`docs/viz-slices.md`](docs/viz-slices.md) — YAML-driven slice imagery of any
-  solver field, through ParaView's own `pvpython`, and the four ways it misleads
-  you
-- [`cases/3d-inflow/README.md`](cases/3d-inflow/README.md) — the reference case,
-  including two unresolved settings its own descendants later changed
-- [`cases/ARCHIVE.md`](cases/ARCHIVE.md) — frozen cases and their known defects
-- [`tests/regression/README.md`](tests/regression/README.md) — what the golden
-  does and does not prove
+The documentation is a local MkDocs site; every page is also readable on
+GitHub under [`docs/`](docs/index.md). To build it (Python ≥ 3.11, separate
+environment, no simulation stack needed):
+
+```bash
+python3 -m venv .venv-docs
+.venv-docs/bin/python -m pip install -r docs/requirements.txt
+.venv-docs/bin/python -m mkdocs serve          # http://127.0.0.1:8000
+.venv-docs/bin/python -m mkdocs build --strict # into site/ (gitignored)
+```
+
+Starting points: [installation](docs/getting-started/installation.md) ·
+[a first session](docs/getting-started/first-run.md) ·
+[repository map](docs/getting-started/repository-map.md) ·
+[command line](docs/reference/cli.md) ·
+[configuration files](docs/reference/configuration.md) ·
+[outputs](docs/reference/outputs.md) ·
+[models and evidence](docs/explanation/index.md) ·
+[architecture](docs/plumetools-architecture.md) ·
+[known gaps](docs/development/known-gaps.md).
+The Python API reference is generated in the built site.

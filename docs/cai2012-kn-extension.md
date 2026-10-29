@@ -5,7 +5,7 @@ Plume Solutions*, Journal of Spacecraft and Rockets, Vol. 49, No. 1, 2012.
 
 This document says what the extension is, what it reuses, what it adds, what
 every compared quantity means, and what is not yet known. Running instructions
-are in [`cases/cai2012-kn-extension/README.md`](../cases/cai2012-kn-extension/README.md);
+are in the [Kn-extension tutorial](tutorials/cai2012-kn-extension.md);
 the parent study is documented in [`docs/cai2012-case.md`](cai2012-case.md).
 
 > **Current setup (2026-10-26): seven-decade full suite prepared, not run.**

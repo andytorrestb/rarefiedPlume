@@ -5,8 +5,8 @@ Plume Solutions*, Journal of Spacecraft and Rockets, Vol. 49, No. 1, 2012.
 
 This document separates **what the paper states** from **what this
 implementation had to decide**, and gives the reasoning for each decision. The
-running instructions are in
-[`cases/cai2012/README.md`](../cases/cai2012/README.md).
+running instructions are in the
+[cai2012 tutorial](tutorials/cai2012.md).
 
 > **This is not a reproduction of Cai's DSMC results, and must not be described
 > as one until the numerical comparison supports it.** Cai used an axisymmetric
@@ -365,7 +365,8 @@ resumes the case from its newest time directory rather than restarting it, and
 `uniform/functionObjects/`. `./Allrun` skips the two steps that would otherwise
 destroy what it is resuming from — `dsmcInitialise` and `decomposePar -force` —
 and `./Allmesh` refuses to re-mesh a case that has results. Details in
-[`cases/cai2012/README.md`](../cases/cai2012/README.md).
+[the tutorial](tutorials/cai2012.md#continuing-a-run) and
+[Restart and recovery](guides/restart-and-recovery.md).
 
 One OpenFOAM detail forced a change here. `writeControl runTime` computes its
 write index as `(value − startTime)/writeInterval`, and on a resume `startTime`
@@ -808,7 +809,7 @@ perfectly plausible picture.
 
 ## 11. Related documents
 
-* [`cases/cai2012/README.md`](../cases/cai2012/README.md) — how to run it
+* [cai2012 tutorial](tutorials/cai2012.md) — how to run it
 * [`docs/plume-field-inflow.md`](plume-field-inflow.md) — the custom inflow model
 * [`docs/solver-compatibility.md`](solver-compatibility.md) — why stock
   `FreeStream` cannot express this case

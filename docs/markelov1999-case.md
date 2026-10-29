@@ -5,8 +5,8 @@ on a Flat Plate in the Wake of a Cylinder*, AIAA 99-3455, 1999.
 
 This document separates **what the paper prints** from **what this
 implementation had to decide**, and gives the reasoning for each decision. The
-running instructions are in
-[`cases/markelov1999/README.md`](../cases/markelov1999/README.md).
+running instructions are in the
+[markelov1999 tutorial](tutorials/markelov1999.md).
 
 ---
 
@@ -251,6 +251,35 @@ the refinement level rather than with the physics.
 
 ---
 
+### 3.9a Surface pressure from `fD`
+
+There is no ready-made wall-pressure field in standard `dsmcFoam`. What it
+provides is `fD`, accumulated in `DSMCParcel::hitWallPatch`:
+
+```cpp
+deltaFD = cloud.nParticle()*(preIMom - postIMom)/(deltaT*fA);
+cloud.fDBF()[wppIndex][wppLocalFace] += deltaFD;
+```
+
+— the momentum the gas delivers to the face, per unit area per unit time.
+Dimensions `[1 -1 -2 0 0 0 0]` = Pa. The surface pressure is its wall-normal
+component, `p = fD · n̂`; the tangential part is the shear stress and is reported
+separately rather than folded in.
+
+This is **not** the gas static pressure. Substituting `n k T` from the cell next
+to the wall would omit the directed momentum of the impinging plume, which at
+these speed ratios is most of the load.
+
+`fD` is reset every timestep by `DSMCCloud::resetFields`, so a written snapshot
+is a one-step momentum tally. The generated `controlDict` runs `fieldAverage`
+from `dsmc.average_start_s`, and the post-processing reads `fDMean`.
+
+Pressure is averaged over an angular and axial **window**, area-weighted — never
+one face, whose value would depend on where snappyHexMesh happened to put it.
+Windward is azimuth 180° (facing the source); leeward is 0° (the base).
+
+(Moved here from the case README.)
+
 ## 4. Inflow flux verification
 
 The solver samples a **half-range drifting Maxwellian**, not `ρUA`. The number
@@ -360,7 +389,7 @@ Two consequences worth knowing:
 
 ## 8. Related documents
 
-* [`cases/markelov1999/README.md`](../cases/markelov1999/README.md) — running it
+* [markelov1999 tutorial](tutorials/markelov1999.md) — running it
 * [`docs/plume-field-inflow.md`](plume-field-inflow.md) — the custom boundary model
 * [`docs/solver-compatibility.md`](solver-compatibility.md) — what stock `dsmcFoam` cannot express
 * [`docs/source-flow-model.md`](source-flow-model.md) — the **legacy** model, and why it is frozen
