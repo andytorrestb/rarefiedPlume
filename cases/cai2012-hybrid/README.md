@@ -1,38 +1,32 @@
 # cases/cai2012-hybrid — one-way CFD → DSMC free plume, full 3-D
 
-Cai & Wang (2012)'s circular argon source (D = 0.2 m, S0 = 2), computed as a
+Cai & Wang (2012)'s circular argon source (D = 0.2 m, S₀ = 2), computed as a
 `rhoCentralFoam` precursor, a fixed continuum-breakdown surface, and standard
-`dsmcFoam` + `plumeFieldInflow` beyond it. Everything is 3-D Cartesian.
-Method, decisions and measured results: [`docs/hybridplume.md`](../../docs/hybridplume.md).
+`dsmcFoam` + `plumeFieldInflow` beyond it. Everything is 3-D Cartesian. Smoke
+runs are intentionally under-resolved; verification and production profiles are
+prepared, not run; nothing is validated.
 
 | file | what |
 |---|---|
 | `hybrid.yaml` | every input, labelled [PAPER] / [REPO] / [BIRD] / [ASSUMPTION] / [NUMERICAL]; profiles overlay `base` |
 | `Allrun` | the OpenFOAM stages, resumable: `setup`, `cfd`, `post-cfd`, `dsmc`, `post-dsmc`, `crossings`, `all` |
 
-Profiles:
-
-| profile | purpose | where |
-|---|---|---|
-| `smoke-kn0p01`, `smoke-kn0p01-coarse`, `smoke-kn1em3` | hybrid machinery, **intentionally under-resolved** | laptop |
-| `smoke-kn0p01-coarse-full` | full DSMC on the same mesh, for the overlap comparison | laptop |
-| `smoke-collisionless` | collisionless 3-D DSMC vs the analytical reference | laptop |
-| `verification-*` | Cai Kne 100 / 0.1 / 0.01 at verification resolution | HPC |
-| `production-kn1em3`, `production-kn1em4` | the extensions | HPC |
-
 ```bash
-# OpenFOAM v2512 sourced, both libraries built in THIS environment:
+# OpenFOAM v2512 sourced, BOTH libraries built in this environment:
 #   applications/thermophysicalModels/Allwmake
 #   applications/dsmcBoundaryModels/Allwmake
 C=runs/kn0p01c                     # runs/ is gitignored
-./Allrun $C setup --profile smoke-kn0p01-coarse -np 4
-./Allrun $C cfd -np 4              # mesh + precursor (mesh only for full-DSMC profiles)
-./Allrun $C post-cfd               # cfd-report, breakdown, interface (verdict in results/interface.json)
-./Allrun $C dsmc -np 4             # refuses an unsuitable interface unless post-cfd had --allow-unsuitable
-./Allrun $C post-dsmc              # dsmc-post, reference, report -> results/summary.json, *.png
-./Allrun $C crossings -np 4        # optional: exact particle crossings over a per-step window
+./Allrun $C setup --profile smoke-kn0p01-coarse -np 4   # Python only
+./Allrun $C cfd -np 4
+./Allrun $C post-cfd               # verdict in results/interface.json
+./Allrun $C dsmc -np 4             # refuses an unsuitable interface unless --allow-unsuitable
+./Allrun $C post-dsmc              # results/summary.json, *.png
 ```
 
-Every stage resumes after an interruption: rerun the same command. Nothing is
-deleted; to start over, remove the case directory. HPC batch scripts:
-`python -m plumetools.hybridplume hpc <case> --scheduler pbs|slurm --np N`.
+Every stage resumes after an interruption; nothing is deleted (to start over,
+remove the case directory). Batch scripts:
+`python -m plumetools.hybridplume hpc <case> --scheduler pbs|slurm|none --np N`.
+
+- Tutorial (profiles, stages, suitability, resume, outputs, HPC):
+  [`docs/tutorials/cai2012-hybrid.md`](../../docs/tutorials/cai2012-hybrid.md)
+- Method, decisions and measured smoke results: [`docs/hybridplume.md`](../../docs/hybridplume.md)
