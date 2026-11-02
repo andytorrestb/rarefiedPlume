@@ -102,10 +102,10 @@ base:
     crossing_discard_steps: 12     # post-restart insertion burst, measured; see docs
 
   resources:
-    max_ranks: 8
-    max_memory_GB: 8.0
-    bytes_per_parcel: 300
-    bytes_per_cell: 2500
+    max_ranks: 192
+    max_memory_GB: 1500.0
+    bytes_per_parcel: 3000
+    bytes_per_cell: 25000
     seconds_per_parcel_step: 4.0e-6       # measured 2026-10-28: WSL, /mnt/c, 4 ranks, smoke-kn1em3
     seconds_per_cfd_cell_step: 3.0e-6
 
@@ -118,7 +118,7 @@ profiles:
     domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
     mesh: {core_cell_over_D: 0.05}
     cfd: {end_time_transits: 4.0}
-    resources: {max_ranks: 8, max_memory_GB: 8.0}
+    resources: {max_ranks: 32, max_memory_GB: 64.0}
 
   smoke-kn0p01-coarse:
     label: "SMOKE (intentionally under-resolved): Kne 0.01, D/10 cells"
@@ -150,6 +150,68 @@ profiles:
     domain: {x_max_over_D: 2.0, half_width_over_D: 1.0}
     mesh: {core_cell_over_D: 0.05}
 
+  # HPC Tests
+  test-kn0p01-20pct:
+    label: "TEST: Cai Kn 0.01, approximately 20% of verification mesh"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 6.0, half_width_over_D: 4.0}
+    mesh: {core_cell_over_D: 0.026, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 60}
+    # cfd: {viscous_dt_factor: 10.0}
+    resources: {max_ranks: 192, max_memory_GB: 1200.0}
+
+  # Fresh ~1M-cell CFD -> DSMC pass. Numerics are the base settings that ran clean
+  # to 2.5 transits on test-kn0p01-20pct; viscous_dt_factor stays 0.25 (1.0 fails
+  # on step 5, in the e solve; measured). From that run:
+  # * Inside R < D the density is within ~1.5% of its t = 4.2 ms value by 1.7 ms,
+  #   so the CFD stops at 1.7 ms, before the outer domain empties (rho_min
+  #   1.8e-9 at 1.7 ms, 2.3e-11 at the crash at 4.3 ms).
+  # * No sphere or the automatic surface met every criterion at Kne 0.01, so
+  #   this is a machinery test and every report says so.
+  test-kn0p01-1M:
+    label: "TEST (machinery, unsuitable interface allowed): Kne 0.01, ~1M cells, 1.7 ms CFD"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 4.0, half_width_over_D: 3.0}
+    mesh: {core_cell_over_D: 0.032, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 24}
+    cfd: {end_time_transits: 1.5, max_courant: 0.1}
+    interface: {allow_unsuitable: true}
+    resources: {max_ranks: 192, max_memory_GB: 400.0}
+
+  # Mesh study on test-kn0p01-1M: only core_cell_over_D and outer_cells change,
+  # each step doubling the cells (linear refinement 2^(1/3)). The step follows
+  # dx^2 through viscous_dt_factor, so the viscous number is the same in all four.
+  test-kn0p01-2M:
+    label: "TEST (machinery, unsuitable interface allowed): Kne 0.01, mesh study ~2M cells, 1.7 ms CFD"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 4.0, half_width_over_D: 3.0}
+    mesh: {core_cell_over_D: 0.0254, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 30}
+    cfd: {end_time_transits: 1.5, max_courant: 0.1}
+    interface: {allow_unsuitable: true}
+    resources: {max_ranks: 192, max_memory_GB: 400.0}
+
+  test-kn0p01-4M:
+    label: "TEST (machinery, unsuitable interface allowed): Kne 0.01, mesh study ~4M cells, 1.7 ms CFD"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 4.0, half_width_over_D: 3.0}
+    mesh: {core_cell_over_D: 0.0202, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 38}
+    cfd: {end_time_transits: 1.5, max_courant: 0.1}
+    interface: {allow_unsuitable: true}
+    resources: {max_ranks: 192, max_memory_GB: 400.0}
+
+  test-kn0p01-8M:
+    label: "TEST (machinery, unsuitable interface allowed): Kne 0.01, mesh study ~8M cells, 1.7 ms CFD"
+    source: {knudsen: 0.01}
+    domain: {x_max_over_D: 4.0, half_width_over_D: 3.0}
+    mesh: {core_cell_over_D: 0.016, core_x_over_D: 2.0, core_half_over_D: 1.0,
+           outer_cells: 48}
+    cfd: {end_time_transits: 1.5, max_courant: 0.1}
+    interface: {allow_unsuitable: true}
+    resources: {max_ranks: 192, max_memory_GB: 400.0}
+
+
   # --- scientific verification (HPC scale unless stated) ----------------------
   verification-collisionless:
     label: "VERIFICATION: collisionless, r/D = 10 arc reachable"
@@ -178,6 +240,7 @@ profiles:
     mesh: {core_cell_over_D: 0.01, core_x_over_D: 2.0, core_half_over_D: 1.0,
            outer_cells: 60}
     resources: {max_ranks: 192, max_memory_GB: 1200.0}
+    cfd: {viscous_dt_factor: 10.0}
 
   # --- production extensions (HPC) --------------------------------------------
   production-kn1em3:

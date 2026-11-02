@@ -189,3 +189,8 @@ cases/cai2012-hybrid/runs/
 # (docs/development/documentation.md). Nothing built is committed.
 /site/
 /.venv-docs/
+
+/cases/cai2012-hybrid/*.e*
+/cases/cai2012-hybrid/*.o*
+applications/dsmcBoundaryModels/plumeFieldInflow/lnInclude/
+applications/dsmcBoundaryModels/plumeFieldInflow/Make/linux64*/

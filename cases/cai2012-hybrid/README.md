@@ -27,6 +27,17 @@ Every stage resumes after an interruption; nothing is deleted (to start over,
 remove the case directory). Batch scripts:
 `python -m plumetools.hybridplume hpc <case> --scheduler pbs|slurm|none --np N`.
 
+To run the default 8M machinery-test profile with the single-case PBS wrapper,
+submit `qsub runCase.sh`. Select another profile with Torque's `-v` option; the
+case directory defaults to `runs/<profile>`:
+
+```bash
+qsub -v PROFILE=verification-kn0p01 runCase.sh
+```
+
+The wrapper requests one node with 192 processors so it can accommodate the
+largest profiles; the selected profile controls the actual rank count.
+
 - Tutorial (profiles, stages, suitability, resume, outputs, HPC):
   [`docs/tutorials/cai2012-hybrid.md`](../../docs/tutorials/cai2012-hybrid.md)
 - Method, decisions and measured smoke results: [`docs/hybridplume.md`](../../docs/hybridplume.md)
