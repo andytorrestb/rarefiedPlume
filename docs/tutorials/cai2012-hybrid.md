@@ -118,7 +118,8 @@ cases/cai2012-hybrid/Allrun $C post-dsmc         # dsmc-post, reference, report 
 cases/cai2012-hybrid/Allrun $C crossings -np 4   # optional: exact exits over a per-step window
 ```
 
-`all --profile NAME` runs setup → cfd → post-cfd → dsmc → post-dsmc. Other
+`all --profile NAME` runs setup → cfd → post-cfd → dsmc → post-dsmc. If omitted,
+the profile is read from `hybrid.yaml`'s `default_profile`. Other
 `Allrun` options: `--config FILE`, `--subdir cfd|cfd_bg…` (for the `cfd` stage),
 `--allow-unsuitable`.
 

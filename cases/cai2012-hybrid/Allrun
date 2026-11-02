@@ -2,14 +2,14 @@
 # Run the OpenFOAM stages of one hybrid case. Python steps write inputs and read
 # outputs; this script only runs OpenFOAM tools, logs them, and resumes.
 #
-#   ./Allrun <case-dir> setup --profile NAME [--config FILE] [-np N]
+#   ./Allrun <case-dir> setup [--profile NAME] [--config FILE] [-np N]
 #   ./Allrun <case-dir> cfd   [-np N] [--subdir cfd|cfd_bgXe-YY]
 #   ./Allrun <case-dir> post-cfd                     # cfd-report, breakdown, interface
 #   ./Allrun <case-dir> dsmc  [-np N]                # dsmc-setup, mesh, fields, solve
 #   ./Allrun <case-dir> post-dsmc                    # dsmc-post, reference, report
 #   ./Allrun <case-dir> crossings [-np N]            # exact exits: N extra steps,
 #                                                    # written every step
-#   ./Allrun <case-dir> all   --profile NAME [-np N] # every stage in order
+#   ./Allrun <case-dir> all   [--profile NAME] [-np N] # every stage in order
 #
 # Every solver stage RESUMES from the newest time that every rank wrote
 # completely (python -m plumetools.foamio.checkpoints plan); re-running a stage
@@ -121,10 +121,11 @@ solve() {   # solve <app> [logname] -- in a case directory with a mesh; resumes
 }
 
 stage_setup() {
-    [ -n "$PROFILE" ] || die "setup needs --profile"
-    $HP setup "$CASE" --config "$CONFIG" --profile "$PROFILE" ${NP:+--np $NP} >/dev/null \
-        || die "setup failed"
-    echo "==> $CASE set up from profile $PROFILE (results/setup.json)"
+    local -a args=(setup "$CASE" --config "$CONFIG")
+    [ -n "$PROFILE" ] && args+=(--profile "$PROFILE")
+    [ -n "$NP" ] && args+=(--np "$NP")
+    $HP "${args[@]}" >/dev/null || die "setup failed"
+    echo "==> $CASE set up from ${PROFILE:-the config default} (results/setup.json)"
 }
 
 stage_cfd() {
@@ -208,6 +209,12 @@ case "$STAGE" in
     dsmc)      stage_dsmc ;;
     post-dsmc) stage_post_dsmc ;;
     crossings) stage_crossings ;;
-    all)       stage_setup; ( stage_cfd ); stage_post_cfd; ( stage_dsmc ); stage_post_dsmc ;;
+    all)
+        stage_setup
+        ( stage_cfd ) || die "CFD stage failed"
+        stage_post_cfd
+        ( stage_dsmc ) || die "DSMC stage failed"
+        stage_post_dsmc
+        ;;
     *) die "unknown stage '$STAGE'" ;;
 esac
