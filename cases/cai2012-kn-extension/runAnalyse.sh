@@ -1,6 +1,6 @@
 #PBS -S /bin/bash
-#PBS -q shortq
-#PBS -l walltime=1:00:00
+#PBS -q normalq
+#PBS -l walltime=24:00:00
 #PBS -l nodes=1:ppn=1
 #PBS -M torresfa@my.erau.edu
 #PBS -m abe
@@ -39,5 +39,5 @@ fi
 source "$HPC_ENV"
 
 printf '>>> Starting: the study-level analysis\n'
-bash ./AllpostCases --analyse-only
+bash ./AllpostCases #--analyse-only
 printf '<<< Completed: the study-level analysis\n'

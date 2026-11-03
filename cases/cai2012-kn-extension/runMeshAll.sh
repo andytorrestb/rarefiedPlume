@@ -1,6 +1,6 @@
 #PBS -S /bin/bash
 #PBS -q shortq
-#PBS -l walltime=4:00:00
+#PBS -l walltime=2:00:00
 #PBS -l nodes=1:ppn=1
 #PBS -M torresfa@my.erau.edu
 #PBS -m abe
