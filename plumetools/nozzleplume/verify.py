@@ -34,8 +34,9 @@ from pathlib import Path
 import numpy as np
 
 from plumetools.mesh.boundary import read_boundary
+from plumetools.mesh.patches import read_patches
+from plumetools.mesh.polymesh import read_cell_count
 from plumetools.nozzleplume import checks
-from plumetools.nozzleplume.meshread import read_cell_count, read_patches
 
 #: Relative tolerance on a measured area.
 #:

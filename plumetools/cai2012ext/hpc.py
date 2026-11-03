@@ -17,14 +17,14 @@ calls ``./Allrun`` itself, and around it the four steps here, through
     run path reads the manifest any more, so this is where the exclusion is
     enforced for a run -- on the case's own ``case.yaml``.
 ``label``
-    re-assess the case from its own ``case.yaml`` (:func:`.generation.derive`
+    re-assess the case from its own ``case.yaml`` (:func:`.direct_case.derive`
     and :func:`.feasibility.assess`, not the manifest, which may be stale) and,
     if it is unsuitable for production, write a ``NON-PRODUCTION`` marker into
     it listing the unresolved criteria. The case still runs; ``Allcompare.py``
     and the study table carry the label.
 ``finished``
-    exit 0 if the case already reached ``endTime`` (``processor*/`` included,
-    with ``Time::run()``'s half-step slack), 1 if not.
+    exit 0 if the case's newest checkpoint complete on every rank is at
+    ``endTime`` (``Time::run()``'s half-step slack), 1 if not.
 ``record``
     add the job's wall clock to the family's ``results/cost-model.yaml``
     through :func:`.feasibility.record_measurement`, under an exclusive
@@ -46,13 +46,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import re
 import sys
 from pathlib import Path
 
 from plumetools.cai2012.config import load_case_config
-from plumetools.cai2012ext import feasibility, generation, interface, policy
+from plumetools.cai2012ext import direct_case, feasibility, interface, policy
 from plumetools.cai2012ext import interface_case
+from plumetools.foamio import checkpoints
 
 MARKER = "NON-PRODUCTION"
 
@@ -97,9 +97,9 @@ def assess(case_dir: Path, cost_model=None, cost_origin=None) -> tuple:
         derived = interface_case.derive(Path(case_dir))
         return derived, interface_case.assess(derived, cost_model=cost_model,
                                               cost_origin=cost_origin)
-    derived = generation.derive(Path(case_dir))
-    return derived, feasibility.assess(*derived, cost_model=cost_model,
-                                       cost_origin=cost_origin)
+    derived = direct_case.derive(Path(case_dir))
+    return derived, feasibility.assess_case(derived, cost_model=cost_model,
+                                            cost_origin=cost_origin)
 
 
 def marker_text(assessment: dict) -> str:
@@ -124,7 +124,7 @@ def label(case_dir: Path) -> str:
             raise policy.ExtensionError(text)
         return text
     derived, assessment = assess(case_dir)
-    limitations = policy.source_limitations(derived[0])
+    limitations = policy.source_limitations(derived.cfg)
     source_text = ("Known source limitations (not resolved by numerical feasibility):\n"
                    + "".join(f"  - {line}\n" for line in limitations)) if limitations else ""
     if limitations:
@@ -143,38 +143,17 @@ def label(case_dir: Path) -> str:
 # --------------------------------------------------------------------------- #
 
 def reached_end(case_dir: Path) -> bool:
-    """Whether the case's newest time, reconstructed or not, is at ``endTime``.
+    """Whether the case's newest COMPLETE checkpoint is at ``endTime``.
 
-    Half a time step of slack, the test ``Time::run()`` applies: ``endTime`` and
-    the time directory's name are the same number printed by two formatters.
+    :func:`plumetools.foamio.checkpoints.reached_end`: a time counts only when
+    every rank wrote all of it (the reconstructed case is one rank), with
+    ``Time::run()``'s half step of slack. A job killed while writing its last
+    time has not finished, however far one rank got.
     """
     case = Path(case_dir)
-    control = case / "system" / "controlDict"
-    if not control.is_file():
+    if not (case / "system" / "controlDict").is_file():
         return False
-    entries = {}
-    for line in control.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"\s*(endTime|deltaT)\s+([^;]+);", line)
-        if match:
-            entries[match.group(1)] = float(match.group(2))
-
-    times = []
-    for parent in (case, *case.glob("processor[0-9]*")):
-        if not parent.is_dir():
-            continue
-        for entry in parent.iterdir():
-            if entry.is_dir():
-                try:
-                    value = float(entry.name)
-                except ValueError:
-                    continue
-                if value > 0.0:
-                    times.append(value)
-
-    latest = max(times, default=None)
-    end = entries.get("endTime")
-    delta = entries.get("deltaT", 0.0)
-    return latest is not None and end is not None and latest >= end - 0.5 * delta
+    return checkpoints.reached_end(case)
 
 
 # --------------------------------------------------------------------------- #
@@ -196,25 +175,24 @@ def measurement(case_dir: Path, seconds: float, derived, assessment) -> dict:
             "path": case_dir.relative_to(family_root(case_dir)).as_posix(),
             "Kn": float(derived.cfg.exit.knudsen),
             "seconds": float(seconds),
-            "parcels": float(derived.parcels),
-            "cells": int(derived.mesh_plan.retained_cells),
-            "steps": int(derived.run.n_steps),
+            "parcels": float(derived.planned.parcels),
+            "cells": int(derived.planned.mesh_plan.retained_cells),
+            "steps": int(derived.planned.run.n_steps),
             "numerical_particle_multiplier": float(
                 derived.cfg.dsmc.numerical_particle_multiplier),
             "production_status": assessment["status"],
             "mode": "interface",
         }
-    cfg, _, _, plan, run, _, particles, _ = derived
     return {
         "case": case_dir.name,
         "path": case_dir.relative_to(family_root(case_dir)).as_posix(),
-        "Kn": float(cfg.exit.knudsen),
+        "Kn": float(derived.cfg.exit.knudsen),
         "seconds": float(seconds),
-        "parcels": float(particles["total_particles"]),
-        "cells": int(plan.n_cells),
-        "steps": int(run.n_steps),
+        "parcels": float(derived.particles["total_particles"]),
+        "cells": int(derived.plan.n_cells),
+        "steps": int(derived.run.n_steps),
         "numerical_particle_multiplier": float(
-            cfg.dsmc.numerical_particle_multiplier),
+            derived.cfg.dsmc.numerical_particle_multiplier),
         "production_status": assessment["status"],
     }
 

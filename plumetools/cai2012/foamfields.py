@@ -47,16 +47,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from plumetools.foamio.patchfields import (  # noqa: F401 -- re-exported
+    CONSTRAINT_PATCH_TYPES,
+    patch_field_type,
+)
 from plumetools.foamio.primitives import BANNER, SEPARATOR, write_lines
 
 GENERATOR = "plumetools.cai2012.foamfields"
-
-#: Geometric patch types whose patchField type must match exactly. OpenFOAM
-#: rejects anything else with "inconsistent patch and patchField types".
-CONSTRAINT_PATCH_TYPES = frozenset({
-    "symmetry", "symmetryPlane", "empty", "wedge", "cyclic", "cyclicAMI",
-    "processor", "processorCyclic", "nonuniformTransformCyclic",
-})
 
 #: Fields ``DSMCCloud`` requires in ``0/`` but ``dsmcInitialise`` does not create.
 #: ``(name, class, dimensions, uniform internal value, written by hitWallPatch)``.
@@ -76,11 +73,6 @@ MEASUREMENT_FIELDS = (
     ("rhoM",      "volScalarField", "[1 -3 0 0 0 0 0]",  "0",       False),
     ("rhoN",      "volScalarField", "[0 -3 0 0 0 0 0]",  "0",       False),
 )
-
-
-def patch_field_type(geometric_type: str) -> str:
-    """The patchField type a given geometric patch type requires."""
-    return geometric_type if geometric_type in CONSTRAINT_PATCH_TYPES else "zeroGradient"
 
 
 def _header(field_class: str, object_name: str, note: str) -> list[str]:

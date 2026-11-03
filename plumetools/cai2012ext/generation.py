@@ -38,11 +38,10 @@ from pathlib import Path
 
 import yaml
 
-from plumetools.cai2012 import PAPER, checks, inflow, mesh
+from plumetools.cai2012 import PAPER
 from plumetools.cai2012 import study as study_module
 from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012.dictionaries import AVERAGED_FIELDS
-from plumetools.cai2012.geometry import from_config
 from plumetools.cai2012ext import (
     EXCLUDED_KNUDSEN,
     EXTENSION_KNUDSEN,
@@ -54,6 +53,8 @@ from plumetools.cai2012ext import (
     policy,
     provenance,
 )
+from plumetools.cai2012ext.direct_case import DirectCase, derive  # noqa: F401 -- re-exported
+from plumetools.foamio.times import time_directories
 
 #: Files whose content is a physical input, compared as parsed YAML.
 #: ``interface.yaml`` exists only in interface-mode cases; a direct-exit case
@@ -75,22 +76,6 @@ STATUS_CONFLICT = "conflict"
 # solver output
 # --------------------------------------------------------------------------- #
 
-def _numeric_positive_dirs(directory: Path) -> list[Path]:
-    found = []
-    if not directory.is_dir():
-        return found
-    for entry in directory.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0.0:
-            found.append(entry)
-    return found
-
-
 def has_solver_output(case_dir: Path) -> bool:
     """Whether a case holds anything a solver run produced.
 
@@ -100,10 +85,10 @@ def has_solver_output(case_dir: Path) -> bool:
     results too.
     """
     case_dir = Path(case_dir)
-    if _numeric_positive_dirs(case_dir):
+    if time_directories(case_dir, missing_ok=True):
         return True
     for processor in case_dir.glob("processor[0-9]*"):
-        if _numeric_positive_dirs(processor):
+        if time_directories(processor, missing_ok=True):
             return True
     return (case_dir / "log.dsmcFoam").is_file()
 
@@ -334,27 +319,6 @@ def stray_directories(root: Path, study, cases: list) -> list[dict]:
 # derivation and the manifest
 # --------------------------------------------------------------------------- #
 
-def derive(case_dir: Path):
-    """Everything the case will run at, from its own ``case.yaml``.
-
-    The same sequence as ``cases/cai2012/generate_cases.py``'s ``derive``.
-    """
-    cfg = load_case_config(case_dir)
-    geom = from_config(cfg)
-    exit_state = inflow.from_config(cfg)
-    plan = mesh.plan(cfg, geom, exit_state)
-    run = inflow.derive_run_settings(
-        cfg, exit_state, geom,
-        min_cell_size_m=plan.min_cell_size_m,
-        exit_cell_volume_m3=plan.exit_cell_volume_m3)
-    nozzle = mesh.predicted_nozzle_faces(plan, geom)
-    particles = mesh.estimate_particles(
-        plan, geom, exit_state, run.n_equivalent_particles)
-    report = checks.run_checks(cfg, geom, exit_state, plan, run,
-                               nozzle=nozzle, particles=particles)
-    return cfg, geom, exit_state, plan, run, nozzle, particles, report
-
-
 def build_entry(root: Path, study, study_path: Path, case, case_dir: Path, *,
                 cost_model=None, cost_origin=None) -> tuple[dict, list]:
     """One manifest row: the parent family's, plus the extension's records.
@@ -362,13 +326,14 @@ def build_entry(root: Path, study, study_path: Path, case, case_dir: Path, *,
     Returns:
         ``(entry, report_lines)``.
     """
-    cfg, geom, exit_state, plan, run, nozzle, particles, report = derive(case_dir)
+    derived = derive(case_dir)
+    cfg, geom, exit_state, run = (derived.cfg, derived.geom, derived.exit_state,
+                                  derived.run)
     entry = study_module.manifest_entry(
-        case, study, cfg, geom, exit_state, plan, run,
-        nozzle=nozzle, particles=particles)
-    assessment = feasibility.assess(
-        cfg, geom, exit_state, plan, run, nozzle, particles, report,
-        cost_model=cost_model, cost_origin=cost_origin)
+        case, study, cfg, geom, exit_state, derived.plan, run,
+        nozzle=derived.nozzle, particles=derived.particles)
+    assessment = feasibility.assess_case(derived, cost_model=cost_model,
+                                         cost_origin=cost_origin)
     entry.update({
         "knudsen_suite": policy.suite_name(study),
         "source_type": "direct-exit",
@@ -381,7 +346,7 @@ def build_entry(root: Path, study, study_path: Path, case, case_dir: Path, *,
         "sampling": provenance.averaging(cfg, run),
         "sources": provenance.sources(root, case_dir, Path(root) / study.base_case,
                                       study_path),
-        "dsmc_checks": report.as_dict(),
+        "dsmc_checks": derived.report.as_dict(),
         "feasibility": assessment,
     })
     return entry, feasibility.describe(assessment)

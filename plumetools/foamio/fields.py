@@ -25,6 +25,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+from plumetools.foamio.patchfields import (  # noqa: F401 -- re-exported
+    CONSTRAINT_PATCH_TYPES,
+    patch_field_type,
+)
+
 BANNER = r"""/*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -218,26 +223,6 @@ MEASUREMENT_FIELDS = (
     ("rhoM",      "volScalarField", "[1 -3 0 0 0 0 0]",  "0"),
     ("rhoN",      "volScalarField", "[0 -3 0 0 0 0 0]",  "0"),
 )
-
-
-#: Geometric patch types whose patchField type must match exactly. OpenFOAM
-#: rejects anything else with "inconsistent patch and patchField types".
-CONSTRAINT_PATCH_TYPES = frozenset({
-    "symmetry", "symmetryPlane", "empty", "wedge", "cyclic", "cyclicAMI",
-    "processor", "processorCyclic", "nonuniformTransformCyclic",
-})
-
-
-def patch_field_type(geometric_type: str) -> str:
-    """The patchField type a given geometric patch type requires.
-
-    Constraint patches -- ``symmetry``, ``empty``, ``wedge``, ``cyclic`` and
-    friends -- must carry a patchField of the same name; OpenFOAM fails with
-    "inconsistent patch and patchField types" otherwise. Ordinary ``patch`` and
-    ``wall`` boundaries take a normal condition, and for zeroed measurement
-    fields that is ``zeroGradient``.
-    """
-    return geometric_type if geometric_type in CONSTRAINT_PATCH_TYPES else "zeroGradient"
 
 
 def write_measurement_fields(out_dir: Path, patches) -> list[Path]:

@@ -163,10 +163,11 @@ def test_all_seven_generated_dictionary_sets_match_the_manifest_without_meshing(
     manifest = manifest_of(family)
     for entry in manifest["cases"]:
         case_dir = family / entry["path"]
-        cfg, geom, state, plan, run, _, _, checks = generation.derive(case_dir)
-        checks.raise_if_failed()
-        paths = mesh.write_mesh_setup(case_dir, cfg, geom, plan)
-        paths += dictionaries.write_case_dictionaries(case_dir, cfg, state, run)
+        case = generation.derive(case_dir)
+        case.report.raise_if_failed()
+        paths = mesh.write_mesh_setup(case_dir, case.cfg, case.geom, case.plan)
+        paths += dictionaries.write_case_dictionaries(case_dir, case.cfg,
+                                                      case.exit_state, case.run)
         assert len(paths) == 10
         assert all(path.is_file() for path in paths)
         assert not (case_dir / "constant" / "polyMesh").exists()

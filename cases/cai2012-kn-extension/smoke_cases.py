@@ -58,14 +58,15 @@ def main(argv=None):
     written, guards = [], {}
     for entry in manifest["cases"]:
         directory = root / entry["path"]
-        cfg, geom, state, plan, run, nozzle, particles, check = generation.derive(directory)
-        check.raise_if_failed()
+        case = generation.derive(directory)
+        case.report.raise_if_failed()
         refusal = hpc.guard(directory)
         if refusal:
             raise ValueError(f"Runtime policy refuses prepared case {entry['name']}: {refusal}")
         guards[entry["name"]] = "accepted by declared profile; suitability is separate"
-        written.extend(mesh.write_mesh_setup(directory, cfg, geom, plan))
-        written.extend(dictionaries.write_case_dictionaries(directory, cfg, state, run))
+        written.extend(mesh.write_mesh_setup(directory, case.cfg, case.geom, case.plan))
+        written.extend(dictionaries.write_case_dictionaries(directory, case.cfg,
+                                                            case.exit_state, case.run))
     verification = verify_extension(root, manifest, with_dictionaries=True)
     if not verification.passed:
         raise ValueError("Generated suite did not verify:\n" + "\n".join(verification.failures))

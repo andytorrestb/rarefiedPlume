@@ -3,11 +3,10 @@
 Removing the dense core from the DSMC domain at `Kn_e = 1e-3, 1e-4`, and
 injecting a continuum continuation of Cai's exit on a sphere downstream.
 
-Running instructions for the direct-exit cases are in
-[`cases/cai2012-kn-extension/README.md`](../cases/cai2012-kn-extension/README.md);
-the extension itself is [`docs/cai2012-kn-extension.md`](cai2012-kn-extension.md).
-This document is the method, the findings, and the commands for the interface
-track.
+Running instructions are in the tutorials: [direct-exit cases](tutorials/cai2012-kn-extension.md)
+and [this interface track](tutorials/cai2012-interfaces.md). The extension itself is
+[`docs/cai2012-kn-extension.md`](cai2012-kn-extension.md). This document is the
+method and the findings of the interface track.
 
 > **Status (2026-10-22): implemented and smoke-tested; nothing validated.**
 >
@@ -354,71 +353,38 @@ counts, the region and definitions) and `results/overlap_bins.csv`.
 | `interface-infeasible` | no admissible sphere, or a decision missing | guard refuses (exit 2) |
 | `unsuitable-for-production` | a production case misses a numerical criterion | label refuses (exit 3) unless `run_mode: exploratory` |
 | `pending-coupling-validation` | numerically sound, no passed overlap at this threshold | label refuses unless exploratory |
-| `production-candidate` | everything met and `validation_evidence` passed at the same B | runs, unmarked |
+| `production-candidate` | everything met and `validation_evidence` passed for the same coupling (below) | runs, unmarked |
 | `interface-validation` | an overlap run | runs if numerically sound (or exploratory), marked NON-PRODUCTION |
 | `development-smoke` | mechanics only | runs, marked NON-PRODUCTION |
 
 `numerical.status` and `coupling_validation.status` are reported separately.
 The direct-exit cases' gates are unchanged.
 
+**What evidence counts** (`plumetools/cai2012ext/interface_evidence.py`, since
+2026-10-27). `Alloverlap.py` records in `overlap.yaml` the coupling it tested,
+and a production case may rest on a `pass` only if every one of these is
+recorded and equal to its own: the model, `purpose: interface-validation`, the
+Bird definition and threshold, the core half-angle, the tail treatment, the
+angular exponent offset, and the source problem (D, S0, T0, the gas and its
+collision model). The Knudsen number, R, the mesh, the time step and the weight
+are recorded but never compared: validating at Kn = 0.01 and carrying the
+verdict to 1e-3 and 1e-4 is the design. A pass for another coupling reports
+`incompatible` (with the items), and evidence that does not say which coupling
+it tested -- anything written before 2026-10-27 -- reports
+`insufficient-provenance`; re-running `Alloverlap.py` on the validation case
+rewrites it from the same fields. Before 2026-10-27 a `pass` with a matching
+threshold was enough. The core angle is the one conservative choice here: the
+overlap region is confined to the injected core and the excluded tail shapes
+what reaches it, so a pass at one angle is not taken to validate another.
+
 ---
 
 ## 10. Commands
 
-### Laptop (no OpenFOAM needed)
-
-From WSL, at the repository root, with the venv active:
-
-```bash
-cd cases/cai2012-kn-extension
-python generate_interfaces.py --dry-run         # plan and verdicts, writes nothing
-python generate_interfaces.py --report          # Interface/, interface-manifest.yaml,
-                                                # results/interface-report.yaml per case
-(cd Interface/smoke_Kn0p001_B0p05 && bash ./Allmesh --dict-only)
-cd ../..
-python -m pytest tests/unit/test_cai2012ext_interface.py \
-                 tests/unit/test_cai2012ext_interface_case.py \
-                 tests/unit/test_cai2012ext_overlap.py -q -p no:cacheprovider
-```
-
-Optional tiny smoke (OpenFOAM v2512, ~37k cells, ~2e4 parcels, < 2 min each).
-On this laptop, put OpenFOAM's own binaries first: the user bin's
-`decomposePar` (hyStrath's) fails on every case, the stock tutorial included.
-
-```bash
-source /usr/lib/openfoam/openfoam2512/etc/bashrc && export PATH="$FOAM_APPBIN:$PATH"
-cd cases/cai2012-kn-extension/Interface/smoke_Kn0p001_B0p05
-timeout 600 bash ./Allmesh
-timeout 900 bash ./Allrun --serial
-bash ./Allclean && timeout 900 bash ./Allrun -np 2
-python -m plumetools.cai2012ext.interface_case check-decomposed .
-bash ./Allpost && python Alldiagnose.py && python Allcompare.py && python Allconverge.py
-python -m plumetools.cai2012ext.interface_case collect . --output results/interface-evidence.yaml
-```
-
-### Cluster, in order (you submit; nothing here does)
-
-1. Commit and push; on the cluster pull, rebuild the library if needed
-   (`applications/dsmcBoundaryModels/Allwmake`), `pip install -e ".[test,plots]"`
-   in the `.venv`.
-2. Generate: `cd cases/cai2012-kn-extension && python generate_interfaces.py --report`.
-3. Tiny smoke first:
-   `cd Interface/smoke_Kn0p001_B0p05 && qsub -N knx-imesh-smoke runMesh.sh`, then
-   `qsub -N knx-irun-smoke runCase.sh` (it is `development-smoke`, exploratory;
-   `dsmc.n_subdomains = 2` in its overrides), then `qsub runPost.sh`.
-4. Overlap cases: **blocked** (§5). Once a threshold set is chosen that admits
-   spheres, and `core_half_angle_deg`/`source_validity_min_radius_over_D` are
-   set, regenerate; for each `val_Kn0p01_*`: `qsub runMesh.sh`, `qsub runCase.sh`,
-   `qsub runPost.sh`. `runPost.sh` runs `Alloverlap.py` against
-   `../../../cai2012/Cases/Kn0p01_np1x` (or `python Alloverlap.py --baseline <path>`).
-5. Collect: each case's `runPost.sh` writes `results/interface-evidence.yaml`;
-   `python -m plumetools.cai2012ext.interface_case collect <case>` regenerates it.
-   Copy those small files (and `results/overlap.yaml`) back — no fields needed.
-6. Production: set `validation_evidence` in `interfaces.yaml` to the passing
-   `overlap.yaml` at the chosen B (a provenance key: `--refresh`, not a
-   conflict), regenerate, then `runMesh.sh`, `runCase.sh`, `runPost.sh` for
-   `Kn0p001_np1x_sphere`, `Kn0p0001_np1x_sphere`. Without passed evidence the
-   label step refuses them.
+The laptop checks, the development smoke run and the cluster sequence moved to
+the [interface-track tutorial](tutorials/cai2012-interfaces.md), which is now the
+one place they are maintained. §11 below records what was actually run on
+2026-10-22.
 
 ---
 

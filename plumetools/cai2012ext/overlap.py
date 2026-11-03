@@ -77,7 +77,8 @@ import numpy as np
 import yaml
 
 from plumetools.cai2012 import post
-from plumetools.cai2012ext import interface
+from plumetools.cai2012ext import interface, interface_evidence
+from plumetools.foamio.times import time_directories
 
 K_BOLTZMANN = 1.380649e-23
 
@@ -261,26 +262,21 @@ def average_start(case_dir: Path) -> float:
 
 def frames(case_dir: Path, t_start: float) -> list[str]:
     """Sampled time directories, oldest first."""
-    out = []
-    for entry in Path(case_dir).iterdir():
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if entry.is_dir() and value > t_start * (1 + 1e-9) and (entry / "rhoNMean").is_file():
-            out.append((value, entry.name))
-    return [name for _, name in sorted(out)]
+    return [name for _, name in time_directories(case_dir, after=t_start * (1 + 1e-9))
+            if (Path(case_dir) / name / "rhoNMean").is_file()]
 
 
 def geometry(case_dir: Path, names: list[str]):
     """``(centres, volumes)`` from the newest frame that has ``C``."""
     for name in reversed(names):
-        if (Path(case_dir) / name / "C").is_file():
-            centres = post.read_internal_field(Path(case_dir) / name / "C")
+        c_path = Path(case_dir) / name / "C"
+        if c_path.is_file():
+            centres = post.read_internal_field(c_path)
             v_path = Path(case_dir) / name / "V"
             if not v_path.is_file():
                 raise post.PostError(f"{case_dir}/{name}: no V; ./Allpost writes it")
-            return centres, post.read_internal_field(v_path)
+            return centres, post.read_cell_values(
+                v_path, centres.shape[0], f"cells in the cell centres {c_path}")
     raise post.PostError(f"{case_dir}: no frame has cell centres; run ./Allpost")
 
 
@@ -311,12 +307,7 @@ def bin_volumes(cfg: OverlapConfig, diameter_m: float) -> np.ndarray:
 def _read(case_dir: Path, name: str, selected) -> dict:
     values = {}
     for field in FIELDS:
-        array = post.read_internal_field(Path(case_dir) / name / field)
-        if array.shape[0] == 1:
-            array = np.broadcast_to(array, (selected.size,) + array.shape[1:])
-        if array.shape[0] != selected.size:
-            raise post.PostError(f"{case_dir}/{name}/{field}: {array.shape[0]} "
-                                 f"values for {selected.size} cells")
+        array = post.read_cell_values(Path(case_dir) / name / field, selected.size)
         values[field] = np.array(array[selected], dtype=np.float64)
     return values
 
@@ -387,8 +378,6 @@ def run_bins(case_dir: Path, cfg: OverlapConfig, *, diameter_m: float,
     if not names:
         raise post.PostError(f"{case_dir}: no sampled frame after {t_s:g} s")
     centres, volumes = geometry(case_dir, names)
-    if volumes.size == 1:
-        volumes = np.full(centres.shape[0], float(volumes[0]))
     selected, index = bin_index(centres, cfg, diameter_m)
     n_bins = bin_volumes(cfg, diameter_m).size
     vol = volumes[selected]
@@ -603,11 +592,9 @@ def run(case_dir: Path, *, baseline: Path | None = None) -> dict:
     written = write_rows(case_dir / "results" / "overlap_bins.csv", rows)
     document = {
         "verdict": result["verdict"],
-        "interface": {"bird_threshold": derived.settings.bird_threshold,
-                      "bird_definition": derived.settings.bird_definition,
-                      "core_half_angle_deg": derived.settings.core_half_angle_deg,
-                      "R_interface_over_D": derived.selection.radius_m / d,
-                      "core_mass_fraction": derived.selection.core_fraction},
+        # What coupling this verdict is evidence for: interface_evidence decides
+        # whether a production case may rest on it.
+        "interface": interface_evidence.evidence_provenance(derived),
         "comparison": cfg.as_dict(),
         "baseline": {k: full[k] for k in ("case", "t_start", "frames", "final_time",
                                           "blocks", "cells_in_region")},

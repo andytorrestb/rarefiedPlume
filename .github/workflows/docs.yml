@@ -1,0 +1,85 @@
+# Build and check the documentation site. Nothing here deploys or publishes it:
+# no Pages, no artifact upload, no secrets, and read-only repository access.
+# See docs/development/documentation.md.
+name: docs
+
+on:
+  push:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "plumetools/**"
+      - "cases/**"
+      - "applications/**"
+      - "tests/regression/README.md"
+      - "README.md"
+      - "Allsetup"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "plumetools/**"
+      - "cases/**"
+      - "applications/**"
+      - "tests/regression/README.md"
+      - "README.md"
+      - "Allsetup"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: strict build, API inventory, links
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NO_MKDOCS_2_WARNING: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the pinned documentation dependencies only
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docs/requirements.txt
+          python -m pip check
+      - name: The build needs no scientific runtime
+        run: |
+          ! python -c "import numpy" 2>/dev/null || { echo "numpy is installed; the build must not depend on it"; exit 1; }
+      - name: API inventory and documented names
+        run: python docs/_tools/check_api.py
+      - name: Strict build
+        run: python -m mkdocs build --strict
+      - name: Internal links and anchors (site and GitHub views)
+        run: python docs/_tools/check_links.py --site site
+
+  examples:
+    name: allowlisted examples and preparation checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install plumetools with its core dependencies (no OpenFOAM, ParaView, MPI or CaseFoam)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Run the allowlisted checks in temporary copies
+        run: python docs/_tools/run_examples.py

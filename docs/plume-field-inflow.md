@@ -272,4 +272,4 @@ line-for-line for exactly that purpose.
 * [`markelov1999-case.md`](markelov1999-case.md) — the case family that uses this
 * [`solver-compatibility.md`](solver-compatibility.md) — the fuller comparison of
   standard `dsmcFoam` against the MNF `dsmcFoam+` fork
-* [`cases/markelov1999/README.md`](../cases/markelov1999/README.md) — running it
+* [markelov1999 tutorial](tutorials/markelov1999.md) — running a case that uses it

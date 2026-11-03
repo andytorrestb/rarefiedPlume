@@ -1,0 +1,200 @@
+# rarefiedPlume documentation site: MkDocs + Material, built locally into site/.
+#
+#   python -m mkdocs serve            # http://127.0.0.1:8000, rebuilds on save
+#   python -m mkdocs build --strict   # what CI runs; any warning fails
+#
+# Dependencies are pinned in docs/requirements.txt and installed into their own
+# environment -- see docs/development/documentation.md. Nothing here deploys.
+
+site_name: rarefiedPlume
+site_description: >-
+  DSMC plume cases and the plumetools package: tutorials, operational guides,
+  and the Python, CLI, configuration and output reference.
+site_author: Andy Torres
+repo_url: https://github.com/andytorrestb/rarefiedPlume
+repo_name: andytorrestb/rarefiedPlume
+edit_uri: ""
+copyright: GPL-3.0-or-later
+
+docs_dir: docs
+site_dir: site
+
+# Documentation tooling and dependency pins live in docs/ but are not pages.
+exclude_docs: |
+  _tools/
+  requirements.txt
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+hooks:
+  - docs/_tools/hooks.py
+
+theme:
+  name: material
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+# MathJax renders the equations pymdownx.arithmatex marks up. It is loaded from
+# a CDN, so equations need a network connection when the page is viewed.
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          # Static analysis only: plumetools is read from source and never
+          # imported, so neither numpy nor ParaView is needed to build.
+          paths: [.]
+          options:
+            allow_inspection: false
+            force_inspection: false
+            extensions:
+              - docs/_tools/griffe_rst.py:RstToMarkdown
+            docstring_style: google
+            # Many docstrings omit types the signature also omits, and some list
+            # several parameters in one entry ("a, b: ..."). Both are source
+            # style, not documentation-build errors; see
+            # docs/development/documentation.md.
+            docstring_options:
+              ignore_init_summary: true
+              warn_missing_types: false
+              warn_unknown_params: false
+            docstring_section_style: table
+            heading_level: 2
+            members_order: source
+            filters: ["!^_"]
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: true
+            show_object_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: false
+            show_if_no_docstring: true
+            merge_init_into_class: true
+            show_submodules: false
+            summary: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - First run: getting-started/first-run.md
+      - Repository map: getting-started/repository-map.md
+  - Tutorials:
+      - tutorials/index.md
+      - 3d-inflow (legacy reference): tutorials/3d-inflow.md
+      - cai2012 collisionless plume: tutorials/cai2012.md
+      - cai2012-health statistics: tutorials/cai2012-health.md
+      - Kn extension, direct cases: tutorials/cai2012-kn-extension.md
+      - Kn extension, interface track: tutorials/cai2012-interfaces.md
+      - Kn extension, field scaling: tutorials/cai2012-scaling.md
+      - Virtual-collision assessment: tutorials/cai2012-virtual-collision.md
+      - Hybrid CFD to DSMC: tutorials/cai2012-hybrid.md
+      - markelov1999 plate in a wake: tutorials/markelov1999.md
+      - r-4d nozzle plume: tutorials/r-4d.md
+      - ISS solar panels: tutorials/iss-solar-panels.md
+      - Solar-panel particle resolution: tutorials/particle-resolution.md
+  - Guides:
+      - Laptop to HPC: guides/laptop-to-hpc.md
+      - PBS jobs: guides/pbs.md
+      - Restart and recovery: guides/restart-and-recovery.md
+      - Post-processing: guides/postprocessing.md
+      - Troubleshooting: guides/troubleshooting.md
+  - Reference:
+      - Case catalog: reference/case-catalog.md
+      - Command line: reference/cli.md
+      - Configuration files: reference/configuration.md
+      - Outputs: reference/outputs.md
+      - API reference:
+          - reference/api/index.md
+  - Explanation:
+      - explanation/index.md
+      - Rarefaction and collision models: explanation/rarefaction-and-collisions.md
+      - What the tests establish: explanation/evidence.md
+      - Legacy source-flow model: source-flow-model.md
+      - Cai 2012 family: cai2012-case.md
+      - cai2012-health sweep: cai2012-health.md
+      - Kn extension: cai2012-kn-extension.md
+      - Kn-extension interface: cai2012-kn-interface.md
+      - Kn-extension field scaling: cai2012-scaling.md
+      - Virtual collisions: cai2012-virtual-collision.md
+      - Hybrid CFD to DSMC: hybridplume.md
+      - Markelov 1999 family: markelov1999-case.md
+      - R-4D nozzle plume: r-4d-case.md
+      - Rarefaction diagnostics: rarefaction-diagnostics.md
+      - Slice imagery: viz-slices.md
+      - Meshes: mesh.md
+      - plumeFieldInflow boundary model: plume-field-inflow.md
+      - Solver compatibility: solver-compatibility.md
+      - Environment and provenance: environment.md
+  - Development:
+      - Architecture: plumetools-architecture.md
+      - Extending workflows: development/extending-workflows.md
+      - Writing documentation: development/documentation.md
+      - Known gaps and defects: development/known-gaps.md
+      - Figures to add: assets/figures/README.md
+      - 2026-10-27 refactor record: refactor-2026-10-27.md
+  - Archive: archive/index.md

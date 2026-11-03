@@ -177,3 +177,20 @@ env/
 build/
 dist/
 .pytest_cache/
+
+# hybridplume: build products of the thermophysical instantiation library
+# (compile it separately in every environment; never commit the objects)
+applications/thermophysicalModels/hybridPlumeThermo/lnInclude/
+applications/thermophysicalModels/hybridPlumeThermo/Make/linux64*/
+# hybridplume case directories are generated under cases/cai2012-hybrid/runs/
+cases/cai2012-hybrid/runs/
+
+# Documentation: the locally built site and its own environment
+# (docs/development/documentation.md). Nothing built is committed.
+/site/
+/.venv-docs/
+
+/cases/cai2012-hybrid/*.e*
+/cases/cai2012-hybrid/*.o*
+applications/dsmcBoundaryModels/plumeFieldInflow/lnInclude/
+applications/dsmcBoundaryModels/plumeFieldInflow/Make/linux64*/

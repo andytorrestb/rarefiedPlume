@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plumetools.cai2012 import checks, inflow, mesh
+from plumetools.cai2012 import inflow
 from plumetools.cai2012.config import load_case_config
 from plumetools.cai2012.geometry import from_config
 from plumetools.cai2012.study import load_study
@@ -27,6 +27,7 @@ from plumetools.cai2012ext import (
     EXTENSION_KNUDSEN,
     FULL_SUITE_KNUDSEN,
     PARTICLE_MULTIPLIERS,
+    direct_case,
     feasibility,
     policy,
     provenance,
@@ -65,18 +66,7 @@ def template_at(knudsen: float, multiplier: float = 1.0):
 
 
 def derived(cfg):
-    geom = from_config(cfg)
-    exit_state = inflow.from_config(cfg)
-    plan = mesh.plan(cfg, geom, exit_state)
-    run = inflow.derive_run_settings(
-        cfg, exit_state, geom, min_cell_size_m=plan.min_cell_size_m,
-        exit_cell_volume_m3=plan.exit_cell_volume_m3)
-    nozzle = mesh.predicted_nozzle_faces(plan, geom)
-    particles = mesh.estimate_particles(plan, geom, exit_state,
-                                        run.n_equivalent_particles)
-    report = checks.run_checks(cfg, geom, exit_state, plan, run, nozzle=nozzle,
-                               particles=particles)
-    return cfg, geom, exit_state, plan, run, nozzle, particles, report
+    return direct_case.derive_config(cfg)
 
 
 # --------------------------------------------------------------------------- #
@@ -404,7 +394,7 @@ def test_full_paper_case_diagnostics_reaches_field_processing(tmp_path, monkeypa
 
 @pytest.mark.parametrize("knudsen", [10.0, 1.0])
 def test_the_rarefied_cases_are_production_candidates(knudsen):
-    verdict = feasibility.assess(*derived(template_at(knudsen)))
+    verdict = feasibility.assess_case(derived(template_at(knudsen)))
     assert verdict["status"] == feasibility.STATUS_CANDIDATE
     assert verdict["unresolved"] == []
     assert verdict["resolution"]["n_cells"] == 1_310_720
@@ -414,7 +404,7 @@ def test_the_rarefied_cases_are_production_candidates(knudsen):
 
 @pytest.mark.parametrize("knudsen", [1.0e-3, 1.0e-4])
 def test_the_dense_cases_are_unsuitable_for_stated_reasons(knudsen):
-    verdict = feasibility.assess(*derived(template_at(knudsen)))
+    verdict = feasibility.assess_case(derived(template_at(knudsen)))
     assert verdict["status"] == feasibility.STATUS_UNSUITABLE
     failed = {c["name"] for c in verdict["criteria"] if not c["passed"]}
     assert failed == {"cell_over_mean_free_path", "mesh_budget",
@@ -428,7 +418,7 @@ def test_the_dense_cases_are_unsuitable_for_stated_reasons(knudsen):
 def test_the_criteria_are_the_nozzle_plume_checks_with_its_thresholds():
     from plumetools.nozzleplume.config import ChecksConfig
 
-    verdict = feasibility.assess(*derived(template_at(1.0)))
+    verdict = feasibility.assess_case(derived(template_at(1.0)))
     criteria = {c["name"]: c for c in verdict["criteria"]}
     assert set(criteria) == {
         "dsmc_checks", "mesh_budget", "cell_over_mean_free_path",
@@ -445,8 +435,8 @@ def test_the_criteria_are_the_nozzle_plume_checks_with_its_thresholds():
 
 
 def test_more_parcels_do_not_change_any_numerical_criterion():
-    one = feasibility.assess(*derived(template_at(1.0e-3, 1.0)))
-    ten = feasibility.assess(*derived(template_at(1.0e-3, 10.0)))
+    one = feasibility.assess_case(derived(template_at(1.0e-3, 1.0)))
+    ten = feasibility.assess_case(derived(template_at(1.0e-3, 10.0)))
     numerical = lambda v: {c["name"]: (c["value"], c["passed"])  # noqa: E731
                            for c in v["criteria"] if c["kind"] == "numerical"}
     assert numerical(one) == numerical(ten)
@@ -457,7 +447,7 @@ def test_more_parcels_do_not_change_any_numerical_criterion():
 def test_the_cost_estimate_uses_the_health_measurements():
     model, origin = feasibility.load_cost_model(FAMILY, HEALTH)
     assert model.n_measurements >= 1
-    verdict = feasibility.assess(*derived(template_at(10.0)), cost_model=model,
+    verdict = feasibility.assess_case(derived(template_at(10.0)), cost_model=model,
                                  cost_origin=origin)
     cost = verdict["cost"]
     assert cost["predicted_wall_hours"] == pytest.approx(model.seconds(
@@ -498,7 +488,8 @@ def test_the_startup_is_ten_thousand_kn_0p01_collision_times_for_every_kn():
     mean_speed = math.sqrt(8.0 * 1.380649e-23 * 300.0 / (math.pi * 6.63e-26))
     expected = 1.0e4 * lambda_ref / mean_speed
     for knudsen in EXTENSION_KNUDSEN:
-        _, _, exit_state, _, run, *_ = derived(template_at(knudsen))
+        case = derived(template_at(knudsen))
+        exit_state, run = case.exit_state, case.run
         assert run.average_start_s == pytest.approx(expected, rel=1e-12)
         record = provenance.startup(template_at(knudsen), run, exit_state)
         assert record["achieved_reference_collision_times"] == pytest.approx(1e4)
@@ -508,7 +499,7 @@ def test_the_startup_is_ten_thousand_kn_0p01_collision_times_for_every_kn():
 
 
 def test_averaging_is_four_and_a_half_transits_after_the_startup():
-    _, _, _, _, run, *_ = derived(template_at(1.0))
+    run = derived(template_at(1.0)).run
     sampled = run.end_time_s - run.average_start_s
     assert 4.5 * run.domain_transit_s <= sampled + 1e-15
     assert sampled <= 4.5 * run.domain_transit_s + run.write_interval_s
@@ -518,7 +509,8 @@ def test_averaging_is_four_and_a_half_transits_after_the_startup():
 def test_the_particle_level_is_applied_exactly_once():
     for multiplier in PARTICLE_MULTIPLIERS:
         cfg = template_at(1.0, multiplier)
-        _, _, exit_state, plan, run, *_ = derived(cfg)
+        case = derived(cfg)
+        exit_state, plan, run = case.exit_state, case.plan, case.run
         assert run.n_equivalent_particles * multiplier * 40.0 == pytest.approx(
             exit_state.number_density_per_m3 * plan.exit_cell_volume_m3,
             rel=1e-12)
@@ -539,3 +531,17 @@ def test_the_case_scripts_are_cai2012s_byte_for_byte(name):
 def test_the_audit_script_is_the_health_familys_byte_for_byte():
     assert (FAMILY / "baseCase" / "Allaudit.py").read_bytes() == (
         HEALTH / "baseCase" / "Allaudit.py").read_bytes()
+
+
+def test_the_direct_derivation_has_one_home_and_keeps_the_old_tuple_order():
+    """generation.derive returned an eight-element tuple; it is now a DirectCase,
+    which still unpacks in that order for code written against it."""
+    from plumetools.cai2012ext import generation
+
+    assert generation.derive is direct_case.derive
+    case = derived(template_at(1.0))
+    cfg, geom, exit_state, plan, run, nozzle, particles, report = case
+    assert (cfg, geom, exit_state, plan) == (case.cfg, case.geom, case.exit_state, case.plan)
+    assert (run, nozzle, particles, report) == (case.run, case.nozzle, case.particles,
+                                                case.report)
+    assert feasibility.assess(*case) == feasibility.assess_case(case)

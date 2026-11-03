@@ -47,16 +47,15 @@ from pathlib import Path
 
 import numpy as np
 
+from plumetools.foamio import volfield
+from plumetools.foamio.patchfields import (  # noqa: F401 -- re-exported
+    CONSTRAINT_PATCH_TYPES,
+    nonuniform_value_entry,
+    patch_field_type,
+)
 from plumetools.foamio.primitives import BANNER, SEPARATOR, write_lines
 
 GENERATOR = "plumetools.markelov1999.foamfields"
-
-#: Geometric patch types whose patchField type must match exactly. OpenFOAM
-#: rejects anything else with "inconsistent patch and patchField types".
-CONSTRAINT_PATCH_TYPES = frozenset({
-    "symmetry", "symmetryPlane", "empty", "wedge", "cyclic", "cyclicAMI",
-    "processor", "processorCyclic", "nonuniformTransformCyclic",
-})
 
 #: Fields ``DSMCCloud`` requires in ``0/`` but ``dsmcInitialise`` does not create.
 #: ``(name, class, dimensions, uniform internal value, needs values on walls)``.
@@ -96,28 +95,8 @@ def _header(field_class: str, object_name: str, note: str) -> list[str]:
     ]
 
 
-def patch_field_type(geometric_type: str) -> str:
-    """The patchField type a given geometric patch type requires.
-
-    Constraint patches must carry a patchField of their own name; OpenFOAM fails
-    with "inconsistent patch and patchField types" otherwise.
-    """
-    return geometric_type if geometric_type in CONSTRAINT_PATCH_TYPES else "zeroGradient"
-
-
 def _nonuniform_entry(patch: str, list_type: str, values) -> list[str]:
-    values = list(values)
-    return [
-        f"    {patch}",
-        "    {",
-        "        type            fixedValue;",
-        f"        value           nonuniform List<{list_type}>",
-        f"        {len(values)}",
-        "        (",
-        *values,
-        "        );",
-        "    }",
-    ]
+    return nonuniform_value_entry(patch, list_type, values)
 
 
 def _uniform_entry(patch: str, bc_type: str, value: str | None) -> list[str]:
@@ -308,59 +287,10 @@ def read_patch_field(path: Path, patch: str) -> np.ndarray:
             what a ``zeroGradient`` boundary condition looks like on disk, and
             means the data was never written rather than that it was zero.
 
-    A small purpose-built parser rather than a general dictionary reader: it needs
-    to survive nested braces inside the target patch entry, which is what the
-    legacy line-offset parsers could not do (findings RB-03, RB-04).
+    Parsed by :mod:`plumetools.foamio.volfield`, the one field parser every
+    family shares; its errors are ``ValueError`` subclasses.
     """
-    import re
-
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"no field file at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-
-    start = text.find("boundaryField")
-    if start < 0:
-        raise ValueError(f"{path}: no boundaryField block")
-
-    # Find the patch entry, then take the balanced brace block that follows.
-    match = re.search(rf"^\s*{re.escape(patch)}\s*$", text[start:], re.M)
-    if not match:
-        raise ValueError(f"{path}: patch {patch!r} is not in the boundaryField")
-
-    body_start = text.index("{", start + match.end())
-    depth, i = 0, body_start
-    while i < len(text):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    body = text[body_start + 1:i]
-
-    nonuniform = re.search(
-        r"value\s+nonuniform\s+List<(\w+)>\s*(\d+)?\s*\((.*?)\)\s*;", body, re.S)
-    if nonuniform:
-        kind, _count, payload = nonuniform.groups()
-        numbers = [float(v) for v in re.findall(r"[-+0-9.eE]+", payload)]
-        arr = np.asarray(numbers, dtype=np.float64)
-        return arr.reshape(-1, 3) if kind == "vector" else arr
-
-    uniform = re.search(r"value\s+uniform\s+(\([^)]*\)|[-+0-9.eE]+)\s*;", body)
-    if uniform:
-        token = uniform.group(1)
-        if token.startswith("("):
-            return np.asarray(
-                [[float(v) for v in re.findall(r"[-+0-9.eE]+", token)]],
-                dtype=np.float64)
-        return np.asarray([float(token)], dtype=np.float64)
-
-    raise ValueError(
-        f"{path}: patch {patch!r} has no 'value' entry. A zeroGradient boundary "
-        f"condition writes none, which means the solver's data for this patch was "
-        f"discarded at write time rather than being zero -- see "
-        f"plumetools.markelov1999.foamfields for why fD and q must be 'calculated' "
-        f"on walls."
-    )
+    return volfield.read_patch_field(path, patch)

@@ -316,8 +316,12 @@ def test_run_case_labels_runs_records_and_then_does_not_record_again(tmp_path):
                                        encoding="utf-8")
     shutil.copy2(FAMILY / "baseCase" / "runCase.sh", case / "runCase.sh")
     write_control(case, end=0.5, delta=0.001)
+    # The stand-in finishes the run: a complete checkpoint at endTime. (An
+    # empty 0.5/ is a killed write, which is not finished.)
+    footer = "// " + "*" * 73 + " //"
     (case / "Allrun").write_text(
-        "#!/bin/bash\necho \"stand-in Allrun $#\"\nmkdir -p 0.5\n",
+        "#!/bin/bash\necho \"stand-in Allrun $#\"\nmkdir -p 0.5/uniform\n"
+        f"echo 'value 0.5; {footer}' > 0.5/uniform/time\n",
         encoding="utf-8")
     env = {**python_env(tmp_path), "PBS_O_WORKDIR": str(case)}
 
@@ -440,6 +444,15 @@ def test_label_leaves_a_candidate_unmarked(tmp_path, capsys):
     assert feasibility.STATUS_CANDIDATE in capsys.readouterr().out
 
 
+def write_checkpoint(base: Path, name: str) -> None:
+    """A time directory as dsmcFoam leaves it: time state and fields, each
+    ending with OpenFOAM's end divider."""
+    footer = "\n// " + "*" * 73 + " //\n"
+    (base / name / "uniform").mkdir(parents=True)
+    (base / name / "uniform" / "time").write_text(f"value {name};" + footer)
+    (base / name / "rhoNMean").write_text("internalField uniform 0;" + footer)
+
+
 def test_finished_reads_processor_times_with_half_a_step_of_slack(tmp_path):
     case = tmp_path / "case"
     case.mkdir()
@@ -448,14 +461,32 @@ def test_finished_reads_processor_times_with_half_a_step_of_slack(tmp_path):
     write_control(case, end=0.0628, delta=1.0e-4)
     (case / "0").mkdir()
     assert not hpc.reached_end(case)                  # time 0 is not a result
-    (case / "processor0" / "0.06276").mkdir(parents=True)
+    write_checkpoint(case / "processor0", "0.06276")
     assert hpc.reached_end(case)                      # 0.4 dt short: finished
     shutil.rmtree(case / "processor0")
-    (case / "processor0" / "0.06274").mkdir(parents=True)
+    write_checkpoint(case / "processor0", "0.06274")
     assert not hpc.reached_end(case)                  # 0.6 dt short: not yet
     assert hpc.main(["finished", str(case)]) == 1
-    (case / "0.0628").mkdir()
+    write_checkpoint(case, "0.0628")
     assert hpc.main(["finished", str(case)]) == 0     # reconstructed counts too
+
+
+def test_finished_needs_the_end_time_on_every_rank(tmp_path):
+    """Defect 1: 'finished' took the newest time on ANY rank, so a job killed
+    while writing its last time looked finished and recorded no wall clock."""
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "case.yaml").write_text("{}\n", encoding="utf-8")
+    write_control(case, end=0.0628, delta=1.0e-4)
+    for rank in (0, 1):
+        write_checkpoint(case / f"processor{rank}", "0.05")
+    write_checkpoint(case / "processor0", "0.0628")   # processor1 never wrote it
+    assert not hpc.reached_end(case)
+    (case / "processor1" / "0.0628").mkdir()          # ... or only began to
+    assert not hpc.reached_end(case)
+    shutil.rmtree(case / "processor1" / "0.0628")
+    write_checkpoint(case / "processor1", "0.0628")
+    assert hpc.reached_end(case)
 
 
 @needs_flock

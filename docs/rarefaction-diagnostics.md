@@ -365,6 +365,15 @@ that is a new input is read in `plumetools.rarefaction.foam.load`; until it is,
 the diagnostic is skipped with the reason and the rest run. A length scale needs
 no code at all: `reference_lengths_m`.
 
+A new input is read with the shared OpenFOAM readers, never with one case
+family's: `plumetools.foamio.volfield.read_internal(path).over(n_cells, ...)`
+for a volume field (a `uniform` entry is expanded, a list of the wrong length is
+refused), `plumetools.foamio.times` for time directories,
+`plumetools.mesh.patches` / `plumetools.mesh.polymesh` for mesh geometry. Their
+one error is `plumetools.foamio.errors.FoamDataError`, which is also
+`rarefaction.foam.PostError`. See
+[`plumetools-architecture.md`](plumetools-architecture.md).
+
 ## Limitations
 
 - Reconstructed cases only; `processor*` directories are not read.

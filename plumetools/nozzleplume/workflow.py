@@ -40,20 +40,30 @@ from plumetools.nozzleplume import (
     run as run_module,
     verify as verify_module,
 )
-from plumetools.nozzleplume.config import ConfigError, load_case_config
+from plumetools.nozzleplume.config import CaseConfig, ConfigError, load_case_config
 
 
 @dataclass(frozen=True)
 class Case:
-    """Everything derived from one ``case.yaml``, before any mesh exists."""
+    """Everything derived from one ``case.yaml``, before any mesh exists.
+
+    Attributes:
+        case_dir: the case directory.
+        cfg: the validated ``case.yaml``.
+        geom: domain, nozzle and plate geometry [m], symmetry planes.
+        exit_state: the uniform exit state and the gas.
+        plan: the octree mesh, planned, not written.
+        nozzle: the nozzle patch ``topoSet`` + ``createPatch`` will carve.
+        run: time step, averaging window, particle weight.
+    """
 
     case_dir: Path
-    cfg: object
-    geom: object
-    exit_state: object
-    plan: object
-    nozzle: object
-    run: object
+    cfg: CaseConfig
+    geom: geometry.PlumeGeometry
+    exit_state: exitstate.ExitState
+    plan: mesh.MeshPlan
+    nozzle: mesh.NozzlePrediction
+    run: run_module.RunSettings
 
     @property
     def label(self) -> str:
