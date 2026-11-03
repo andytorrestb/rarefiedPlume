@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+# Finish the reconstruction of every case whose ./Allrun ran out of walltime
+# during reconstructPar.
+#
+#   ./AllreconstructCases                  repair every case that needs it
+#   ./AllreconstructCases --check          report only; writes nothing
+#   ./AllreconstructCases --case Kn10_np1x only this case (repeatable)
+#   ./AllreconstructCases --help
+#
+# A job killed mid-reconstructPar leaves its last time directory holding only
+# the fields written so far, and that is the "no rhoNMean" postProcess.py stops
+# on. ./Allrun cannot repair it: reconstructPar -newTimes skips every time whose
+# directory exists, however little is in it.
+#
+# reconstructPar goes through the times in order, so everything before the first
+# incomplete time is whole. From that time on, -time T: rewrites each field in
+# place. Nothing is deleted, so the C, V and diagnostic fields earlier
+# post-processing left in the partial directory stay.
+#
+# "Complete" means every file in processorN/<time> is also in <time>; the
+# reconstructed directory may hold more. This takes hours per case: submit
+# runReconstruct.sh, do not run it on a login node.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+CHECK=0
+SELECT=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)    CHECK=1 ;;
+        --case)     shift; SELECT+=("${1:?"--case needs a case name"}") ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "AllreconstructCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllreconstructCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+LISTING=$($PYTHON -m plumetools.cai2012ext.policy --study study.yaml --all) \
+    || die "the active study manifest is missing or invalid (above); nothing processed"
+[ -n "$LISTING" ] || die "the active manifest lists no cases"
+mapfile -t CASES <<< "$LISTING"
+
+if [ ${#SELECT[@]} -gt 0 ]; then
+    PICKED=()
+    for want in "${SELECT[@]}"; do
+        FOUND=""
+        for case_path in "${CASES[@]}"; do
+            if [ "$case_path" = "$want" ] || [ "${case_path##*/}" = "$want" ]; then
+                FOUND=$case_path
+            fi
+        done
+        [ -n "$FOUND" ] || die "no case '$want' in the active manifest"
+        PICKED+=("$FOUND")
+    done
+    CASES=("${PICKED[@]}")
+fi
+
+# The solver's time directories, ascending, without 0: reconstructPar never
+# writes 0/.
+solver_times() {
+    ls "$1/processor0" 2>/dev/null | grep -E '^[0-9.eE+-]+$' | grep -v '^0$' | sort -g
+}
+
+# The files of one time directory, relative to it.
+files_of() {
+    ( cd "$1" && find . -type f | sort )
+}
+
+time_is_complete() {
+    local case_path=$1 time=$2
+    [ -d "$case_path/$time" ] || return 1
+    [ -z "$(comm -23 <(files_of "$case_path/processor0/$time") <(files_of "$case_path/$time"))" ]
+}
+
+first_incomplete() {
+    local case_path=$1 time
+    while read -r time; do
+        if ! time_is_complete "$case_path" "$time"; then
+            echo "$time"
+            return 0
+        fi
+    done < <(solver_times "$case_path")
+}
+
+FAILED=()
+for case_path in "${CASES[@]}"; do
+    if [ -z "$(solver_times "$case_path")" ]; then
+        echo "$case_path: no solver output; skipped"
+        continue
+    fi
+    FROM=$(first_incomplete "$case_path")
+    if [ -z "$FROM" ]; then
+        echo "$case_path: complete"
+        continue
+    fi
+    REMAINING=$(solver_times "$case_path" | awk -v from="$FROM" '$1 >= from' | wc -l)
+    echo "$case_path: incomplete from t = $FROM ($REMAINING times to reconstruct)"
+    [ "$CHECK" -eq 1 ] && continue
+
+    have reconstructPar || die "'reconstructPar' is not on PATH"
+    echo "==> reconstructPar -time $FROM: (>> log.reconstructPar)"
+    if ! ( cd "$case_path" && reconstructPar -time "$FROM:" >> log.reconstructPar 2>&1 ); then
+        echo "AllreconstructCases: reconstructPar failed; see $case_path/log.reconstructPar" >&2
+        FAILED+=("$case_path")
+        continue
+    fi
+    STILL=$(first_incomplete "$case_path")
+    if [ -n "$STILL" ]; then
+        echo "AllreconstructCases: $case_path is still incomplete at t = $STILL" >&2
+        FAILED+=("$case_path")
+        continue
+    fi
+    echo "$case_path: complete"
+done
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "AllreconstructCases: ${#FAILED[@]} case(s) failed:" >&2
+    printf '    %s\n' "${FAILED[@]}" >&2
+    exit 1
+fi
