@@ -66,9 +66,9 @@ plate: null
 # A vacuum box from the exit plane x = 0. All boundaries are open: molecules
 # that reach them are deleted. Extents are rounded UP to whole background cells.
 domain:
-  x_max_m: 50.0
-  y_half_m: 40.0
-  z_half_m: 16.0
+  x_max_m: 200.0
+  y_half_m: 200.0
+  z_half_m: 200.0
   symmetry_planes: []                # [] is the full 3-D box. [y, z] models one
                                      # quarter -- a quarter of the cells AND of
                                      # the parcels for the same answer when the
@@ -114,11 +114,11 @@ mesh:
   n_cells_between_levels: 3          # snappyHexMesh's nCellsBetweenLevels. It
                                      # moves the mesh in steps, not smoothly:
                                      # 342k cells at 2, 459k at 3, 490k at 4.
-  max_cells: 30000000                 # refuse a mesh ESTIMATED above this
+  max_cells: 40000000                 # refuse a mesh ESTIMATED above this
 
 # --- DSMC ---------------------------------------------------------------------
 dsmc:
-  n_equivalent_particles: 1.0e+18    # THE COST KNOB: real molecules per
+  n_equivalent_particles: 1.0e+16   # THE COST KNOB: real molecules per
                                      # simulated parcel, written to
                                      # dsmcProperties exactly as given.
                                      #
@@ -148,7 +148,7 @@ dsmc:
                                      # the exit speed before averaging ...
   sampling_domain_transits: 3.0      # ... then average over this many
 
-  n_subdomains: 12                   # MPI ranks
+  n_subdomains: 192                # MPI ranks
   decomposition_method: scotch
 
 # --- DSMC quality checks ------------------------------------------------------
