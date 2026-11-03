@@ -106,6 +106,18 @@ $PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)
     || bad "Python >= 3.9 is required (pyproject.toml requires-python)"
 
 if [ "$CHECK_ONLY" -eq 0 ]; then
+    if ! $PYTHON -m pip --version >/dev/null 2>&1; then
+        echo "  -> $PYTHON -m ensurepip --upgrade (pip is missing)"
+        if ! $PYTHON -m ensurepip --upgrade; then
+            echo "" >&2
+            echo "$SELF: $PYTHON has no pip, and its ensurepip module could not install it." >&2
+            echo "       Load or install pip for this exact Python interpreter, or use a" >&2
+            echo "       Python >= 3.9 virtual environment that includes ensurepip, then" >&2
+            echo "       re-run $SELF." >&2
+            exit 1
+        fi
+    fi
+
     echo "  -> $PYTHON -m pip install -e \".[$EXTRAS]\""
     if ! $PYTHON -m pip install -e ".[$EXTRAS]"; then
         echo "" >&2

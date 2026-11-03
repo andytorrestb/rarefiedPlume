@@ -72,6 +72,12 @@ install. Slice imagery has no extra, because it needs ParaView and nothing pip
 can install; `./Allsetup` only reports whether `pvpython` and `ffmpeg` are there
 ([below](#slice-imagery-with-plumetoolsviz-and-pvpython)).
 
+`Allsetup` uses the Python interpreter on `PATH` and bootstraps `pip` with
+`python -m ensurepip --upgrade` when possible. Some managed/HPC Python builds
+omit both `pip` and `ensurepip`; for those, load or install `pip` for the same
+Python module, or activate a Python ≥ 3.9 virtual environment that includes
+`ensurepip` before running `./Allsetup`.
+
 **Step 3 is the one that gets missed.** Nothing pip does touches it, and a case
 that needs it fails only at `./Allrun` — several steps into a study, with a
 message that reads like a missing solver rather than a missing build step. Every
