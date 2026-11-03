@@ -37,3 +37,54 @@ The preparation recorded on 2026-10-26 (seven configurations, 70 dictionary
 files, 84 verification checks, idempotence, all seven policy gates, scaling
 registration; no meshes, no solver output, no scheduler command) is described in
 the tutorial's checks section; it validates input preparation, not a DSMC run.
+
+The `--all` listing deliberately includes non-production cases. Without it,
+policy listing returns production candidates and reports the refused cases.
+Each case has `runMesh.sh`, `runCase.sh`, `runPost.sh`, and `runViz.sh`.
+Completed runs are not automatically resubmitted. Post-process with each case's
+`runPost.sh`, or use the study-level `AllpostCases` after reconstruction.
+`analyse.py` writes the active study summary beneath `results/full-suite/`.
+
+A `runCase.sh` that runs out of walltime during `reconstructPar` leaves a partial
+time directory, and post-processing then stops on `no rhoNMean`. Resubmitting
+does not repair it, because `reconstructPar -newTimes` skips existing directories.
+`./AllreconstructCases --check` reports such cases; `qsub runReconstruct.sh`
+finishes them.
+
+## Scaling integration
+
+The scaling inventory follows `study.yaml`'s `manifest_name` and `cases_dir`.
+All seven new direct-exit cases are registered automatically. `scaling-registration.yaml`
+adds the explicitly named local graded archives; it is not needed to register
+new full-suite cases. Historical results remain separate by name and source.
+
+```bash
+python Allscale.py inventory
+# Once reconstructed fields include actual C, V and density arrays:
+python Allscale.py fit --full
+python Allscale.py report
+# Analysis-only PBS template, submitted manually if desired:
+msub runScaling.sh
+```
+
+New scaling outputs use `results/scaling/full-suite/`. Missing results are
+skipped honestly. Available low-Kn fields can enter exploratory fits but remain
+excluded from suitable-reference fits while source/numerical limitations remain.
+There is currently no whole-field scientific fit to the newly prepared suite.
+Full fitting details and portable-field formats are in
+[the scaling documentation](../../docs/cai2012-scaling.md). Existing comparison
+normalizations and estimator definitions are in
+[the study documentation](../../docs/cai2012-kn-extension.md).
+
+## Preparation validation (2026-10-26)
+
+The actual local preparation produced seven case configurations and 70
+dictionary files (about 0.8 MB total), passed 84 independent verification checks,
+and confirmed idempotence, all seven runtime-policy gates, and scaling
+registration. There are zero generated mesh trees and no solver outputs.
+
+The focused policy, generation, HPC-wrapper, diagnostics and scaling regression
+run completed with **237 passed, 3 skipped in 62.70 seconds**. The three skips
+require Unix file locking. This validates input preparation and bounded
+synthetic numerical behavior; it does not claim a successful OpenFOAM/DSMC run
+or a scientifically suitable low-Kn reference. No scheduler command was run.
