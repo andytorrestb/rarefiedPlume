@@ -194,3 +194,10 @@ cases/cai2012-hybrid/runs/
 /cases/cai2012-hybrid/*.o*
 applications/dsmcBoundaryModels/plumeFieldInflow/lnInclude/
 applications/dsmcBoundaryModels/plumeFieldInflow/Make/linux64*/
+/*.e[0-9]*
+/*.o[0-9]*
+/*.log
+/cases/**/*.e[0-9]*
+/cases/**/*.o[0-9]*
+/cases/**/*.log
+*.swp
