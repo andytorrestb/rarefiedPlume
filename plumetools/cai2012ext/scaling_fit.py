@@ -9,6 +9,7 @@ The defaults describe the available cases; a whole-Kn holdout is opt-in.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import json
 import math
 import time
 from typing import Callable, Optional, Sequence
@@ -16,7 +17,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 from scipy.optimize import least_squares
 
-from .scaling import CaiPredictor, CoordinateMap
+from .scaling import CaiPredictor, CoordinateMap, cai_field
 
 
 CONTOUR_LEVELS = (0.1, 0.01, 0.001)
@@ -47,6 +48,8 @@ class ScalingCase:
     occupied: Optional[np.ndarray] = None
     suitable: bool = False
     metadata: dict = field(default_factory=dict)
+    # Prepared masks and Cai predictions, reused across fits of this exact case.
+    memo: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.points = np.asarray(self.points, dtype=float).reshape(-1, 2)
@@ -103,6 +106,20 @@ class PreparedCase:
 def _predictor(mapping, case, options=None, factory=None):
     return (factory or CaiPredictor)(mapping, speed_ratio=case.speed_ratio,
                                     **(options or {}))
+
+
+def _options_key(options):
+    return tuple(sorted((options or {}).items()))
+
+
+def predict(prepared, mapping, evaluator_options=None, quantity="density"):
+    """Memoized ``density`` or ``temperature``; the mapping is the only thing that varies."""
+    key = (quantity, json.dumps(mapping.to_dict(), sort_keys=True), _options_key(evaluator_options))
+    memo = prepared.case.memo
+    if key not in memo:
+        predictor = _predictor(mapping, prepared.case, evaluator_options)
+        memo[key] = getattr(predictor, quantity)(prepared.points, prepared.case.kn)
+    return memo[key]
 
 
 def _fixed_weights(volumes, angles, bands):
@@ -164,6 +181,10 @@ def prepare_case(case: ScalingCase, *, angle_edges=None, floor=1e-10,
         raise ValueError("angle_edges must increase and cover [0, pi/2]")
     if int(radial_bins) < 2:
         raise ValueError("radial_bins must be at least two")
+    key = ("prepared", float(floor), angle_edges.tobytes(), int(radial_bins),
+           _options_key(evaluator_options))
+    if evaluator_factory is None and key in case.memo:
+        return case.memo[key]
     n = case.density.size
     mask = np.ones(n, dtype=bool)
     exclusions = {}
@@ -185,8 +206,14 @@ def prepare_case(case: ScalingCase, *, angle_edges=None, floor=1e-10,
     exclude("no_meaningful_dsmc_estimator", ~case.occupied)
     baseline = np.full(n, np.nan)
     if np.any(mask):
-        baseline[mask] = _predictor(CoordinateMap(), case, evaluator_options,
-                                    evaluator_factory).density(case.points[mask], case.kn)
+        baseline_key = ("baseline", _options_key(evaluator_options), mask.tobytes())
+        if evaluator_factory is None and baseline_key in case.memo:
+            baseline[mask] = case.memo[baseline_key]
+        else:
+            baseline[mask] = _predictor(CoordinateMap(), case, evaluator_options,
+                                        evaluator_factory).density(case.points[mask], case.kn)
+            if evaluator_factory is None:
+                case.memo[baseline_key] = baseline[mask]
     exclude("undefined_baseline", ~np.isfinite(baseline) | (baseline < 0))
     points, density, volumes = case.points[mask], case.density[mask], case.volumes[mask]
     base = baseline[mask]
@@ -214,10 +241,13 @@ def prepare_case(case: ScalingCase, *, angle_edges=None, floor=1e-10,
         "near_lip_samples": int(np.count_nonzero(np.hypot(points[:, 0], points[:, 1] - .5) <= .1)),
         "floor": float(floor), "band_reference": "fixed direct Cai baseline",
     }
-    return PreparedCase(case, mask, points, density, volumes, base, weights,
-                        angles, bands, coverage,
-                        _prepare_rays(points, volumes, angles, angle_edges, int(radial_bins)),
-                        angle_edges, float(floor))
+    prepared = PreparedCase(case, mask, points, density, volumes, base, weights,
+                            angles, bands, coverage,
+                            _prepare_rays(points, volumes, angles, angle_edges, int(radial_bins)),
+                            angle_edges, float(floor))
+    if evaluator_factory is None:
+        case.memo[key] = prepared
+    return prepared
 
 
 def extract_crossing(radii, density, level, *, gaps_after=None):
@@ -364,15 +394,13 @@ def independent_physics_diagnostics(prepared, predicted_density, *, evaluator_op
     from .comparison import mass_flux_per_steradian, projections
 
     options = evaluator_options or {}
-    chunk = int(options.get("chunk_size", 128))
-    cai_velocity = np.empty((len(prepared.points), 3))
-    for start in range(0, len(prepared.points), chunk):
-        stop = start + chunk
-        x, rho = prepared.points[start:stop].T
-        cai_velocity[start:stop] = analytical.moments(
-            x, rho, 0., .5, prepared.case.speed_ratio,
-            n_radial=options.get("n_radial", 48),
-            n_azimuthal=options.get("n_azimuthal", 96))["U_sqrt_beta0"]
+    key = ("velocity", _options_key(options), prepared.mask.tobytes())
+    memo = prepared.case.memo
+    if key not in memo:
+        memo[key] = cai_field(prepared.points, "velocity", prepared.case.speed_ratio,
+                              options.get("n_radial", 48), options.get("n_azimuthal", 96),
+                              int(options.get("chunk_size", 128)))
+    cai_velocity = memo[key]
     ds_ur = None
     if cylindrical is not None:
         data = np.asarray(cylindrical, float)
@@ -476,7 +504,8 @@ def evaluate(cases, mapping, *, floor=1e-10, angle_edges=None, radial_bins=80,
         predictor = _predictor(mapping, data.case, evaluator_options, evaluator_factory)
         failure = None
         try:
-            pred = predictor.density(data.points, data.case.kn)
+            pred = (predictor.density(data.points, data.case.kn) if evaluator_factory
+                    else predict(data, mapping, evaluator_options))
         except (ValueError, FloatingPointError, OverflowError) as exc:
             pred = np.full(data.density.shape, np.nan)
             failure = str(exc)
@@ -507,7 +536,8 @@ def evaluate(cases, mapping, *, floor=1e-10, angle_edges=None, radial_bins=80,
             temp = data.case.temperature[data.mask]
             valid = np.isfinite(temp) & (temp >= 0)
             try:
-                predicted_temp = predictor.temperature(data.points, data.case.kn)
+                predicted_temp = (predictor.temperature(data.points, data.case.kn) if evaluator_factory
+                                  else predict(data, mapping, evaluator_options, "temperature"))
             except (ValueError, FloatingPointError, OverflowError):
                 predicted_temp = np.full(temp.shape, np.nan)
             if np.any(valid) and np.all(np.isfinite(predicted_temp[valid])):
@@ -652,9 +682,9 @@ def fit(cases: Sequence[ScalingCase], mapping: CoordinateMap, *, track="F",
                 if np.any(~np.isfinite(prediction)) or np.any(prediction < 0):
                     raise ValueError("unavailable mapped Cai evaluation")
                 if track == "F":
-                    values.extend((np.sqrt(data.weights / len(usable)) * (
+                    values.append(np.sqrt(data.weights / len(usable)) * (
                         np.log(np.maximum(prediction, floor)) -
-                        np.log(np.maximum(data.density, floor)))).tolist())
+                        np.log(np.maximum(data.density, floor))))
                 else:
                     rows = contour_diagnostics(data, prediction)
                     indexed = {(r["angle_bin"], r["level"]): r for r in rows}
@@ -665,10 +695,10 @@ def fit(cases: Sequence[ScalingCase], mapping: CoordinateMap, *, track="F",
                         current_row = indexed[(row["angle_bin"], row["level"])]
                         value = (current_row["log_radius_residual"]
                                  if current_row["model_status"] == "ok" else penalty)
-                        values.append(value / math.sqrt(len(usable) * len(levels) * per_level[row["level"]]))
+                        values.append(np.atleast_1d(value / math.sqrt(len(usable) * len(levels) * per_level[row["level"]])))
             if regularization:
-                values.extend((math.sqrt(regularization) * np.asarray(parameters)).tolist())
-            return np.asarray(values)
+                values.append(math.sqrt(regularization) * np.asarray(parameters))
+            return np.concatenate(values) if values else np.empty(0)
         except (ValueError, FloatingPointError, OverflowError):
             last["invalid_candidates"] += 1
             # Fixed dimension even when an entire mapped field is unavailable.
@@ -682,7 +712,8 @@ def fit(cases: Sequence[ScalingCase], mapping: CoordinateMap, *, track="F",
     elif nparams == 0:
         identified, success = True, True
         message = "Cai baseline: no fitted parameters."
-        objective = float(np.dot(residual([]), residual([])))
+        baseline_residual = residual([])
+        objective = float(np.dot(baseline_residual, baseline_residual))
     elif count < nparams:
         message = f"Only {count} residuals for {nparams} coefficients; model not identified."
     else:

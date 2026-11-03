@@ -1,7 +1,7 @@
 """Study-scoped orchestration; defaults to inventory and never launches DSMC.
 
 The serial optimizer keeps numerical libraries to one thread. ``cores`` is an
-upper resource declaration, not a promise to spawn that many workers.
+upper resource declaration; Cai evaluation uses up to that many worker processes.
 """
 from __future__ import annotations
 
@@ -10,12 +10,13 @@ import csv
 import json
 import os
 from pathlib import Path
+import sys
 import time
 
 import numpy as np
 import yaml
 
-from .scaling import CaiPredictor, CoordinateMap
+from .scaling import CaiPredictor, CoordinateMap, configure_workers
 from . import scaling_fit as sf
 from . import scaling_inventory as si
 
@@ -64,8 +65,8 @@ def load_config(study_root, path=None):
     path = Path(path or Path(study_root) / "scaling.yaml").resolve()
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     cores = int(cfg["resources"]["cores"])
-    if not 1 <= cores <= 8:
-        raise ValueError("local core cap must be between one and eight")
+    if not 1 <= cores <= 192:
+        raise ValueError("core cap must be between 1 and 192, one node")
     for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[key] = "1"
     cfg["_path"] = str(path)
@@ -125,8 +126,20 @@ def load_available(inv, cfg):
                 case.metadata["stratum"] = row["stratum"]
                 cases.append(case)
         except (ValueError, OSError) as exc:
-            skipped.append({"name": row["name"], "reason": str(exc)})
+            skipped.append({"name": row["name"], "reason": str(exc), "load_failed": True})
     return cases, skipped
+
+
+def require_loaded(cases, skipped):
+    """Report every skip; an unreadable fit-ready case or an empty fit is a failure."""
+    for item in skipped:
+        print(f"Allscale: skipped {item['name']}: {item['reason'] or item.get('result_status')}",
+              file=sys.stderr, flush=True)
+    failed = [item["name"] for item in skipped if item.get("load_failed")]
+    if failed:
+        raise ValueError(f"fit-ready cases failed to load, refusing a partial assessment: {failed}")
+    if not cases:
+        raise ValueError("no fit-ready cases; nothing was fitted")
 
 
 def _fit_kwargs(cfg, smoke):
@@ -157,6 +170,8 @@ def run_assessment(cases, cfg, output, *, smoke=False, inv=None, skipped=()):
                     key = f"stratum{index}/{subset}/{track}/{family}"
                     destination = output / key
                     mapping = mapping_from_config(cfg, family)
+                    print(f"Scaling fit start: {key} ({len(selected)} cases, "
+                          f"{time.perf_counter()-started:.0f} s elapsed)", flush=True)
                     result = sf.fit(selected, mapping, track=track,
                                     holdout_kn=tuple(cfg["fit"]["holdout_kn"]),
                                     **_fit_kwargs(cfg, smoke))
@@ -195,6 +210,9 @@ def run_assessment(cases, cfg, output, *, smoke=False, inv=None, skipped=()):
                         document["predictor"] = str((destination / "predictor.json").relative_to(output))
                     write_json(destination / "fit.json", document)
                     records.append(document)
+                    print(f"Scaling fit done: {key} identifiable={result.identifiable} "
+                          f"success={result.success} nfev={document.get('diagnostics', {}).get('optimizer_nfev')} "
+                          f"({time.perf_counter()-started:.0f} s elapsed)", flush=True)
     if not strata:
         records.append({"status": "no eligible whole-field inputs", "identifiable": False,
                         "subsets": {"exploratory": "unidentifiable", "suitable": "unidentifiable"}})
@@ -227,7 +245,8 @@ def write_summary(output, report):
             "Density is Cai evaluated at mapped coordinates, without an amplitude or determinant factor.",
             "Temperature is a transfer test using density coefficients. Velocity is unchanged.", "",
             f"Eligible fit records: {sum(bool(r.get('identifiable')) for r in report['fits'])}.",
-            f"Missing whole-field results at Kn: {inv.get('missing_results', [])}.", "",
+            f"Missing whole-field results at Kn: {inv.get('missing_results', [])}.",
+            f"Skipped cases: {[item['name'] for item in report.get('skipped', [])]}.", "",
             "| Case | Kn | Source | Fit input | Suitable | Warnings |",
             "|---|---:|---|---|---|---|"]
     for row in inv.get("cases", []):
@@ -262,6 +281,9 @@ def main(argv=None, *, study_root=None):
         if args.mode == "smoke" and not args.output:
             output = output / "smoke"
         registration = root / cfg["registration"] if cfg.get("registration") else None
+        if args.mode in ("fit", "report"):
+            workers = configure_workers(cfg["resources"]["cores"])
+            print(f"Cai evaluation workers: {workers}", flush=True)
         if args.mode == "evaluate":
             if not args.predictor or not args.points or args.kn is None:
                 parser.error("evaluate requires --predictor, --points and --kn")
@@ -292,6 +314,8 @@ def main(argv=None, *, study_root=None):
                 if args.mode == "fit" and not args.full:
                     parser.error("fit requires --full; use smoke for a bounded synthetic numerical check")
                 cases, skipped = (synthetic_cases(cfg), []) if args.mode == "smoke" else load_available(inv, cfg)
+                if args.mode != "smoke":
+                    require_loaded(cases, skipped)
                 preprocessing = time.perf_counter()-begin
                 report = run_assessment(cases, cfg, output, smoke=args.mode == "smoke", inv=inv, skipped=skipped)
                 report["timing_seconds"]["inventory_and_loading"] = preprocessing

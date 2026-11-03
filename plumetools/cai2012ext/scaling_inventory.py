@@ -504,7 +504,7 @@ def load_case(row, max_bytes=DEFAULT_MAX_BYTES):
                    if p.is_file() and p.name in set(post.REQUIRED_FIELDS) | {"dsmcRhoNMean"})
         size += sum(p.stat().st_size for p in required[:2])
         if size * 4 > max_bytes:
-            raise InventoryError(f"OpenFOAM input size exceeds conservative array cap {max_bytes}; use HPC configuration")
+            raise InventoryError(f"OpenFOAM input estimate {size*4} bytes exceeds resources.max_input_bytes {max_bytes} in scaling.yaml")
         centres = np.asarray(post.read_internal_field(geom_dir / "C"), dtype=float)
         volumes = np.asarray(post.read_cell_values(geom_dir / "V", len(centres)), dtype=float)
         state = row["exit_state"]

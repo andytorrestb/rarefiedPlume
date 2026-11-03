@@ -9,8 +9,23 @@ import numpy as np
 
 from .scaling import CaiPredictor, CoordinateMap
 from . import scaling_fit as sf
-from .scaling_workflow import (LABELS, _fit_kwargs, load_available, options, run_assessment,
-                               synthetic_cases, write_csv, write_json)
+from .scaling_workflow import (LABELS, _fit_kwargs, load_available, options, require_loaded,
+                               run_assessment, synthetic_cases, write_csv, write_json)
+
+# Above these, per-cell exports use NPZ and scatter panels show an even subset.
+MAX_CSV_FIELD_ROWS = 200_000
+MAX_PLOT_POINTS = 40_000
+
+
+def _shown(count):
+    return np.linspace(0, count-1, min(count, MAX_PLOT_POINTS), dtype=int)
+
+
+def _write_field(path, columns):
+    if len(columns["X"]) > MAX_CSV_FIELD_ROWS:
+        np.savez(path.with_suffix(".npz"), **columns)
+    else:
+        write_csv(path, [dict(zip(columns, row)) for row in zip(*columns.values())])
 
 
 def _mean_profile(coordinate, values, weights, edges):
@@ -26,11 +41,13 @@ def _mean_profile(coordinate, values, weights, edges):
 
 def _plot_maps(plt, destination, case, prepared, predictions, title):
     from matplotlib.colors import LogNorm, Normalize
-    points = prepared.points
+    shown_cells = _shown(len(prepared.points))
+    points = prepared.points[shown_cells]
+    reference = prepared.density[shown_cells]
     radius = np.linalg.norm(points, axis=1)
     angle = np.rad2deg(np.arctan2(points[:, 1], points[:, 0]))
-    fields = {"DSMC" if not case.metadata.get("synthetic") else "SYNTHETIC reference": prepared.density,
-              **{LABELS[k]: v for k, v in predictions.items()}}
+    fields = {"DSMC" if not case.metadata.get("synthetic") else "SYNTHETIC reference": reference,
+              **{LABELS[k]: v[shown_cells] for k, v in predictions.items()}}
     for coordinate_name, coords, labels in [
             ("cartesian", points, ("$x/D_e$", r"$\rho/D_e$")),
             ("source-centered", np.column_stack((radius, angle)),
@@ -39,7 +56,7 @@ def _plot_maps(plt, destination, case, prepared, predictions, title):
             shown = dict(list(fields.items())[1:]) if residual else fields
             fig, axes = plt.subplots(1, len(shown), figsize=(3.0*len(shown), 3.4), squeeze=False)
             for ax, (name, values) in zip(axes[0], shown.items()):
-                value = ((values-prepared.density)/np.maximum(prepared.density, 1e-10)
+                value = ((values-reference)/np.maximum(reference, 1e-10)
                          if residual else np.maximum(values, 1e-10))
                 artist = ax.scatter(coords[:, 0], coords[:, 1], c=value, s=8, rasterized=True,
                                     cmap="RdBu_r" if residual else "viridis",
@@ -98,7 +115,8 @@ def _plot_profiles(plt, destination, case, prepared, predictions, cfg, title):
 
 def _plot_jacobians(plt, destination, prepared, jacobians, log_bound, title):
     from matplotlib.colors import LogNorm
-    points = prepared.points
+    shown_cells = _shown(len(prepared.points))
+    points = prepared.points[shown_cells]
     polar = np.column_stack((np.linalg.norm(points, axis=1),
                              np.rad2deg(np.arctan2(points[:, 1], points[:, 0]))))
     fig, axes = plt.subplots(2, len(jacobians), figsize=(3*len(jacobians), 6), squeeze=False)
@@ -106,7 +124,7 @@ def _plot_jacobians(plt, destination, prepared, jacobians, log_bound, title):
         for ax, coords, labels in zip(column, [points, polar],
                                       [("$x/D_e$", r"$\rho/D_e$"),
                                        ("$r/D_e$", r"$\theta$ [deg]")]):
-            artist = ax.scatter(coords[:, 0], coords[:, 1], c=values, s=8, rasterized=True,
+            artist = ax.scatter(coords[:, 0], coords[:, 1], c=values[shown_cells], s=8, rasterized=True,
                                 cmap="viridis", norm=LogNorm(np.exp(-3*log_bound), np.exp(3*log_bound)))
             ax.set(xlabel=labels[0], ylabel=labels[1], title=LABELS[family])
             ax.grid(alpha=.2)
@@ -177,7 +195,11 @@ def render_report(output, report, *, cases=None):
     cfg = report["config"]
     smoke = bool(report["synthetic"])
     if cases is None:
-        cases = synthetic_cases(cfg) if smoke else load_available(report["inventory"], cfg)[0]
+        if smoke:
+            cases = synthetic_cases(cfg)
+        else:
+            cases, skipped = load_available(report["inventory"], cfg)
+            require_loaded(cases, skipped)
     plt = _pyplot()
     began = time.perf_counter()
     for case in cases:
@@ -202,20 +224,20 @@ def render_report(output, report, *, cases=None):
                 for record in records:
                     predictor = CaiPredictor.load(output / record["predictor"])
                     family = record["family"]
-                    predictions[family] = predictor.density(prepared.points, case.kn)
-                    temperature = (predictor.temperature(prepared.points, case.kn)
+                    evaluator = options(cfg, smoke)
+                    predictions[family] = sf.predict(prepared, predictor.mapping, evaluator)
+                    temperature = (sf.predict(prepared, predictor.mapping, evaluator, "temperature")
                                    if cfg["evaluation"]["temperature_transfer"]
                                    else np.full(len(prepared.points), np.nan))
                     jacobian = predictor.mapping.jacobian(prepared.points, case.kn)
                     jacobians[family] = jacobian
                     mapped = predictor.mapping.map_points(prepared.points, case.kn)
-                    write_csv(destination / f"{family}-field.csv", [
-                        dict(X=p[0], P=p[1], radius_D=np.linalg.norm(p),
-                             theta_deg=np.rad2deg(np.arctan2(p[1], p[0])), reference=n,
-                             predicted=pred, T_transfer=temp, mapped_X=m[0], mapped_P=m[1],
-                             jacobian=j, volume=v)
-                        for p, n, pred, temp, m, j, v in zip(prepared.points, prepared.density,
-                            predictions[family], temperature, mapped, jacobian, prepared.volumes)])
+                    x, p = prepared.points.T
+                    _write_field(destination / f"{family}-field.csv", dict(
+                        X=x, P=p, radius_D=np.hypot(x, p), theta_deg=np.rad2deg(np.arctan2(p, x)),
+                        reference=prepared.density, predicted=predictions[family],
+                        T_transfer=temperature, mapped_X=mapped[:, 0], mapped_P=mapped[:, 1],
+                        jacobian=jacobian, volume=prepared.volumes))
                     probe = np.array([[0, .5], [.01, .49], [.01, .51], [.1, .5]])
                     numerical_probe = prepared.points[np.linspace(0, max(0, len(prepared.points)-1),
                                                                    min(12, len(prepared.points)), dtype=int)]

@@ -3,9 +3,10 @@ schema_version: 1
 registration: scaling-registration.yaml
 output: results/scaling/full-suite
 resources:
-  cores: 8
-  max_input_bytes: 536870912
-  max_total_input_bytes: 1073741824
+  # Upper bound on Cai worker processes; keep equal to ppn in runScaling.sh.
+  cores: 64
+  max_input_bytes: 8589934592
+  max_total_input_bytes: 34359738368
   chunk_size: 64
   # A full assessment must be requested explicitly with fit --full.
   smoke_max_points_per_case: 48

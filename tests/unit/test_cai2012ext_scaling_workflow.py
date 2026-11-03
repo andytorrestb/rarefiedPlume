@@ -59,9 +59,9 @@ def test_production_fit_requires_explicit_full_opt_in(tmp_path, monkeypatch):
 
 def test_local_core_cap_cannot_be_exceeded(tmp_path):
     cfg, path = configuration(tmp_path)
-    cfg["resources"]["cores"] = 9
+    cfg["resources"]["cores"] = 193
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
-    with pytest.raises(ValueError, match="eight"):
+    with pytest.raises(ValueError, match="192"):
         workflow.load_config(tmp_path, path)
 
 
@@ -219,3 +219,25 @@ def test_report_records_empty_case_coverage_and_continues(tmp_path, monkeypatch)
     assert coverage["excluded"]["no_meaningful_dsmc_estimator"] == len(empty.density)
     assert not list((output / "figures" / empty.name).rglob("*.png"))
     assert (output / "figures" / "SYNTHETIC_valid" / "exploratory" / "F" / "baseline-field.csv").is_file()
+
+
+def test_unreadable_fit_ready_case_fails_instead_of_fitting_nothing(tmp_path, monkeypatch, capsys):
+    cfg, _ = configuration(tmp_path)
+
+    def rejected(*_args, **_kwargs):
+        raise ValueError("input too large")
+
+    monkeypatch.setattr(workflow.si, "load_case", rejected)
+    inv = {"cases": [{"name": "Kn1", "compatible": True, "fit_ready": True, "stratum": "same"}]}
+    cases, skipped = workflow.load_available(inv, cfg)
+    with pytest.raises(ValueError, match="Kn1"):
+        workflow.require_loaded(cases, skipped)
+    assert "input too large" in capsys.readouterr().err
+
+
+def test_no_fit_ready_cases_is_an_error_but_unready_archives_are_only_reported(capsys):
+    skipped = [{"name": "archive", "reason": [], "result_status": "missing-configuration"}]
+    with pytest.raises(ValueError, match="no fit-ready cases"):
+        workflow.require_loaded([], skipped)
+    workflow.require_loaded([case("Kn1")], skipped)
+    assert "missing-configuration" in capsys.readouterr().err

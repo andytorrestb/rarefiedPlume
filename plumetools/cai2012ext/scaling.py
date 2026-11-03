@@ -9,8 +9,13 @@ the two affine families can change it.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from concurrent.futures import ProcessPoolExecutor
+import hashlib
 import json
 import math
+import multiprocessing
+import os
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +25,76 @@ from plumetools.cai2012 import analytical
 
 FAMILIES = ("baseline", "axial", "axial_transverse", "radial_angular")
 FEATURES = ("inverse_kn", "inverse_kn_squared")
+# Cells within 1e-7 diameters share one Cai value: well below the cell size, and
+# axisymmetry makes most of a 3D mesh repeat the same (X, P).
+COORDINATE_DECIMALS = 7
+_UNIQUE_CACHE_SIZE = 64
+_unique_cache = OrderedDict()
+_workers = 1
+_executor = None
+
+
+def configure_workers(cores):
+    """Set the Cai worker processes, never more than this job's allocated CPUs."""
+    global _workers, _executor
+    if _executor is not None:
+        _executor.shutdown()
+        _executor = None
+    _workers = max(1, min(int(cores), len(os.sched_getaffinity(0))))
+    return _workers
+
+
+def _map_chunks(tasks):
+    """A worker lost to the OS raises BrokenProcessPool rather than hanging."""
+    global _executor
+    if _workers == 1 or len(tasks) == 1:
+        return [_analytical_chunk(task) for task in tasks]
+    if _executor is None:
+        _executor = ProcessPoolExecutor(_workers, mp_context=multiprocessing.get_context("fork"))
+    return list(_executor.map(_analytical_chunk, tasks,
+                              chunksize=max(1, len(tasks)//(16*_workers))))
+
+
+def _analytical_chunk(task):
+    kind, x, rho, speed_ratio, options = task
+    if kind == "density":
+        return analytical.density_ratio(x, rho, 0., .5, speed_ratio, **options)
+    values = analytical.moments(x, rho, 0., .5, speed_ratio, **options)
+    return values["T_over_T0" if kind == "temperature" else "U_sqrt_beta0"]
+
+
+def unique_points(points):
+    """Representative points and the inverse restoring ``points``; cached per array."""
+    key = (points.shape, hashlib.blake2b(np.ascontiguousarray(points).data, digest_size=16).digest())
+    cached = _unique_cache.get(key)
+    if cached is None:
+        _, first, inverse = np.unique(np.round(points, COORDINATE_DECIMALS), axis=0,
+                                      return_index=True, return_inverse=True)
+        cached = first, inverse.ravel()
+        _unique_cache[key] = cached
+        if len(_unique_cache) > _UNIQUE_CACHE_SIZE:
+            _unique_cache.popitem(last=False)
+    else:
+        _unique_cache.move_to_end(key)
+    return points[cached[0]], cached[1]
+
+
+def _evaluate_sorted(points, kind, speed_ratio, n_radial, n_azimuthal, chunk_size):
+    """Evaluate in X order: each chunk's nearest point sets its adaptive disk order."""
+    order = np.argsort(points[:, 0], kind="stable")
+    options = {"n_radial": n_radial, "n_azimuthal": n_azimuthal}
+    tasks = [(kind, *points[order[start:start+chunk_size]].T, speed_ratio, options)
+             for start in range(0, len(order), chunk_size)]
+    values = np.concatenate(_map_chunks(tasks)) if tasks else np.empty((0,))
+    result = np.empty_like(values)
+    result[order] = values
+    return result
+
+
+def cai_field(points, kind, speed_ratio, n_radial=48, n_azimuthal=96, chunk_size=128):
+    """Unmapped Cai ``density``, ``temperature`` or ``velocity`` at ``[X, P]`` points."""
+    unique, inverse = unique_points(np.asarray(points, dtype=float).reshape(-1, 2))
+    return _evaluate_sorted(unique, kind, speed_ratio, n_radial, n_azimuthal, chunk_size)[inverse]
 
 
 def kn_feature(kn, feature="inverse_kn"):
@@ -301,24 +376,17 @@ class CaiPredictor:
         self.n_radial, self.n_azimuthal, self.chunk_size = int(n_radial), int(n_azimuthal), int(chunk_size)
 
     def _evaluate(self, points, kn, temperature):
-        mapped = self.mapping.map_points(points, kn)
-        shape = mapped.shape[:-1]
-        flat = mapped.reshape(-1, 2)
+        points = _points(points)
+        shape = points.shape[:-1]
+        unique, inverse = unique_points(points.reshape(-1, 2))
+        flat = self.mapping.map_points(unique, kn).reshape(-1, 2)
         if np.any(flat[:, 0] <= 0):
             raise ValueError("Cai direct evaluation requires X > 0; source-plane boundary is undefined")
-        result = np.empty(len(flat))
-        for start in range(0, len(flat), self.chunk_size):
-            stop = start+self.chunk_size
-            x, rho = flat[start:stop].T
-            options = {"n_radial": self.n_radial, "n_azimuthal": self.n_azimuthal}
-            if temperature:
-                values = analytical.moments(x, rho, 0., .5, self.speed_ratio, **options)["T_over_T0"]
-            else:
-                values = analytical.density_ratio(x, rho, 0., .5, self.speed_ratio, **options)
-            result[start:stop] = values
+        result = _evaluate_sorted(flat, "temperature" if temperature else "density",
+                                  self.speed_ratio, self.n_radial, self.n_azimuthal, self.chunk_size)
         if not np.all(np.isfinite(result)):
             raise ValueError("mapped Cai field is unavailable/nonfinite; candidate must be penalized")
-        return result.reshape(shape)
+        return result[inverse].reshape(shape)
 
     def density(self, points, kn):
         return self._evaluate(points, kn, False)

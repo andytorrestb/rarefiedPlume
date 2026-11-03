@@ -166,3 +166,37 @@ def test_large_radial_batch_agrees_with_independent_point_evaluations():
     independent = np.vstack([mapping.map_points(points[index], .1) for index in selected])
     np.testing.assert_allclose(full[selected], independent, rtol=1e-14, atol=1e-14)
     assert np.all(np.diff(np.linalg.norm(full, axis=1)) > 0)
+
+
+def test_duplicate_shuffled_and_parallel_evaluation_match_direct_cai():
+    from plumetools.cai2012ext import scaling
+
+    near = np.column_stack((np.full(8, .02), np.linspace(0., .4, 8)))
+    far = np.column_stack((np.linspace(1., 5., 24), np.linspace(0., 3., 24)))
+    points = np.random.default_rng(3).permutation(np.vstack((near, far, far)))
+    options = dict(n_radial=20, n_azimuthal=40)
+    direct = np.array([analytical.density_ratio(x, p, 0., .5, 2., **options).item() for x, p in points])
+    predictor = CaiPredictor(CoordinateMap(), speed_ratio=2., chunk_size=5, **options)
+    assert scaling.unique_points(points)[0].shape[0] == 32
+    assert predictor.density(points, 1.) == pytest.approx(direct, rel=1e-12)
+    try:
+        assert scaling.configure_workers(2) >= 1
+        assert predictor.density(points, 1.) == pytest.approx(direct, rel=1e-12)
+        velocity = scaling.cai_field(points, "velocity", 2., chunk_size=5, **options)
+        assert velocity.shape == (len(points), 3)
+    finally:
+        scaling.configure_workers(1)
+
+
+def test_prediction_memo_is_per_mapping_and_reused():
+    from plumetools.cai2012ext import scaling_fit as sf
+
+    points = np.column_stack((np.linspace(1., 5., 12), np.linspace(0., 2., 12)))
+    case = sf.ScalingCase("memo", 1., points, np.full(12, .1), np.ones(12))
+    options = {"n_radial": 12, "n_azimuthal": 24, "chunk_size": 4}
+    prepared = sf.prepare_case(case, radial_bins=4, evaluator_options=options)
+    assert sf.prepare_case(case, radial_bins=4, evaluator_options=options) is prepared
+    first = sf.predict(prepared, CoordinateMap(), options)
+    assert sf.predict(prepared, CoordinateMap(), options) is first
+    other = sf.predict(prepared, CoordinateMap("axial", [.2]), options)
+    assert not np.allclose(first, other)

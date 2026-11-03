@@ -34,12 +34,13 @@ synthetic. Whole-field fits require the explicit `fit --full`.
 
 Those commands inspect every compatible, registered available Kn. Missing input
 fields are skipped with reasons, and an empty suitable subset is reported as
-unidentifiable. The implementation uses a serial optimizer, one BLAS/OpenMP
-thread, chunks of 64 Cai points, no interpolated Cai cache, a 512 MiB per-input
-cap, and a 1 GiB aggregate loaded-input cap. Exceeding aggregate memory aborts
-the assessment; it must not silently select a convenient subset. Configuration
-rejects core declarations above eight. A complete assessment is never the
-default laptop action. Input files are checked against uncompressed NPZ size
+unidentifiable. A fit-ready case that fails to load, or a fit with no cases,
+exits non-zero. The implementation uses a serial optimizer, one BLAS/OpenMP
+thread per process, and up to `resources.cores` Cai worker processes (at most
+192). Each Cai evaluation covers the unique (X, P) points to 1e-7 D, in X order,
+in chunks of 64 points; there is no interpolated Cai cache. Exceeding the
+`scaling.yaml` input limits aborts the assessment; it must not silently select a
+convenient subset. A complete assessment is never the default laptop action. Input files are checked against uncompressed NPZ size
 before loading. Increase explicit limits only after checking HPC resources.
 
 `report` reads stored fits and does not refit. The predictor inherits the
