@@ -1,7 +1,10 @@
 """Built native mesh geometry, later extended with a bounded solver mechanics run."""
 from dataclasses import replace
+import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import numpy as np
@@ -69,3 +72,45 @@ def test_bounded_plus_mechanics_run(tmp_path):
             verify_sources(case,plan)
         path.write_bytes(original)
     verify_sources(case,plan)
+
+
+def test_serial_scripts_run_and_restart_native_cases(tmp_path):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from _refinement import tree_hash
+    from test_radialstudy_suite import case
+    from plumetools.foamio.times import time_directories
+    root = tmp_path/'Cases with spaces'
+    done,_ = case(root,100)
+    interrupted,_ = case(root,10)
+    repo = Path(__file__).resolve().parents[2]
+    env = dict(os.environ,PYTHON=sys.executable,PYTHONPATH=str(repo),PYTHONDONTWRITEBYTECODE='1')
+
+    def script(name):
+        result = subprocess.run(['bash',str(repo/'cases/cai2012-radial-resolution'/name),
+                                 '--cases',str(root)],cwd=tmp_path,env=env,
+                                capture_output=True,text=True,timeout=120)
+        assert result.returncode==0,result.stderr
+        return json.loads(result.stdout)
+
+    report = script('Allrun')
+    assert report['completed']==2 and report['skipped']==0
+    before = tree_hash(done)
+    # Restore the second case's first saved checkpoint, as from an interrupted run.
+    times = time_directories(interrupted)
+    assert len(times)>1
+    for _,name in times[1:]:
+        shutil.rmtree(interrupted/name)
+    initializer = (interrupted/'log.dsmcInitialise').read_bytes()
+    initial_fields = tree_hash(interrupted/'0')
+    fresh,_ = case(root,1)
+    report = script('Allrestart')
+    assert report['completed']==2 and report['skipped']==1
+    assert [row['action'] for row in report['cases']]==['skip','resume','fresh']
+    assert tree_hash(done)==before
+    assert (interrupted/'log.dsmcInitialise').read_bytes()==initializer
+    assert tree_hash(interrupted/'0')==initial_fields
+    state = json.loads((interrupted/'run-state.json').read_text())
+    assert state['segments'][-1]['start_s']==times[0][0]
+    assert state['segments'][-1]['status']=='completed'
+    assert time_directories(fresh)

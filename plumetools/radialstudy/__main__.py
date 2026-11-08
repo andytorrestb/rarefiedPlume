@@ -19,6 +19,11 @@ def main(argv=None):
     r.add_argument('--correction',choices=['needed','mesh','parcels','timestep'],default='needed')
     r.add_argument('--delta-t',type=float)
     r.add_argument('--dry-run',action='store_true')
+    batch = sub.add_parser('run-all',help='run generated cases sequentially; stop on the first failure')
+    batch.add_argument('--cases',type=Path,default=Path('Cases'),help='generated case tree')
+    batch.add_argument('--resume',action='store_true',help='skip finished cases, resume checkpoints and start untouched cases')
+    batch.add_argument('--dry-run',action='store_true',help='report the queue without writing or launching commands')
+    batch.add_argument('--allow-budget-exceedance',action='store_true')
     for name in ('mesh','run','post','analyse'):
         a = sub.add_parser(name)
         a.add_argument('case',type=Path)
@@ -42,6 +47,11 @@ def main(argv=None):
                 plan, recommended_dt = case_plan(a.case)
                 dt = a.delta_t or recommended_dt
             result = revise_case(a.case,plan,correction=a.correction,delta_t_s=dt,dry_run=a.dry_run)
+        elif a.command == 'run-all':
+            from .run import run_study
+            result = run_study(a.cases,resume=a.resume,dry_run=a.dry_run,
+                               allow_budget_exceedance=a.allow_budget_exceedance,
+                               progress=lambda message:print(message,file=sys.stderr,flush=True))
         elif a.command in ('mesh','run'):
             from . import run
             result = (run.mesh_case(a.case) if a.command == 'mesh' else

@@ -8,11 +8,22 @@ Edit [study.yaml](study.yaml), then:
 ```bash
 python generate_cases.py --dry-run
 python generate_cases.py
-cd Cases/Kn100/r0_ppc20
-bash ./Allmesh
+bash ./Allrun --dry-run
 bash ./Allrun
-bash ./Allpost
+# After an interruption, or after generating more revisions:
+bash ./Allrestart
 ```
+
+The study-level `Allrun` builds/verifies each mesh and runs all generated
+`Cases/Kn*/rN_ppc*` cases one at a time, in decreasing Kn and increasing revision
+order. It checks the whole queue first and stops at the first solver failure.
+`Allrestart` skips finished cases, resumes complete checkpoints, and starts
+untouched cases. Neither script deletes results. Both accept `--cases OTHER_TREE`
+and `--dry-run`. The default densest case exceeds the step budget: inspect the
+dry run, then pass `--allow-budget-exceedance` explicitly if that cost is intended.
+
+For a single case, use its own `Allmesh`, `Allrun` (`--resume` to continue), and
+`Allpost` scripts. Postprocessing and refinement remain explicit steps.
 
 Ensure this checkout is on PYTHONPATH and use a Python with numpy/scipy/PyYAML.
 The [tutorial](../../docs/tutorials/cai2012-radial-resolution.md) includes the

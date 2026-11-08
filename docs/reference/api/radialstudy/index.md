@@ -15,7 +15,7 @@ exit physics to the portable measured-target API. See the
 | `plumetools.radialstudy.mesh` | actual streamtube geometry and targets | `RadialMesh`, `initial_mesh`, `RadialRefiner`, `render_block_mesh`, `read_radial_mesh` |
 | `plumetools.radialstudy.case` | native dictionaries and sizing | `write_case`, `load_case`, `sizing` |
 | `plumetools.radialstudy.generation` | seven initial cases and revisions | `generate_initial`, `revise_case` |
-| `plumetools.radialstudy.run` | serial lifecycle and sampling provenance | `mesh_case`, `run_case`, `read_windows`, `collect_case` |
+| `plumetools.radialstudy.run` | serial lifecycle and sampling provenance | `mesh_case`, `run_case`, `run_study`, `read_windows`, `collect_case` |
 | `plumetools.radialstudy.post` | moments, diagnostics and comparisons | `assess_case`, `analyse_study`, `case_plan`, `post_case`, `project_moments` |
 | `plumetools.radialstudy.report` | machine-readable and plotted outputs | `write_study_report`, `write_case_report` |
 | `plumetools.radialstudy.__main__` | study/case CLI | `main` |

@@ -36,6 +36,7 @@ cases/**/constant/polyMesh/** -text
 # checking-out platform's autocrlf setting.
 *.sh        text eol=lf
 Allrun      text eol=lf
+Allrestart  text eol=lf
 Allclean    text eol=lf
 Allmesh     text eol=lf
 Allpost     text eol=lf

@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 
 import numpy as np
@@ -68,12 +69,95 @@ def mesh_case(case, *, runner=None):
             'total_volume_m3':float(g.volumes_m3.sum())}
 
 
+def _has_output(case):
+    return ((case/'run-state.json').exists() or bool(time_directories(case))
+            or (case/'0/lagrangian').exists())
+
+
+def _restart_state(case,record,mesh_sha256):
+    statepath = case/'run-state.json'
+    if not statepath.is_file():
+        raise ValueError('resume requires the original run-state.json and checkpoint; no reinitialization was performed')
+    state = json.loads(statepath.read_text())
+    if (state.get('case_id') != record['case_id'] or state.get('mesh_sha256') != mesh_sha256
+            or state.get('sampling',record['sampling']) != record['sampling']):
+        raise ValueError('restart mesh, inputs or sampling identity changed')
+    restart = plan_restart(case,1)
+    if restart.refusal:
+        raise ValueError(restart.refusal)
+    if restart.resume is None:
+        raise ValueError('no complete checkpoint for resume; no cloud was initialized or discarded')
+    start = float(restart.resume)
+    cadence = record['sampling']['cadence_s']
+    if not restart.reached_end and not math.isclose(start/cadence,round(start/cadence),abs_tol=1e-8,rel_tol=0):
+        raise ValueError('checkpoint is not a native reset-at-write window boundary; independent sampling cannot resume')
+    return state,restart
+
+
+def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=False, progress=None):
+    """Preflight all generated revisions, then run one serial case at a time.
+
+    Restart mode skips complete cases, resumes complete checkpoints and starts
+    untouched cases. Dry runs only read inputs/checkpoints and report the queue.
+    """
+    root = Path(root).resolve()
+    queue = []
+    for recordpath in root.glob('Kn*/r*_ppc*/case.json'):
+        case = recordpath.parent
+        match = re.fullmatch(r'r(\d+)_ppc[0-9pem+]+',case.name)
+        if match is None:
+            continue
+        _,_,record = load_case(case)
+        verify_inputs(case,record)
+        queue.append((record['source']['exit']['Kn'],int(match[1]),case,record))
+    if not queue:
+        raise ValueError(f'no generated cases in {root}; run generate_cases.py first')
+    queue.sort(key=lambda item:(-item[0],item[1],item[2].name))
+    rows = []
+    for kn,revision,case,record in queue:
+        try:
+            started = _has_output(case)
+            if started and not resume:
+                raise ValueError('existing output/initialization; use Allrestart or --resume')
+            row = {'path':str(case),'Kn':kn,'revision':revision,'action':'fresh',
+                   'budget_gaps':record['numerics']['budget_gaps']}
+            if started:
+                _,restart = _restart_state(case,record,mesh_fingerprint(case))
+                row.update(action='skip' if restart.reached_end else 'resume',checkpoint=restart.resume)
+            rows.append(row)
+        except (ValueError,OSError) as exc:
+            raise ValueError(f'{case.relative_to(root)}: {exc}') from exc
+    blocked = [row for row in rows if row['action']!='skip' and row['budget_gaps']]
+    if blocked and not dry_run and not allow_budget_exceedance:
+        details = '; '.join(f"{Path(row['path']).relative_to(root)}: {', '.join(row['budget_gaps'])}" for row in blocked)
+        raise ValueError(f'resource budget exceeded: {details}; inspect --dry-run, then use --allow-budget-exceedance if intended')
+    result = {'mode':'restart' if resume else 'fresh','dry_run':dry_run,
+              'cases':rows,'completed':0,'skipped':0}
+    if dry_run:
+        return result
+    for index,row in enumerate(rows,1):
+        case = Path(row['path'])
+        if progress:
+            progress(f"[{index}/{len(rows)}] {row['action']}: {case.relative_to(root)}")
+        if row['action']=='skip':
+            row['status'] = 'already_finished'
+            result['skipped'] += 1
+            continue
+        try:
+            row.update(run_case(case,resume=row['action']=='resume',
+                                allow_budget_exceedance=allow_budget_exceedance))
+        except (ValueError,OSError,RuntimeError) as exc:
+            raise RuntimeError(f'{case.relative_to(root)}: {exc}') from exc
+        result['completed'] += 1
+    return result
+
+
 def run_case(case, *, resume=False, allow_budget_exceedance=False, runner=None):
     case = Path(case).resolve()
     model,mesh,record = load_case(case)
     verify_inputs(case,record)
     statepath = case/'run-state.json'
-    if not resume and (statepath.exists() or time_directories(case) or (case/'0/lagrangian').exists()):
+    if not resume and _has_output(case):
         raise ValueError('fresh run refuses existing output/initialization; use --resume with a complete checkpoint or generate a new revision')
     if record['numerics']['budget_gaps'] and not allow_budget_exceedance:
         raise ValueError('resource budget exceeded: '+'; '.join(record['numerics']['budget_gaps'])+'; inspect the plan, then explicitly allow budget exceedance if intended')
@@ -84,23 +168,10 @@ def run_case(case, *, resume=False, allow_budget_exceedance=False, runner=None):
              'sampling':record['sampling'],'environment':environment,'segments':[]}
     start = 0.
     if resume:
-        if not statepath.is_file():
-            raise ValueError('resume requires the original run-state.json and checkpoint; no reinitialization was performed')
-        state = json.loads(statepath.read_text())
-        if (state['case_id'] != record['case_id'] or state['mesh_sha256'] != geometry['mesh_sha256']
-                or state.get('sampling',record['sampling']) != record['sampling']):
-            raise ValueError('restart mesh, inputs or sampling identity changed')
-        restart = plan_restart(case,1)
-        if restart.refusal:
-            raise ValueError(restart.refusal)
-        if restart.resume is None:
-            raise ValueError('no complete checkpoint for resume; no cloud was initialized or discarded')
+        state,restart = _restart_state(case,record,geometry['mesh_sha256'])
         if restart.reached_end:
             return {'status':'already_finished','checkpoint':restart.resume}
         start = float(restart.resume)
-        cadence = record['sampling']['cadence_s']
-        if not math.isclose(start/cadence,round(start/cadence),abs_tol=1e-8,rel_tol=0):
-            raise ValueError('checkpoint is not a native reset-at-write window boundary; independent sampling cannot resume')
     segment = {'start_s':start,'end_s':record['sampling']['end_s'],'status':'started'}
     state['segments'].append(segment)
     _save(statepath,state)

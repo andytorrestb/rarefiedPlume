@@ -22,6 +22,37 @@ the mesh criterion. Generation writes dictionaries only:
 
 ```bash
 "$PYTHON" cases/cai2012-radial-resolution/generate_cases.py
+cd cases/cai2012-radial-resolution
+bash ./Allrun --dry-run
+bash ./Allrun
+```
+
+The study-level `Allrun` builds/verifies meshes and runs every generated case
+one at a time: Kn 100 down to 0.0001, with revisions in increasing order within
+each Kn. It checks all inputs and resource budgets before starting the first
+case. At the default settings, execution requires an explicit
+`--allow-budget-exceedance` after reviewing the densest case's step count.
+It stops at the first failed command, whose case and log appear in the error.
+
+To continue an interrupted study or include newly generated revisions:
+
+```bash
+bash ./Allrestart --dry-run
+bash ./Allrestart
+```
+
+`Allrestart` skips finished cases, resumes interrupted cases from complete
+checkpoints, and starts untouched cases. Use `--allow-budget-exceedance` again
+when the remaining cases exceed their budgets. It refuses an incomplete latest
+write, a missing checkpoint, or changed run inputs/mesh before launching any
+case; follow the reported recovery instructions. No checkpoint is removed or
+cloud reinitialized. Both scripts accept `--cases /path/to/OTHER_TREE`; their
+default is the `Cases` beside the script. A dry run requires Python only and
+does not write files or launch OpenFOAM.
+
+For an individual case, from the repository root:
+
+```bash
 cd cases/cai2012-radial-resolution/Cases/Kn100/r0_ppc20
 bash ./Allmesh
 bash ./Allrun
@@ -33,6 +64,8 @@ output unless `--resume` is explicit. `bash ./Allrun --resume` preserves the clo
 and checks the newest complete checkpoint. Incomplete checkpoints produce the
 shared recovery instructions and are not deleted. Changed inputs or mesh refuse
 restart. Neither generation nor refinement launches a solver.
+The study scripts run simulations only; run each case's `Allpost` explicitly
+before assessing measured corrections.
 
 From the repository root, inspect the selected measured corrections:
 
