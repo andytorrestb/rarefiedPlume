@@ -23,8 +23,9 @@ def test_actual_radial_mesh_geometry(tmp_path):
     mesh = initial_mesh(m)
     # Deliberately exercise transverse subdivisions too.
     mesh = replace(mesh, transverse=3)
-    materialize(mesh, tmp_path/'mesh')
-    actual = read_geometry(tmp_path/'mesh', time='0')
+    destination = tmp_path/'ancestor with spaces'/'mesh'
+    materialize(mesh, destination)
+    actual = read_geometry(destination, time='0')
     np.testing.assert_allclose(actual.centres_m, mesh.geometry.centres_m, rtol=1e-9, atol=1e-12)
     np.testing.assert_allclose(actual.volumes_m3, mesh.geometry.volumes_m3, rtol=1e-9)
     np.testing.assert_allclose(actual.max_edge_m, mesh.geometry.max_edge_m, rtol=1e-9)
@@ -56,3 +57,15 @@ def test_bounded_plus_mechanics_run(tmp_path):
         assert all((case/w['time']/name).is_file() for name in ('rhoN_Ar','Ttra_Ar','U_Ar','dsmcNMean_Ar','mfp_Ar','mct_Ar'))
         assert (case/w['time']/'lagrangian/dsmc/positions').is_file()
     assert run_case(case,resume=True)['status'] == 'already_finished'
+    from plumetools.radialstudy.post import case_plan
+    from plumetools.refinement.plan import verify_sources
+    plan,_ = case_plan(case)
+    for relative in ('0/C','0/V','run-state.json','sampling-windows.json'):
+        assert relative in plan.provenance['source_files']
+        path = case/relative
+        original = path.read_bytes()
+        path.write_bytes(original+b'\n')
+        with pytest.raises(ValueError,match='changed|stale'):
+            verify_sources(case,plan)
+        path.write_bytes(original)
+    verify_sources(case,plan)
