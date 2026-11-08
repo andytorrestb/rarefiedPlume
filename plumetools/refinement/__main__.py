@@ -8,7 +8,7 @@ import sys
 from .assess import assess
 from .config import load_settings
 from .foam import read_snapshot
-from .plan import plan_refinement, write_plan
+from .plan import plan_refinement, write_plan, read_plan
 from .report import write_assessment
 
 
@@ -23,8 +23,23 @@ def main(argv=None) -> int:
         p.add_argument("--time")
         p.add_argument("--output", type=Path, required=(name == "plan"))
         p.add_argument("--dry-run", action="store_true")
+    apply = subs.add_parser("apply")
+    apply.add_argument("case", type=Path)
+    apply.add_argument("--plan", type=Path, required=True)
+    apply.add_argument("--backend", choices=["hex"], default="hex")
+    apply.add_argument("--output", type=Path, required=True)
+    apply.add_argument("--max-stages", type=int, default=20)
+    apply.add_argument("--max-cells", type=int)
     args = parser.parse_args(argv)
     try:
+        if args.command == "apply":
+            from .openfoam import HexRefiner
+            result = HexRefiner(args.max_stages, args.max_cells).refine(args.case, read_plan(args.plan), args.output)
+            print(f"{result.target_status}: {result.n_cells} cells; "
+                  + ("new flow run required" if result.requires_flow_rerun else "no mesh correction needed"))
+            if result.destination:
+                print(f"wrote mesh artifact {result.destination}")
+            return 0
         cfg = load_settings(args.settings)
         snap = read_snapshot(args.case, cfg, time=args.time)
         result = assess(snap.geometry, snap.measured, snap.species, convention=snap.convention, targets=cfg.targets)
@@ -39,7 +54,7 @@ def main(argv=None) -> int:
                 path = write_assessment(snap.geometry, snap.measured, result, args.output)
             print(f"wrote {path}")
         return 0
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         print(f"refinement: {exc}", file=sys.stderr)
         return 2
 

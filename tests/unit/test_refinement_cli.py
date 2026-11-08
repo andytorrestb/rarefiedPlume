@@ -55,3 +55,14 @@ def test_plan_command_exports_selected_cell_and_source_data(tmp_path):
     with (out / "cells.csv").open(newline="") as stream:
         rows = list(csv.DictReader(stream))
     assert float(rows[0]["target_edge_m"]) == pytest.approx(.6)
+
+
+def test_apply_of_passing_plan_creates_no_mesh_or_solver_work(tmp_path):
+    case = write_cartesian_case(tmp_path / "case", lambdas=(2, 2))
+    artifact = tmp_path / "plan"
+    planned = run(tmp_path, "plan", case, "--settings", case / "refinement.yaml", "--output", artifact)
+    assert planned.returncode == 0, planned.stderr
+    out = tmp_path / "not created"
+    result = run(tmp_path, "apply", case, "--plan", artifact / "plan.json", "--backend", "hex", "--output", out)
+    assert result.returncode == 0, result.stderr
+    assert not out.exists()
