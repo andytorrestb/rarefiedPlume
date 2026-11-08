@@ -93,6 +93,12 @@ class RadialMesh:
 
 def initial_mesh(model):
     cfg, d = model.config, model.source.diameter_m
+    if cfg.mesh.initial_cells is not None:
+        bounds = np.linspace(model.r_in,model.r_out,cfg.mesh.initial_cells+1)
+        angle = math.radians(cfg.domain.angle_deg if cfg.domain.angle_deg is not None else .5)
+        centres = .75*(bounds[:-1]+bounds[1:])*(bounds[:-1]**2+bounds[1:]**2)/(bounds[:-1]**2+bounds[:-1]*bounds[1:]+bounds[1:]**2)
+        return RadialMesh(bounds,1,angle,model.identity(angle_rad=angle),
+                          model.state(centres)['n'],max_cells=cfg.mesh.max_cells)
     samples = np.geomspace(model.r_in, model.r_out, 8193)
     lam = np.asarray(model.state(samples)['lambda'])
     if not np.all(np.isfinite(lam) & (lam > 0)) or np.any(np.diff(lam) < 0):

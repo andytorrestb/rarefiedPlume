@@ -30,6 +30,7 @@ class Mesh:
     predicted_edge_over_mfp: float = 1.
     geometric_cap_over_D: float = .05
     max_cells: int = 1000000
+    initial_cells: int | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,19 @@ class Analysis:
 
 
 @dataclass(frozen=True)
+class Controller:
+    enabled: bool = False
+    check_every_windows: int = 1
+    min_windows: int = 4
+    stability_relative: float = .05
+    density_floor: float = 1.
+    velocity_floor: float = 1.
+    temperature_floor: float = 1.
+    retry_parcels: float = 25.
+    max_retries: int = 5
+
+
+@dataclass(frozen=True)
 class RadialStudyConfig:
     path: Path
     reference: object
@@ -77,10 +91,11 @@ class RadialStudyConfig:
     run: Run
     breakdown: Breakdown
     analysis: Analysis
+    controller: Controller = Controller()
 
     def settings(self):
         return {key: asdict(getattr(self, key)) for key in
-                ('domain', 'mesh', 'targets', 'time', 'run', 'breakdown', 'analysis')}
+                ('domain', 'mesh', 'targets', 'time', 'run', 'breakdown', 'analysis', 'controller')}
 
 
 def _section(cls, raw, name):
@@ -96,7 +111,7 @@ def load_study(path: Path) -> RadialStudyConfig:
     path = Path(path).resolve()
     raw = yaml.safe_load(path.read_text(encoding='utf-8-sig'))
     allowed = {'model', 'reference_case', 'knudsen_numbers', 'domain', 'mesh',
-               'targets', 'time', 'run', 'breakdown', 'analysis'}
+               'targets', 'time', 'run', 'breakdown', 'analysis', 'controller'}
     if not isinstance(raw, dict) or set(raw) - allowed:
         raise ValueError('study: expected mapping with known study keys')
     if raw.get('model') != 'cai_exit_radial_resolution':
@@ -113,7 +128,7 @@ def load_study(path: Path) -> RadialStudyConfig:
         physical, tuple(float(k) for k in raw.get('knudsen_numbers', [100, 10, 1, .1, .01, .001, .0001])),
         *[_section(cls, raw.get(key, {}), key) for key, cls in (
             ('domain', Domain), ('mesh', Mesh), ('targets', Targets), ('time', Time),
-            ('run', Run), ('breakdown', Breakdown), ('analysis', Analysis))])
+            ('run', Run), ('breakdown', Breakdown), ('analysis', Analysis), ('controller', Controller))])
     if not cfg.knudsen_numbers or len(set(cfg.knudsen_numbers)) != len(cfg.knudsen_numbers):
         raise ValueError('knudsen_numbers must be nonempty and unique')
     positive = [*cfg.knudsen_numbers, cfg.domain.outer_over_D, cfg.mesh.predicted_edge_over_mfp,
@@ -135,4 +150,21 @@ def load_study(path: Path) -> RadialStudyConfig:
         raise ValueError('angle_deg must be below 45 degrees')
     if cfg.breakdown.definition not in ('general', 'radial_approx'):
         raise ValueError('breakdown.definition must be general or radial_approx')
+    c = cfg.controller
+    if not isinstance(c.enabled,bool):
+        raise ValueError('controller.enabled must be boolean')
+    for name,value,minimum in (('initial_cells',cfg.mesh.initial_cells,1),
+            ('check_every_windows',c.check_every_windows,1),('min_windows',c.min_windows,4),
+            ('max_retries',c.max_retries,0)):
+        if value is None and name=='initial_cells':
+            continue
+        if isinstance(value,bool) or not isinstance(value,int) or value<minimum:
+            raise ValueError(f'{name} must be an integer >= {minimum}')
+    if c.min_windows%2:
+        raise ValueError('controller.min_windows must be even')
+    for value in (c.stability_relative,c.density_floor,c.velocity_floor,c.temperature_floor,c.retry_parcels):
+        if isinstance(value,bool) or not math.isfinite(value) or value<=0:
+            raise ValueError('controller tolerances, floors and parcel target must be finite and positive')
+    if c.stability_relative>=1:
+        raise ValueError('controller.stability_relative must be below one')
     return cfg

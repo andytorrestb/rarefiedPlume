@@ -22,6 +22,37 @@ def test_default_study_inherits_only_reference_physics():
     assert cfg.run.cores == 1
 
 
+def test_adaptive_defaults_and_initial_cells():
+    from plumetools.radialstudy.config import load_study
+    from plumetools.radialstudy.physics import source_for_kn,predict_breakdown
+    from plumetools.radialstudy.mesh import initial_mesh
+    cfg = load_study(STUDY)
+    assert cfg.domain.angle_deg==2.5 and cfg.domain.outer_over_D==10
+    assert cfg.mesh.initial_cells==100 and cfg.controller.enabled
+    assert cfg.controller.min_windows==4 and cfg.controller.stability_relative==.05
+    assert cfg.controller.retry_parcels==25 and cfg.controller.max_retries==5
+    m = source_for_kn(cfg,.0001)
+    mesh = initial_mesh(m)
+    assert mesh.n_cells==100 and mesh.transverse==1
+    assert mesh.boundaries[-1]/m.source.diameter_m==pytest.approx(10)
+    assert predict_breakdown(m)['status']=='NOT_REACHED_IN_DOMAIN'
+
+
+@pytest.mark.parametrize('section,value',[
+    ('mesh',{'initial_cells':0}),('mesh',{'initial_cells':True}),
+    ('controller',{'enabled':'yes'}),('controller',{'min_windows':3}),
+    ('controller',{'stability_relative':0}),('controller',{'max_retries':-1})])
+def test_invalid_controller_settings(tmp_path,section,value):
+    from plumetools.radialstudy.config import load_study
+    data = yaml.safe_load(STUDY.read_text())
+    data['reference_case'] = str(STUDY.parent.parent/'cai2012-kn-extension/baseCase/case.yaml')
+    data[section] = value
+    path = tmp_path/'study.yaml'
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError):
+        load_study(path)
+
+
 @pytest.mark.parametrize('section,value', [('surprise', {}), ('mesh', {'max_cells': 0}),
     ('knudsen_numbers', [0]), ('time', {'blocks': 1}), ('run', {'cores': 2})])
 def test_invalid_study_is_rejected(tmp_path, section, value):

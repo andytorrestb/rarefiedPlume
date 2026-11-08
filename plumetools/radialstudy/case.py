@@ -81,6 +81,10 @@ def sizing(model, mesh, target_parcels=20., particle_weight=None, delta_t_s=None
                'predicted_total_parcels': float(pop.sum()), 'weight_controlling_cell': int(np.argmin(molecules)),
                'delta_t_s': dt, 'predicted_delta_t_limit_s': limit, 'steps_per_window': steps_window,
                'planned_steps': steps, 'budget_gaps': gaps}
+    ratio = mesh.geometry.max_edge_m/sample['lambda']
+    numeric.update(initial_mesh_mode='cell_count' if cfg.mesh.initial_cells is not None else 'predicted_target',
+                   predicted_mesh_failed_cells=int(np.count_nonzero(ratio>cfg.targets.edge_over_mfp)),
+                   predicted_max_edge_over_mfp=float(np.max(ratio)))
     return numeric, sampling_record
 
 

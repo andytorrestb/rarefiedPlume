@@ -9,7 +9,11 @@ from test_radialstudy_config import STUDY
 def model(kn):
     from plumetools.radialstudy.config import load_study
     from plumetools.radialstudy.physics import source_for_kn
-    return source_for_kn(load_study(STUDY), kn)
+    cfg = load_study(STUDY)
+    # Existing mechanics tests exercise the original fixed-duration configuration.
+    cfg = replace(cfg,domain=replace(cfg.domain,outer_over_D=25,angle_deg=None),
+                  mesh=replace(cfg.mesh,initial_cells=None),controller=replace(cfg.controller,enabled=False))
+    return source_for_kn(cfg, kn)
 
 
 def test_mapping_and_density_scaling_reuse_existing_source():

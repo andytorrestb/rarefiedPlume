@@ -4,9 +4,10 @@ reference_case: ../cai2012-kn-extension/baseCase/case.yaml
 knudsen_numbers: [100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
 domain:
   inlet_over_D: null  # fixed mapped anchor, upstream when continuum exists
-  outer_over_D: 25
-  angle_deg: null     # resolve once from predicted mesh, then freeze
+  outer_over_D: 10
+  angle_deg: 2.5      # half-angle in each coordinate plane
 mesh:
+  initial_cells: 100  # exploratory start; measured failures drive refinement
   predicted_edge_over_mfp: 1.0
   geometric_cap_over_D: 0.05
   max_cells: 1000000
@@ -29,3 +30,10 @@ breakdown:
   definition: general
   threshold: 0.05
 analysis: {}  # optional profile tolerances; no mandatory extra refinement sweep
+controller:
+  enabled: true
+  check_every_windows: 1
+  min_windows: 4
+  stability_relative: 0.05
+  retry_parcels: 25
+  max_retries: 5
