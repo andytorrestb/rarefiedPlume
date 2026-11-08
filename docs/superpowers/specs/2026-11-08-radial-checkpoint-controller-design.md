@@ -1,6 +1,6 @@
 # Radial study: coarse starts and automatic checkpoint corrections
 
-Date: 2026-11-08. Status: draft for owner approval.
+Date: 2026-11-08. Status: approved by the owner, including the proposed defaults.
 
 ## Intent and agreed behavior
 
