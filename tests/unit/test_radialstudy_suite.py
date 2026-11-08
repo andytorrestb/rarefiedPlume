@@ -151,6 +151,21 @@ def test_empty_case_tree_explains_generation(tmp_path):
         run_study(tmp_path/'missing')
 
 
+def test_adaptive_study_dispatches_once_and_skips_superseded_attempts(tmp_path,monkeypatch):
+    from test_radialstudy_adaptive import configured
+    from plumetools.radialstudy.run import run_study
+    p,_,_ = configured(tmp_path,monkeypatch,first_parcels=10)
+    root = p.parent.parent
+    monkeypatch.setattr('plumetools.radialstudy.run.run_case',lambda *a,**k:pytest.fail('legacy run used for adaptive case'))
+    before = tree_hash(root)
+    preview = run_study(root,dry_run=True)
+    assert preview['cases'][0]['n_cells']==3
+    assert tree_hash(root)==before
+    assert run_study(root)['completed']==1
+    result = run_study(root,resume=True)
+    assert result['skipped']==1 and len(result['cases'])==1
+
+
 @pytest.mark.parametrize('script',['Allrun','Allrestart'])
 def test_study_shell_scripts_dry_run_from_another_directory(tmp_path,script):
     if not shutil.which('bash') or os.name!='posix':

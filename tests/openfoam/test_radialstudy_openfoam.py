@@ -132,3 +132,33 @@ def test_native_write_boundary_segments(tmp_path):
     assert (path/'log.dsmcInitialise').read_bytes()==initializer
     assert (path/'system/controlDict').read_bytes()==canonical
     verify_inputs(path,record)
+
+
+def test_native_adaptive_clean_retry_and_persistent_summary(tmp_path):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from plumetools.radialstudy.case import write_case,sizing
+    from plumetools.radialstudy.physics import source_for_kn
+    from plumetools.radialstudy.mesh import initial_mesh
+    from plumetools.radialstudy.run import run_study
+    from _refinement import tree_hash
+    m = model(100)
+    cfg = replace(m.config,domain=replace(m.config.domain,outer_over_D=.82,angle_deg=.5),
+                  mesh=replace(m.config.mesh,initial_cells=3),
+                  controller=replace(m.config.controller,enabled=True,stability_relative=.5))
+    m = source_for_kn(cfg,100)
+    mesh = initial_mesh(m)
+    num,_ = sizing(m,mesh)
+    root = tmp_path/'Cases-adaptive'
+    parent = root/'Kn100/r0_ppc20'
+    write_case(parent,m,mesh,particle_weight=num['particle_weight']*4,delta_t_s=num['delta_t_s']/2)
+    result = run_study(root)
+    assert result['completed']==1
+    state = json.loads((parent.parent/'controller-state.json').read_text())
+    assert state['outcome']=='accepted' and len(state['attempts'])>=2
+    assert not (parent/'0/lagrangian').exists() and not (parent/'constant/polyMesh').exists()
+    log = (root/'adaptive-study.log').read_text()
+    assert 'retry' in log and 'cleanup' in log and 'accepted' in log
+    before = tree_hash(root)
+    assert run_study(root,resume=True)['skipped']==1
+    assert tree_hash(root)==before

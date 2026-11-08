@@ -10,13 +10,16 @@ exit physics to the portable measured-target API. See the
 
 | Module | Purpose | Principal interfaces |
 |---|---|---|
-| `plumetools.radialstudy.config` | strict study controls | `RadialStudyConfig`, `load_study` |
+| `plumetools.radialstudy.config` | strict study controls | `RadialStudyConfig`, `Controller`, `load_study` |
 | `plumetools.radialstudy.physics` | existing source and Bird wrappers | `RadialModel`, `source_for_kn`, `predict_breakdown` |
 | `plumetools.radialstudy.mesh` | actual streamtube geometry and targets | `RadialMesh`, `initial_mesh`, `RadialRefiner`, `render_block_mesh`, `read_radial_mesh` |
 | `plumetools.radialstudy.case` | native dictionaries and sizing | `write_case`, `load_case`, `sizing` |
 | `plumetools.radialstudy.generation` | seven initial cases and revisions | `generate_initial`, `revise_case` |
 | `plumetools.radialstudy.run` | serial lifecycle and sampling provenance | `mesh_case`, `run_case`, `run_study`, `read_windows`, `collect_case` |
-| `plumetools.radialstudy.post` | moments, diagnostics and comparisons | `assess_case`, `analyse_study`, `case_plan`, `post_case`, `project_moments` |
+| `plumetools.radialstudy.segments` | audited native checkpoint stops | `run_segment`, `recover_control`, `verify_segment_inputs` |
+| `plumetools.radialstudy.locking` | process exclusion with crash-safe release | `exclusive_lock` |
+| `plumetools.radialstudy.adaptive` | persistent summary and bounded clean retries | `run_adaptive`, `adaptive_preview`, `clean_attempt` |
+| `plumetools.radialstudy.post` | moments, diagnostics and comparisons | `assess_case`, `checkpoint_assessment`, `analyse_study`, `case_plan`, `post_case`, `project_moments` |
 | `plumetools.radialstudy.report` | machine-readable and plotted outputs | `write_study_report`, `write_case_report` |
 | `plumetools.radialstudy.__main__` | study/case CLI | `main` |
 
@@ -29,6 +32,6 @@ from plumetools.radialstudy.physics import source_for_kn, predict_breakdown
 cfg = load_study(Path("cases/cai2012-radial-resolution/study.yaml"))
 assert len(cfg.knudsen_numbers) == 7
 prediction = predict_breakdown(source_for_kn(cfg, .0001))
-assert prediction["status"] == "CROSSING_IN_DOMAIN"
-assert abs(prediction["r_over_D"] - 14.992) < .002
+assert prediction["status"] == "NOT_REACHED_IN_DOMAIN"
+assert cfg.mesh.initial_cells == 100
 ```

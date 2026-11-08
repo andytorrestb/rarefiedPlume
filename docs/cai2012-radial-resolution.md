@@ -17,17 +17,20 @@ difference comes from the existing gross outward-flux mapping. Inlet drift is
 uniform and axial. This radial surrogate does not reproduce the finite exit disk
 or angular variation of the full plume.
 
-The default outer boundary is `25 D_e`. At general Bird threshold 0.05, predicted
-breakdown is at approximately `2.788 D_e` for Kn 0.001 and `14.992 D_e` for
-Kn 0.0001. Kn 0.01 and larger are already noncontinuum at the anchor. Results
+The default outlet plane is at `10 D_e`. At general Bird threshold 0.05,
+predicted breakdown is near `2.788 D_e` for Kn 0.001. The Kn 0.0001 crossing
+near `14.992 D_e` lies outside this shortened domain and is reported as not
+reached. Kn 0.01 and larger are already noncontinuum at the anchor. Results
 distinguish `CROSSING_IN_DOMAIN`, `ALREADY_NONCONTINUUM_AT_INLET`,
 `NOT_REACHED_IN_DOMAIN`, and `INVALID_STATE`; the outlet is never substituted for
 a missing breakdown crossing. `radial_approx` is an explicitly named alternative.
 A sphere at the axis radius is a surrogate surface, not a validated plume surface.
 
 The square frustum has `y,z = +/- r tan(alpha)`, specular sides and vacuum outlet.
-The narrow angle is selected once from the initial predicted target and capped
-at 0.5 degrees, unless explicitly overridden. Inlet, outlet and numeric angle
+The default half-angle is fixed at 2.5 degrees in each coordinate plane; square
+corners have a larger diagonal angle and lie slightly beyond the outlet's model
+radius. Legacy predicted-target mode can still select the angle automatically.
+Inlet, outlet and numeric angle
 remain fixed across numerical revisions. An inlet override must retain an
 available upstream continuum interval. Cartesian parcel weighting is used.
 Loading a case restores its recorded source coefficients, inlet and physical
@@ -36,8 +39,10 @@ change that case's identity; an edited case record fails its checksum.
 
 ## Predict, measure, correct
 
-The initial mesh targets `min(1.0 lambda_predicted(r), 0.05 D_e)`, including
-slanted and transverse edges. These are provisional model estimates. The final
+The initial mesh has 100 uniform radial layers and one transverse cell in each
+direction. It is exploratory and may miss predicted numerical targets. Set
+`mesh.initial_cells: null` to retain the earlier initial target
+`min(1.0 lambda_predicted(r), 0.05 D_e)`. The final
 goal is **largest actual edge <= 0.8 measured local lambda**, evaluated using
 the same existing VHS convention on measured positive density and temperature.
 The initial prediction is not a measurement of the initially empty domain.
@@ -59,8 +64,24 @@ mesh and weight. Resource gaps are reported; the runner requires an explicit
 
 ## Sampling and evidence
 
+The adaptive controller runs to complete native writes and assesses recent
+windows periodically. After startup and at least four windows, two block means
+must differ by no more than 5% in every cell's density, velocity vector and
+temperature (floors: 1 m^-3, 1 m/s, 1 K). This sizing gate uses the latest windows
+so earlier invalid data can recover. It does not establish statistical
+independence or scientific flow convergence.
+
+Trusted failures prepare a measured correction, append a durable summary, clean
+the superseded attempt's owned outputs, and restart from initial conditions.
+Occupancy corrections aim for 25; acceptance stays at 20. Passing attempts stop
+early and retain results. Five retries, resource limits and a cumulative step
+budget bound work; a non-passing outcome is reported explicitly.
+`Cases-adaptive/adaptive-study.log` survives retries and command restarts.
+Controller state and compact attempt/plan records support recovery. Earlier
+`Cases` runs are preserved. See the tutorial for commands and cleanup behavior.
+
 Transit time integrates `dr/U_model(r)` over the fixed domain. Defaults are two
-transits of startup, six of sampling, six equal blocks and two disjoint native
+transits of startup, at most six of sampling, six equal blocks and two disjoint native
 write windows per block. Startup is rounded up to a write boundary and the
 requested/achieved durations are recorded. Physical durations remain unchanged
 under numerical revisions. The native field model keeps `resetAtOutput on`
@@ -73,7 +94,7 @@ steps, field hashes and mesh/physical identity. Cases have reproducible distinct
 hash-derived seeds. Execution is serial; MPI streams are not exposed.
 
 Post-processing combines density/momentum/energy moments, then derives velocity
-and temperature. It retains native radial layers, six block profiles and block
+and temperature. Legacy full-run analysis retains native radial layers, six block profiles and block
 standard errors. Drift and strong lag-one correlation are flagged; these
 diagnostics do not establish statistical independence. Invalid coverage or
 incomplete/unsettled blocks leaves acceptance unresolved. The older rarefaction

@@ -54,8 +54,14 @@ def main(argv=None):
                                progress=lambda message:print(message,file=sys.stderr,flush=True))
         elif a.command in ('mesh','run'):
             from . import run
-            result = (run.mesh_case(a.case) if a.command == 'mesh' else
-                      run.run_case(a.case,resume=a.resume,allow_budget_exceedance=a.allow_budget_exceedance))
+            from .case import load_case
+            if a.command=='run' and load_case(a.case)[0].config.controller.enabled:
+                from .adaptive import run_adaptive
+                result = run_adaptive(a.case,resume=a.resume,allow_budget_exceedance=a.allow_budget_exceedance,
+                                      progress=lambda message:print(message,file=sys.stderr,flush=True))
+            else:
+                result = (run.mesh_case(a.case) if a.command == 'mesh' else
+                          run.run_case(a.case,resume=a.resume,allow_budget_exceedance=a.allow_budget_exceedance))
         else:
             from . import post
             result = post.analyse(a.case) if a.command == 'analyse' else post.post_case(a.case)

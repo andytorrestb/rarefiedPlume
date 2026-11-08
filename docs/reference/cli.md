@@ -42,8 +42,13 @@ needed|mesh|parcels|timestep] [--delta-t SECONDS] [--dry-run]`; `mesh CASE`,
 `run-all [--cases DIR] [--resume] [--dry-run] [--allow-budget-exceedance]` checks
 the generated tree before running cases sequentially, stopping on the first
 failure. In restart mode it skips completed cases, resumes checkpoints, and
-starts untouched cases. The family-level `Allrun` and `Allrestart` select fresh
-and restart mode respectively; their default tree is the adjacent `Cases`.
+starts untouched cases. Controller-enabled cases run checkpoint segments,
+correct trusted failures with clean retries, and stop early on numerical
+acceptance. The family-level `Allrun` and `Allrestart` select fresh and restart
+mode respectively; their default tree is the adjacent `Cases-adaptive`, also
+the default of `generate_cases.py`. Use `--cases` for existing trees.
+`Cases-adaptive/adaptive-study.log` is the persistent summary. The budget flag
+does not override retry limits or the mesh cell cap.
 The family wrappers call these same entry points. See the
 [radial tutorial](../tutorials/cai2012-radial-resolution.md). Both CLIs return 2
 for invalid input or a failed command; a reported measurement gap is a diagnostic

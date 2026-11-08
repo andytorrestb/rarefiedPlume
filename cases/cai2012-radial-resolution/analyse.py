@@ -10,4 +10,4 @@ for root in Path(__file__).resolve().parents:
 from plumetools.radialstudy.__main__ import main
 
 if __name__ == '__main__':
-    raise SystemExit(main(['analyse',str(Path(__file__).with_name('Cases')),*sys.argv[1:]]))
+    raise SystemExit(main(['analyse',str(Path(__file__).with_name('Cases-adaptive')),*sys.argv[1:]]))

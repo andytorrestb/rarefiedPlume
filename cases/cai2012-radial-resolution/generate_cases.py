@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the prediction-based radial cases; use --dry-run to inspect costs."""
+"""Generate fresh adaptive sizing cases; use --dry-run to inspect costs."""
 from pathlib import Path
 import sys
 
@@ -11,4 +11,4 @@ from plumetools.radialstudy.__main__ import main
 
 if __name__ == '__main__':
     raise SystemExit(main(['generate','--study',str(Path(__file__).with_name('study.yaml')),
-                          '--output',str(Path(__file__).with_name('Cases')),*sys.argv[1:]]))
+                          '--output',str(Path(__file__).with_name('Cases-adaptive')),*sys.argv[1:]]))

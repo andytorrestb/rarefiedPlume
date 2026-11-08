@@ -110,15 +110,38 @@ def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=Fals
         match = re.fullmatch(r'r(\d+)_ppc[0-9pem+]+',case.name)
         if match is None:
             continue
-        _,_,record = load_case(case)
-        verify_inputs(case,record)
+        model,_,record = load_case(case)
+        if model.config.controller.enabled:
+            from .segments import verify_segment_inputs
+            verify_segment_inputs(case,record)
+        else:
+            verify_inputs(case,record)
         queue.append((record['source']['exit']['Kn'],int(match[1]),case,record))
     if not queue:
         raise ValueError(f'no generated cases in {root}; run generate_cases.py first')
     queue.sort(key=lambda item:(-item[0],item[1],item[2].name))
     rows = []
+    adaptive_roots = {}
+    legacy_roots = set()
     for kn,revision,case,record in queue:
         try:
+            model,_,_ = load_case(case)
+            if model.config.controller.enabled:
+                if case.parent in legacy_roots:
+                    raise ValueError('mixed legacy/adaptive attempts in one Kn directory')
+                if case.parent in adaptive_roots:
+                    if adaptive_roots[case.parent]!=record['physical_identity']:
+                        raise ValueError('incompatible physical identities in one adaptive Kn directory')
+                    continue
+                from .adaptive import adaptive_preview
+                row = adaptive_preview(case,resume=resume)
+                row['controller'] = True
+                rows.append(row)
+                adaptive_roots[case.parent] = record['physical_identity']
+                continue
+            if case.parent in adaptive_roots:
+                raise ValueError('mixed legacy/adaptive attempts in one Kn directory')
+            legacy_roots.add(case.parent)
             started = _has_output(case)
             if started and not resume:
                 raise ValueError('existing output/initialization; use Allrestart or --resume')
@@ -147,8 +170,13 @@ def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=Fals
             result['skipped'] += 1
             continue
         try:
-            row.update(run_case(case,resume=row['action']=='resume',
-                                allow_budget_exceedance=allow_budget_exceedance))
+            if row.get('controller'):
+                from .adaptive import run_adaptive
+                row.update(run_adaptive(case,resume=resume,allow_budget_exceedance=allow_budget_exceedance,
+                                        progress=progress))
+            else:
+                row.update(run_case(case,resume=row['action']=='resume',
+                                    allow_budget_exceedance=allow_budget_exceedance))
         except (ValueError,OSError,RuntimeError) as exc:
             raise RuntimeError(f'{case.relative_to(root)}: {exc}') from exc
         result['completed'] += 1

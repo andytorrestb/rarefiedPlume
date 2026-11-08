@@ -1,8 +1,7 @@
-# Run a radial sizing case
+# Run the adaptive radial sizing study
 
-Use WSL/Linux, Python with this checkout on its import path, and the installed
-OpenFOAM v2512 hyStrath port. The owner's setup is an example, not a runner
-dependency:
+Use WSL/Linux with Python and the installed OpenFOAM v2512 hyStrath port. The
+owner's setup below is an example:
 
 ```bash
 source /usr/lib/openfoam/openfoam2512/etc/bashrc
@@ -14,11 +13,11 @@ export PYTHON=/path/to/python-with-numpy-scipy-pyyaml
 "$PYTHON" cases/cai2012-radial-resolution/generate_cases.py --dry-run
 ```
 
-Inspect the editable [study settings](../../cases/cai2012-radial-resolution/study.yaml).
-The report gives seven initial plans, fixed domains, breakdown outcomes, cells,
-weights, predicted populations, steps and budget gaps. At the default settings,
-the densest case exceeds the ten-million-step budget. No resource limit relaxes
-the mesh criterion. Generation writes dictionaries only:
+Inspect [study.yaml](../../cases/cai2012-radial-resolution/study.yaml). Defaults
+use a 2.5-degree half-angle, outlet plane at 10 D_e, and 100 uniform radial cells.
+Generation reports predicted requirements and costs. The initial mesh is
+exploratory and may miss the final requirements. It writes dictionaries only,
+into the fresh `Cases-adaptive` tree:
 
 ```bash
 "$PYTHON" cases/cai2012-radial-resolution/generate_cases.py
@@ -27,67 +26,71 @@ bash ./Allrun --dry-run
 bash ./Allrun
 ```
 
-The study-level `Allrun` builds/verifies meshes and runs every generated case
-one at a time: Kn 100 down to 0.0001, with revisions in increasing order within
-each Kn. It checks all inputs and resource budgets before starting the first
-case. At the default settings, execution requires an explicit
-`--allow-budget-exceedance` after reviewing the densest case's step count.
-It stops at the first failed command, whose case and log appear in the error.
+`Allrun` runs Kn 100 down to 0.0001 serially. It builds/verifies meshes, then
+runs short native segments ending at complete writes. After startup, four
+post-startup windows supply two blocks for a per-cell 5% n/U/T change check.
+Stable measurements allow assessment of edge/MFP, occupancy and timestep
+requirements. Missing or unstable evidence continues the current run.
 
-To continue an interrupted study or include newly generated revisions:
+Passing cases finish early. Trusted failures prepare `r1_ppc20`, then later
+revisions if needed, record a compact summary and correction plan, clean the
+superseded attempt's native outputs, and initialize the corrected case afresh.
+Population corrections aim for 25 parcels/cell; acceptance stays at 20. Five
+retries are allowed by default. Inlet, angle and outlet remain fixed.
+
+Watch the dedicated summary, which is never truncated by cleanup or retries:
+
+```bash
+tail -f Cases-adaptive/adaptive-study.log
+```
+
+Every assessment records Kn, attempt, simulated time, wall time, charged steps,
+cells, particle weight, timestep, minimum mean parcels, maximum edge/MFP,
+failed/unresolved counts, and action/reason. Retry records include old/new
+settings. Each Kn directory has `controller-state.json` for recovery; attempts
+retain dictionaries, settings, mesh metadata and compact assessment/plan records.
+Accepted outputs remain available for postprocessing.
+
+To continue after an interruption:
 
 ```bash
 bash ./Allrestart --dry-run
 bash ./Allrestart
 ```
 
-`Allrestart` skips finished cases, resumes interrupted cases from complete
-checkpoints, and starts untouched cases. Use `--allow-budget-exceedance` again
-when the remaining cases exceed their budgets. It refuses an incomplete latest
-write, a missing checkpoint, or changed run inputs/mesh before launching any
-case; follow the reported recovery instructions. No checkpoint is removed or
-cloud reinitialized. Both scripts accept `--cases /path/to/OTHER_TREE`; their
-default is the `Cases` beside the script. A dry run requires Python only and
-does not write files or launch OpenFOAM.
+`Allrestart` skips verified accepted cases, resumes complete checkpoints on an
+unchanged attempt, recovers interrupted retry transitions, and starts untouched
+cases. It refuses incomplete latest writes or unrelated input/mesh edits with
+recovery instructions. Do not remove controller state or edit running inputs.
+Known temporary endTime overrides are restored exactly; arbitrary edits are
+refused. Solver failures retain their outputs and logs.
 
-For an individual case, from the repository root:
+Cell, parcel, cumulative-step, sampling and retry limits can prevent a pass.
+Both scripts stop on such an outcome or a solver failure. Inspect the summary
+before explicitly using `--allow-budget-exceedance` for step/parcel limits;
+this flag never overrides retries or the mesh cell cap. A wider fixed angle can
+still require many cells at low Kn. Unresolved/budget-limited results never pass.
 
-```bash
-cd cases/cai2012-radial-resolution/Cases/Kn100/r0_ppc20
-bash ./Allmesh
-bash ./Allrun
-bash ./Allpost
-```
-
-Each case starts empty and uses its fixed mapped inlet. `Allrun` refuses existing
-output unless `--resume` is explicit. `bash ./Allrun --resume` preserves the cloud
-and checks the newest complete checkpoint. Incomplete checkpoints produce the
-shared recovery instructions and are not deleted. Changed inputs or mesh refuse
-restart. Neither generation nor refinement launches a solver.
-The study scripts run simulations only; run each case's `Allpost` explicitly
-before assessing measured corrections.
-
-From the repository root, inspect the selected measured corrections:
+Both scripts accept `--cases /path/to/OTHER_TREE`. A dry run needs Python only;
+it creates no files and launches no solver. Earlier `Cases` runs are preserved.
+To continue their legacy fixed-duration workflow:
 
 ```bash
-"$PYTHON" cases/cai2012-radial-resolution/refine_case.py \
-  cases/cai2012-radial-resolution/Cases/Kn100/r0_ppc20 --dry-run
-"$PYTHON" cases/cai2012-radial-resolution/refine_case.py \
-  cases/cai2012-radial-resolution/Cases/Kn100/r0_ppc20
-"$PYTHON" cases/cai2012-radial-resolution/analyse.py
+bash ./Allrestart --cases "$PWD/Cases"
 ```
 
-If necessary this creates the next `rN_ppc20` beside the parent. Run its own
-Allmesh/Allrun/Allpost and reassess. `--correction mesh`, `parcels`, or `timestep`
-isolates a correction; `--delta-t SECONDS` can request a smaller fixed timestep.
-An exported portable `--plan DIRECTORY` is also accepted. A passing assessment
-creates nothing. Missing measurements request evidence instead of guessing.
+To disable automatic control in a fresh study, set `controller.enabled: false`.
+Set `mesh.initial_cells: null` for the earlier predicted-target initial mesh.
+Use a new tree whenever changing geometry or sampling policy. Matching
+generation is idempotent; incompatible existing inputs are refused.
 
-To change physical settings, use a separate study/output tree. For explicit
-higher-occupancy experiments, copy study.yaml, change `targets.min_mean_parcels`,
-and pass `generate_cases.py --study COPY --output NEW_TREE`. Matching generation
-is idempotent and preserves results; incompatible existing inputs are refused.
+An individual generated case's `Allrun` follows its embedded controller policy;
+`bash ./Allrun --resume` continues it. Use the accepted attempt's own `Allpost`
+for plots/diagnostics, and `python analyse.py` at family level for a study report.
+Numerical sizing uses recent stable windows. Reports label this basis and do
+not certify statistical independence or flow convergence; legacy full-run
+analysis retains its original block checks.
 
-Read the [physical and numerical method](../cai2012-radial-resolution.md) and the
+Read the [method](../cai2012-radial-resolution.md) and the
 [portable unrelated-case workflow](../mesh-refinement.md) before interpreting
 streamtube totals as guidance for another geometry.
