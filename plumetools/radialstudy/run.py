@@ -36,7 +36,10 @@ def verify_inputs(case, record):
 
 def _save(path, data):
     tmp = path.with_suffix(path.suffix+'.tmp')
-    tmp.write_text(json.dumps(data,sort_keys=True,indent=2)+'\n')
+    with tmp.open('w',encoding='utf-8',newline='\n') as stream:
+        stream.write(json.dumps(data,sort_keys=True,indent=2)+'\n')
+        stream.flush()
+        os.fsync(stream.fileno())
     tmp.replace(path)
 
 

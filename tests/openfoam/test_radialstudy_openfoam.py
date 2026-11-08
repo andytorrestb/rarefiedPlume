@@ -114,3 +114,21 @@ def test_serial_scripts_run_and_restart_native_cases(tmp_path):
     assert state['segments'][-1]['start_s']==times[0][0]
     assert state['segments'][-1]['status']=='completed'
     assert time_directories(fresh)
+
+
+def test_native_write_boundary_segments(tmp_path):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from test_radialstudy_suite import case
+    from plumetools.radialstudy.segments import run_segment
+    from plumetools.radialstudy.run import verify_inputs
+    path,record = case(tmp_path/'Cases',100)
+    canonical = (path/'system/controlDict').read_bytes()
+    cadence = record['sampling']['cadence_s']
+    first = run_segment(path,cadence)
+    initializer = (path/'log.dsmcInitialise').read_bytes()
+    second = run_segment(path,2*cadence)
+    assert first['end_s']==pytest.approx(second['start_s'],rel=1e-12)
+    assert (path/'log.dsmcInitialise').read_bytes()==initializer
+    assert (path/'system/controlDict').read_bytes()==canonical
+    verify_inputs(path,record)
