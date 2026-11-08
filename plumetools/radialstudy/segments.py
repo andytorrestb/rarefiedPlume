@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from .case import load_case
+from .locking import exclusive_lock
 from .run import (_save,_native_run,_has_output,_restart_state,mesh_case,
                   require_environment,verify_inputs)
 from plumetools.refinement.geometry import file_sha256
@@ -34,7 +35,7 @@ def verify_segment_inputs(case,record):
                                               if k!='system/controlDict'}})
 
 
-def recover_control(case):
+def _recover_control(case):
     case = Path(case)
     manifest = case/'controller-control.json'
     if manifest.exists():
@@ -48,10 +49,22 @@ def recover_control(case):
         manifest.unlink()
 
 
+def recover_control(case):
+    case = Path(case)
+    with exclusive_lock(case/'controller.lock'):
+        _recover_control(case)
+
+
 def run_segment(case,end_s,*,runner=None):
+    case = Path(case)
+    with exclusive_lock(case/'controller.lock'):
+        return _run_segment(case,end_s,runner=runner)
+
+
+def _run_segment(case,end_s,*,runner=None):
     """Initialize once, then continue unchanged native clouds to exact writes."""
     case = Path(case).resolve()
-    recover_control(case)
+    _recover_control(case)
     _,_,record = load_case(case)
     verify_inputs(case,record)
     cadence = record['sampling']['cadence_s']
@@ -96,7 +109,7 @@ def run_segment(case,end_s,*,runner=None):
             runner(['dsmcInitialise+','-case',str(case)],case,case/'log.dsmcInitialise')
         log = case/f'log.dsmcFoam.stage-{len(state["segments"])-1}'
         runner(['dsmcFoam+','-case',str(case)],case,log)
-        recover_control(case)
+        _recover_control(case)
         _,checkpoint = _restart_state(case,record,geometry['mesh_sha256'])
         if not math.isclose(float(checkpoint.resume),end_s,abs_tol=record['numerics']['delta_t_s']/2,rel_tol=0):
             raise ValueError(f'solver did not write the requested complete checkpoint at {end_s:g}; see {log}')
@@ -106,5 +119,5 @@ def run_segment(case,end_s,*,runner=None):
         raise
     finally:
         _save(statepath,state)
-        recover_control(case)
+        _recover_control(case)
     return dict(segment)

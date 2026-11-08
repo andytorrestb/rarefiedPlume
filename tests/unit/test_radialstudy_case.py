@@ -146,3 +146,16 @@ def test_persistent_windows_publish_lock_is_bounded_and_leaves_no_partial_case(t
     assert 1<len(attempts)<=10
     assert not (tmp_path/'case').exists()
     assert not list(tmp_path.glob('*.stage-*'))
+def test_native_measurement_interval_is_physical(tmp_path):
+    import re
+    from plumetools.radialstudy.case import write_case
+    from plumetools.radialstudy.mesh import initial_mesh
+    from test_radialstudy_physics import model
+    m = model(100)
+    path = tmp_path/'timing'
+    record = write_case(path,m,initial_mesh(m))
+    text = (path/'system/controlDict').read_text()
+    assert re.search(r'writeControl\s+(\w+)',text)[1]=='runTime'
+    interval = float(re.search(r'writeInterval\s+([^;]+)',text)[1])
+    assert interval==pytest.approx(record['sampling']['cadence_s'])
+    assert interval/record['numerics']['delta_t_s']==pytest.approx(record['numerics']['steps_per_window'])

@@ -177,9 +177,11 @@ def _sizing_statistics(windows,species,settings):
             'reason':'stable sizing measurements' if stable else 'per-cell block means still changing'},{}
 
 
-def _compute(case, *, incremental=False):
+def _compute(case, *, incremental=None):
     case = Path(case).resolve()
     model,mesh,record = load_case(case)
+    if incremental is None:
+        incremental = model.config.controller.enabled
     windows = read_windows(case)
     if not windows:
         raise ValueError('no measured post-startup windows')
@@ -350,7 +352,15 @@ def comparison_metrics(coarse,fine,species,*,targets=None,trusted=False):
 
 def analyse_study(root,*,kn_values=None):
     root = Path(root)
-    cases = [assess_case(p.parent) for p in sorted(root.rglob('case.json')) if '.stage-' not in str(p)]
+    paths = []
+    for p in sorted(root.rglob('case.json')):
+        if '.stage-' in str(p):
+            continue
+        statepath = p.parent.parent/'controller-state.json'
+        if statepath.exists() and json.loads(statepath.read_text()).get('current')!=p.parent.name:
+            continue
+        paths.append(p.parent)
+    cases = [assess_case(p) for p in paths]
     if kn_values is not None:
         cases = [c for c in cases if c['Kn'] in kn_values]
     comparisons = []

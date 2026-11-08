@@ -2,6 +2,7 @@
 from dataclasses import replace
 import json
 from pathlib import Path
+import re
 
 from plumetools.refinement.plan import verify_sources, write_plan, plan_identity
 from .case import write_case, load_case, sizing
@@ -59,14 +60,16 @@ def revise_case(parent, plan, *, correction='needed', delta_t_s=None, dry_run=Fa
         return {'action':'no_revision_needed','reason':'no selected correction is required'}
     if 'mesh' in changed:
         dt = min(dt,sizing(model,mesh,plan.target_parcels)[0]['delta_t_s'])
-    revision = 1+max(int(p.name.split('_')[0][1:]) for p in parent.parent.glob('r*_ppc*') if (p/'case.json').is_file())
+    revision = 1+max(int(p.name.split('_')[0][1:]) for p in parent.parent.glob('r*_ppc*')
+                    if re.fullmatch(r'r\d+_ppc[0-9pem+]+',p.name) and (p/'case.json').is_file())
     child = parent.parent/f'r{revision}_ppc{label(plan.target_parcels)}'
     row = {'action':'create_revision','path':str(child),'corrections':changed,
            'parent_plan_id':plan_identity(plan),'requires_flow_rerun':True,
            'numerics':sizing(model,mesh,plan.target_parcels,weight,dt)[0]}
     if not dry_run:
+        def finalize(stage):
+            write_plan(plan,stage/'parent-plan')
+            (stage/'revision.json').write_text(json.dumps({k:v for k,v in row.items() if k not in ('path','record')},indent=2)+'\n')
         row['record'] = write_case(child,model,mesh,target_parcels=plan.target_parcels,
-                                   particle_weight=weight,delta_t_s=dt,parent=parent)
-        write_plan(plan,child/'parent-plan')
-        (child/'revision.json').write_text(json.dumps({k:v for k,v in row.items() if k not in ('path','record')},indent=2)+'\n')
+                                   particle_weight=weight,delta_t_s=dt,parent=parent,_finalize=finalize)
     return row

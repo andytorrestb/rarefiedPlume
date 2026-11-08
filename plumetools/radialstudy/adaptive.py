@@ -8,7 +8,6 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
 import time
 import uuid
 
@@ -21,6 +20,7 @@ from .generation import revise_case
 from .post import checkpoint_assessment
 from .run import _save,_has_output,_restart_state
 from .segments import run_segment,recover_control,verify_segment_inputs
+from .locking import exclusive_lock
 
 
 class AdaptiveStop(RuntimeError):
@@ -142,7 +142,10 @@ def adaptive_preview(case,*,resume=False):
 def clean_attempt(case,root,owner_id):
     """Delete only native outputs of a durably superseded owned attempt."""
     case,root = Path(case),Path(root)
+    supplied = case.resolve()
     case = _attempt(root,case.name)
+    if supplied!=case.resolve():
+        raise ValueError('cleanup source must be inside its owned Kn directory')
     marker = case/'controller-owner.json'
     if not marker.is_file() or json.loads(marker.read_text()).get('owner_id')!=owner_id:
         raise ValueError('cleanup requires a controller-owned attempt')
@@ -154,22 +157,56 @@ def clean_attempt(case,root,owner_id):
     child = _attempt(root,pending['child'])
     _,_,record = load_case(child)
     verify_segment_inputs(child,record)
-    targets = [case/'constant/polyMesh',case/'0/C',case/'0/V',case/'0/lagrangian',
-               case/'sampling-windows.json',case/'postProcessing',case/'fieldMeasurements',case/'boundaries']
-    targets += [case/name for _,name in time_directories(case)]
-    targets += [p for p in case.glob('log.*') if p.name in (
+    _output_files(case)  # Validate all output containers, including unknown links.
+    inventory = json.loads((case/'controller-outputs.json').read_text())
+    targets = []
+    for name,expected in inventory.items():
+        path = case/name
+        if path.is_symlink() or not path.resolve().is_relative_to(case.resolve()):
+            raise ValueError(f'cleanup refuses linked or outside output: {path}')
+        if path.exists():
+            if file_sha256(path)!=expected:
+                raise ValueError(f'owned native output changed before cleanup: {path}')
+            targets.append(path)
+    directories = set()
+    for path in targets:
+        directories.update(p for p in path.parents if p!=case and p.is_relative_to(case))
+        path.unlink()
+    for directory in sorted(directories,key=lambda p:len(p.parts),reverse=True):
+        if directory.exists() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def _output_files(case):
+    containers = [case/'constant/polyMesh',case/'0/C',case/'0/V',case/'0/lagrangian',
+                  case/'postProcessing',case/'fieldMeasurements',case/'boundaries']
+    containers += [case/name for _,name in time_directories(case)]
+    containers += [p for p in case.glob('log.*') if p.name in (
         'log.blockMesh','log.checkMesh','log.writeCellCentres','log.writeCellVolumes','log.dsmcInitialise')
         or re.fullmatch(r'log\.dsmcFoam\.stage-\d+',p.name)]
-    # Validate the whole deletion set before deleting anything.
-    for path in targets:
-        if (path.is_symlink() or not path.resolve().is_relative_to(case.resolve())
-                or (path.is_dir() and any(p.is_symlink() for p in path.rglob('*')))):
+    files = []
+    for path in containers:
+        if path.is_symlink() or getattr(path,'is_junction',lambda:False)() or not path.resolve().is_relative_to(case.resolve()):
             raise ValueError(f'cleanup refuses linked or outside output: {path}')
-    for path in targets:
-        if path.is_dir():
-            shutil.rmtree(path)
-        elif path.exists():
-            path.unlink()
+        entries = [path]+list(path.rglob('*')) if path.is_dir() else [path]
+        for entry in entries:
+            if (entry.is_symlink() or getattr(entry,'is_junction',lambda:False)()
+                    or not entry.resolve().is_relative_to(case.resolve())):
+                raise ValueError(f'cleanup refuses linked or outside output: {entry}')
+            if entry.is_file():
+                files.append(entry)
+    return files
+
+
+def _capture_outputs(case,before):
+    path = case/'controller-outputs.json'
+    owned = json.loads(path.read_text()) if path.exists() else {}
+    for output in _output_files(case):
+        name = output.relative_to(case).as_posix()
+        sha = file_sha256(output)
+        if before.get(name)!=sha:
+            owned[name] = sha
+    _save(path,owned)
 
 
 def _stop(root,state,outcome,reason):
@@ -212,6 +249,12 @@ def _finish_retry(root,state):
 def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None):
     """Run/retry one Kn case; the persistent study log survives every retry."""
     case = Path(case).resolve()
+    with exclusive_lock(case.parent.parent/'.adaptive-study.lock'):
+        return _run_adaptive(case,resume=resume,allow_budget_exceedance=allow_budget_exceedance,progress=progress)
+
+
+def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None):
+    case = Path(case).resolve()
     preview = adaptive_preview(case,resume=resume)
     if preview['action']=='skip':
         return {'status':'already_finished','path':preview['path']}
@@ -250,12 +293,10 @@ def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None
                      mesh_failed=assessment.get('mesh_failed_cells'),occupancy_failed=assessment.get('occupancy_failed_cells'),
                      timestep_failed=timestep.get('failed_cells'),unresolved=assessment.get('unresolved_cells'),
                      action=result['status'],reason=result.get('reason',result.get('sampling',{}).get('reason')))
-                state['last_checked_s'] = current
-                _save(_statepath(root),state)
                 if progress:
                     progress(f"Kn{state['Kn']:g} {active.name} t={current:g}: {result['status']}")
                 if result['status']=='criteria_satisfied' and plan is not None:
-                    state.update(outcome='accepted',accepted_time_s=current,
+                    state.update(outcome='accepted',accepted_time_s=current,last_checked_s=current,
                                  certificate={'mesh_sha256':plan.mesh_sha256,'source_files':plan.provenance['source_files']})
                     _save(_statepath(root),state)
                     _log(root,'accepted',Kn=state['Kn'],attempt=active.name,time_s=current)
@@ -284,8 +325,11 @@ def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None
                     state['pending_retry'] = {'parent':active.name,'child':Path(proposed['path']).name,
                         'plan':folder,'delta_t_s':result.get('recommended_delta_t_s'),'phase':'intent',
                         'reason':result['status'],'old_settings':record['numerics']}
+                    state['last_checked_s'] = current
                     _save(_statepath(root),state)
                     continue
+                state['last_checked_s'] = current
+                _save(_statepath(root),state)
             if current>=limit-record['numerics']['delta_t_s']/2:
                 _stop(root,state,'unresolved','maximum sampling limit reached without trusted numerical acceptance')
             end = min(limit,(round(current/cadence)+model.config.controller.check_every_windows)*cadence)
@@ -299,9 +343,11 @@ def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None
             state['outcome'] = 'running'
             _save(_statepath(root),state)
             started = time.monotonic()
+            before = {p.relative_to(active).as_posix():file_sha256(p) for p in _output_files(active)}
             try:
                 run_segment(active,end)
             finally:
+                _capture_outputs(active,before)
                 state['wall_seconds'] += time.monotonic()-started
                 _save(_statepath(root),state)
             _log(root,'checkpoint',Kn=state['Kn'],attempt=active.name,time_s=end,steps=state['total_steps'])

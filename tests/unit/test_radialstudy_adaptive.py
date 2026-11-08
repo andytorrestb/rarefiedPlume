@@ -178,3 +178,80 @@ def test_cumulative_budget_does_not_reset_at_retry(tmp_path,monkeypatch):
         run_adaptive(p)
     state = json.loads((p.parent/'controller-state.json').read_text())
     assert state['current']=='r1_ppc20' and state['total_steps']==budget
+
+
+def test_post_reports_sizing_basis_and_analysis_excludes_cleaned_attempt(tmp_path,monkeypatch):
+    from plumetools.radialstudy.adaptive import run_adaptive
+    from plumetools.radialstudy.post import post_case,analyse_study
+    p,_,_ = configured(tmp_path,monkeypatch,first_parcels=10)
+    result = run_adaptive(p)
+    post = post_case(result['path'],plots=False)
+    assert post['status']=='criteria_satisfied' and post['sampling']['basis']=='adaptive_sizing'
+    analysis = analyse_study(p.parent.parent)
+    assert len(analysis['cases'])==1 and analysis['cases'][0]['path']==result['path']
+
+
+def test_interrupted_child_audit_publication_can_restart(tmp_path,monkeypatch):
+    import plumetools.radialstudy.adaptive as adaptive
+    import plumetools.radialstudy.generation as generation
+    p,_,_ = configured(tmp_path,monkeypatch,first_parcels=10)
+    write = generation.write_plan
+    monkeypatch.setattr(generation,'write_plan',lambda *a:(_ for _ in ()).throw(RuntimeError('publication interrupted')))
+    with pytest.raises(RuntimeError,match='publication interrupted'):
+        adaptive.run_adaptive(p)
+    monkeypatch.setattr(generation,'write_plan',write)
+    assert adaptive.run_adaptive(p,resume=True)['status']=='accepted'
+    assert (p.parent/'r1_ppc20/revision.json').exists()
+    assert not (p.parent/'r2_ppc20').exists()
+
+
+def test_acceptance_decision_is_not_lost_at_last_sampling_checkpoint(tmp_path,monkeypatch):
+    import plumetools.radialstudy.adaptive as adaptive
+    from plumetools.foamio.times import time_directories
+    p,r,_ = configured(tmp_path,monkeypatch)
+    assess = adaptive.checkpoint_assessment
+    def final_only(path):
+        return (assess(path) if time_directories(path)[-1][0]>=r['sampling']['end_s']*.999999 else
+                ({'status':'unresolved','reason':'wait for final fixture checkpoint'},None))
+    monkeypatch.setattr(adaptive,'checkpoint_assessment',final_only)
+    save = adaptive._save
+    interrupted = []
+    def interrupt(path,data):
+        save(path,data)
+        if (Path(path).name=='controller-state.json' and not interrupted and
+                data['last_checked_s']>=r['sampling']['end_s']*.999999 and data['outcome']=='running'
+                and not data.get('pending_retry')):
+            interrupted.append(True)
+            raise RuntimeError('decision interrupted')
+    monkeypatch.setattr(adaptive,'_save',interrupt)
+    try:
+        result = adaptive.run_adaptive(p)
+    except RuntimeError:
+        result = adaptive.run_adaptive(p,resume=True)
+    assert result['status']=='accepted'
+
+
+def test_cleanup_preserves_unknown_files_inside_output_directories(tmp_path,monkeypatch):
+    import plumetools.radialstudy.adaptive as adaptive
+    p,_,_ = configured(tmp_path,monkeypatch,first_parcels=10)
+    clean = adaptive.clean_attempt
+    note = p/'postProcessing/my-unrelated-analysis.txt'
+    def with_note(path,root,owner):
+        note.parent.mkdir(exist_ok=True)
+        note.write_text('my analysis')
+        clean(path,root,owner)
+    monkeypatch.setattr(adaptive,'clean_attempt',with_note)
+    assert adaptive.run_adaptive(p)['status']=='accepted'
+    assert note.read_text()=='my analysis'
+
+
+def test_concurrent_controller_refuses_before_any_mutation(tmp_path,monkeypatch):
+    from plumetools.radialstudy.adaptive import run_adaptive
+    from plumetools.radialstudy.locking import exclusive_lock
+    p,_,calls = configured(tmp_path,monkeypatch)
+    with exclusive_lock(p.parent.parent/'.adaptive-study.lock'):
+        before = tree_hash(p.parent)
+        with pytest.raises(RuntimeError,match='already running|locked'):
+            run_adaptive(p,resume=True)
+        assert not calls and tree_hash(p.parent)==before
+        assert not (p.parent.parent/'adaptive-study.log').exists()

@@ -113,8 +113,8 @@ startTime 0;
 stopAt endTime;
 endTime {sampling['end_s']:.17g};
 deltaT {numerical['delta_t_s']:.17g};
-writeControl timeStep;
-writeInterval {numerical['steps_per_window']};
+writeControl runTime;
+writeInterval {sampling['cadence_s']:.17g};
 purgeWrite 0;
 writeFormat ascii;
 writePrecision 17;
@@ -161,7 +161,7 @@ mfpReferenceTemperature {gas.t_ref_K:.17g}; averagingAcrossManyRuns false; }} }}
 
 
 def write_case(destination, model, mesh, *, target_parcels=20., particle_weight=None,
-               delta_t_s=None, parent=None):
+               delta_t_s=None, parent=None, _finalize=None):
     destination = Path(destination).resolve()
     require_same_physics(mesh.identity, model.identity(angle_rad=mesh.angle_rad))
     num, sampling = sizing(model,mesh,target_parcels,particle_weight,delta_t_s)
@@ -193,6 +193,8 @@ def write_case(destination, model, mesh, *, target_parcels=20., particle_weight=
         changed = [p for p,h in existing['input_files'].items() if not (destination/p).is_file() or file_sha256(destination/p) != h]
         if changed:
             raise ValueError(f'case input conflict: {changed}')
+        if _finalize is not None:
+            _finalize(destination)
         return existing
     destination.parent.mkdir(parents=True,exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=destination.name+'.stage-',dir=destination.parent))
@@ -200,6 +202,8 @@ def write_case(destination, model, mesh, *, target_parcels=20., particle_weight=
         _write_inputs(stage,model,mesh,num,sampling,seed)
         record['input_files'] = {p.relative_to(stage).as_posix():file_sha256(p) for p in sorted(stage.rglob('*')) if p.is_file()}
         _write_text(stage/'case.json',json.dumps(record,sort_keys=True,indent=2)+'\n')
+        if _finalize is not None:
+            _finalize(stage)
         _publish_stage(stage,destination)
     except Exception:
         shutil.rmtree(stage)
