@@ -15,7 +15,7 @@ from plumetools.foamio.checkpoints import plan_restart
 from plumetools.foamio.times import time_directories
 from plumetools.refinement.geometry import file_sha256,mesh_fingerprint
 from plumetools.refinement.plan import read_plan,write_plan,plan_identity,json_safe
-from .case import load_case
+from .case import load_case,study_identity
 from .generation import revise_case
 from .post import checkpoint_assessment
 from .run import _save,_has_output,_restart_state
@@ -62,7 +62,8 @@ def _owner(case,state):
 
 def _read_state(root,record):
     state = json.loads(_statepath(root).read_text())
-    if state.get('schema_version')!=1 or state.get('physical_identity')!=record['physical_identity']:
+    identity = state.get('study_identity',state.get('physical_identity'))
+    if state.get('schema_version')!=1 or identity!=study_identity(record):
         raise ValueError('controller physical identity changed; generate a fresh study tree')
     for name,item in state['attempts'].items():
         path = _attempt(root,name)
@@ -70,6 +71,8 @@ def _read_state(root,record):
         verify_segment_inputs(path,r)
         if r['case_id']!=item['case_id']:
             raise ValueError('controller attempt inputs changed')
+        if study_identity(r)!=identity:
+            raise ValueError('controller attempt changes the fixed study identity')
         marker = path/'controller-owner.json'
         if not marker.is_file() or json.loads(marker.read_text())!={'owner_id':state['owner_id'],'case_id':r['case_id']}:
             raise ValueError('missing or changed controller ownership record')
@@ -230,7 +233,7 @@ def _finish_retry(root,state):
     _,_,record = load_case(child)
     revision = json.loads((child/'revision.json').read_text())
     if (record['parent']['case_id']!=state['attempts'][parent.name]['case_id']
-            or record['physical_identity']!=state['physical_identity']
+            or study_identity(record)!=state.get('study_identity',state['physical_identity'])
             or revision['parent_plan_id']!=plan_identity(plan)):
         raise ValueError('prepared retry does not match the committed correction')
     verify_segment_inputs(child,record)
@@ -244,6 +247,8 @@ def _finish_retry(root,state):
     _log(root,'cleanup',Kn=state['Kn'],attempt=parent.name)
     state['attempts'][parent.name]['status'] = 'superseded'
     state.update(current=child.name,pending_retry=None,last_checked_s=0.,outcome='running')
+    if 'local_study_identity' in record:
+        state['physical_identity'] = record['physical_identity']
     _save(_statepath(root),state)
 
 
@@ -259,6 +264,7 @@ def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None
 
 
 def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None):
+    controller_started = time.monotonic()
     case = Path(case).resolve()
     preview = adaptive_preview(case,resume=resume)
     if preview['action']=='skip':
@@ -270,11 +276,17 @@ def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=Non
     else:
         state = {'schema_version':1,'owner_id':uuid.uuid4().hex,'Kn':preview['Kn'],
                  'physical_identity':record['physical_identity'],'current':case.name,
+                 'study_identity':study_identity(record),
                  'attempts':{case.name:{'case_id':record['case_id'],'status':'active'}},
                  'total_steps':0,'wall_seconds':0.,'last_checked_s':0.,'outcome':'running','pending_retry':None}
         _owner(case,state)
         _save(_statepath(root),state)
         _log(root,'start',Kn=state['Kn'],attempt=case.name,numerics=record['numerics'])
+    base_wall = state['wall_seconds']
+    def snapshot_time():
+        state['wall_seconds'] = base_wall+time.monotonic()-controller_started
+        state['controller_io_wall_seconds'] = max(0.,state['wall_seconds']-
+            state.get('solver_wall_seconds',0.)-state.get('assessment_wall_seconds',0.))
     try:
         while True:
             if state.get('pending_retry'):
@@ -286,26 +298,44 @@ def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=Non
             current = _checkpoint(active,record)
             cadence,limit = record['sampling']['cadence_s'],record['sampling']['end_s']
             if current>record['sampling']['start_s']+cadence*1e-8 and current>state['last_checked_s']+cadence*1e-8:
+                assessment_started = time.monotonic()
                 result,plan = checkpoint_assessment(active)
+                state['assessment_wall_seconds'] = state.get('assessment_wall_seconds',0.)+time.monotonic()-assessment_started
+                snapshot_time()
                 assessment,timestep = result.get('assessment',{}),result.get('timestep',{})
                 summary = {'status':result['status'],'sampling':result.get('sampling',{}),
                            'assessment':assessment,'timestep':timestep,'reason':result.get('reason')}
                 _save(active/'controller-assessment.json',json_safe(summary))
                 _log(root,'assessment',Kn=state['Kn'],attempt=active.name,time_s=current,
+                     inlet_over_D=model.r_in/model.source.diameter_m,
+                     outer_over_D=model.r_out/model.source.diameter_m,half_angle_deg=model.config.domain.angle_deg,
+                     sample_duration_s=record['sampling']['end_s'],
+                     solver_wall_seconds=state.get('solver_wall_seconds',0.),
+                     assessment_wall_seconds=state.get('assessment_wall_seconds',0.),
+                     controller_io_wall_seconds=state['controller_io_wall_seconds'],
                      wall_seconds=state['wall_seconds'],steps=state['total_steps'],cells=record['numerics']['n_cells'],
                      particle_weight=record['numerics']['particle_weight'],delta_t_s=record['numerics']['delta_t_s'],
                      min_mean_parcels=assessment.get('min_mean_parcels'),max_edge_over_mfp=assessment.get('max_edge_over_mfp'),
+                     measured_total_mean_parcels=result.get('measured_total_mean_parcels'),
                      mesh_failed=assessment.get('mesh_failed_cells'),occupancy_failed=assessment.get('occupancy_failed_cells'),
                      timestep_failed=timestep.get('failed_cells'),unresolved=assessment.get('unresolved_cells'),
                      action=result['status'],reason=result.get('reason',result.get('sampling',{}).get('reason')))
                 if progress:
                     progress(f"Kn{state['Kn']:g} {active.name} t={current:g}: {result['status']}")
+                observed_parcels = result.get('measured_total_mean_parcels')
+                if (model.config.local.enabled and not allow_budget_exceedance and observed_parcels is not None
+                        and observed_parcels>model.config.run.max_predicted_parcels):
+                    _stop(root,state,'budget_limited',f'measured parcel budget exceeded: {observed_parcels:g} > {model.config.run.max_predicted_parcels}')
                 if result['status']=='criteria_satisfied' and plan is not None:
+                    snapshot_time()
                     state.update(outcome='accepted',accepted_time_s=current,last_checked_s=current,
                                  certificate={'mesh_sha256':plan.mesh_sha256,'source_files':plan.provenance['source_files']})
                     _save(_statepath(root),state)
                     _log(root,'accepted',Kn=state['Kn'],attempt=active.name,time_s=current)
-                    return {'status':'accepted','path':str(active),'retries':len(state['attempts'])-1,'steps':state['total_steps']}
+                    return {'status':'accepted','path':str(active),'retries':len(state['attempts'])-1,'steps':state['total_steps'],
+                            'wall_seconds':state['wall_seconds'],'solver_wall_seconds':state.get('solver_wall_seconds',0.),
+                            'assessment_wall_seconds':state.get('assessment_wall_seconds',0.),
+                            'controller_io_wall_seconds':state['controller_io_wall_seconds']}
                 if plan is not None:
                     if len(state['attempts'])-1>=model.config.controller.max_retries:
                         _stop(root,state,'budget_limited','automatic retry limit reached')
@@ -323,7 +353,8 @@ def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=Non
                     num = proposed['numerics']
                     if not allow_budget_exceedance and num['predicted_total_parcels']>model.config.run.max_predicted_parcels:
                         _stop(root,state,'budget_limited','corrected parcel budget exceeded')
-                    if not allow_budget_exceedance and state['total_steps']+round(cadence/num['delta_t_s'])>model.config.time.max_steps:
+                    child_cadence = proposed.get('sampling',record['sampling'])['cadence_s']
+                    if not allow_budget_exceedance and state['total_steps']+round(child_cadence/num['delta_t_s'])>model.config.time.max_steps:
                         _stop(root,state,'budget_limited','cumulative step budget cannot start corrected attempt')
                     folder = f'controller-plans/check-{round(current/cadence)}'
                     write_plan(plan,active/folder)
@@ -347,18 +378,21 @@ def _run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=Non
             state['total_steps'] += steps  # Conservative charge survives partial writes/process loss.
             state['outcome'] = 'running'
             _save(_statepath(root),state)
-            started = time.monotonic()
             before = {p.relative_to(active).as_posix():file_sha256(p) for p in _output_files(active)}
             try:
-                run_segment(active,end)
+                segment = run_segment(active,end)
+                state['solver_wall_seconds'] = state.get('solver_wall_seconds',0.)+(segment or {}).get('solver_wall_seconds',0.)
             finally:
                 _capture_outputs(active,before)
-                state['wall_seconds'] += time.monotonic()-started
+                snapshot_time()
                 _save(_statepath(root),state)
             _log(root,'checkpoint',Kn=state['Kn'],attempt=active.name,time_s=end,steps=state['total_steps'])
     except AdaptiveStop:
+        snapshot_time()
+        _save(_statepath(root),state)
         raise
     except BaseException as exc:
+        snapshot_time()
         state['outcome'] = 'failed'
         _save(_statepath(root),state)
         _log(root,'solver_failure',Kn=state['Kn'],attempt=state['current'],reason=str(exc))

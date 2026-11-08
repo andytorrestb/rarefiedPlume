@@ -192,3 +192,68 @@ def test_native_parallel_adaptive_cases_and_restart(tmp_path):
     before = tree_hash(root)
     assert run_study(root,resume=True,jobs=2)['skipped']==2
     assert tree_hash(root)==before
+
+
+@pytest.mark.parametrize('kn',[.01,.0001])
+def test_native_fixed_count_local_pilot(tmp_path,kn):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from plumetools.radialstudy.config import load_study
+    from plumetools.radialstudy.generation import generate_initial
+    from plumetools.radialstudy.run import run_study
+    from plumetools.radialstudy.case import load_case
+    root = tmp_path/'Cases-local'
+    cfg = load_study(Path(__file__).resolve().parents[2]/'cases/cai2012-radial-resolution/study-local.yaml')
+    generate_initial(cfg,root,kn_values=[kn])
+    try:
+        result = run_study(root)
+    except RuntimeError as exc:
+        # This pilot checks bounded cost and honest outcomes, not proof that a
+        # noisy100-cell field has converged within the default sampling interval.
+        assert 'sampling limit' in str(exc)
+        state = json.loads(next(root.glob('Kn*/controller-state.json')).read_text())
+        assert state['outcome']=='unresolved' and 'certificate' not in state
+        path = next(root.glob('Kn*'))/state['current']
+        result = None
+    else:
+        assert result['completed']==1
+        path = result['cases'][0]['path']
+    _,mesh,record = load_case(path)
+    assert mesh.n_cells==100 and record['numerics']['predicted_total_parcels']<=5000
+    for path in root.glob('Kn*/r*/case.json'):
+        assert json.loads(path.read_text())['numerics']['n_cells']==100
+    state = json.loads(next(root.glob('Kn*/controller-state.json')).read_text())
+    assert state['solver_wall_seconds']>0 and state['controller_io_wall_seconds']>=0
+    assert state['total_steps']<=50000
+    if result is not None:
+        assert run_study(root,resume=True)['skipped']==1
+
+
+def test_native_local_domain_retry_retains_100_cells(tmp_path):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from plumetools.radialstudy.config import load_study
+    from plumetools.radialstudy.local import initial_local_model,_patch
+    from plumetools.radialstudy.mesh import initial_mesh
+    from plumetools.radialstudy.case import write_case,sizing,load_case
+    from plumetools.radialstudy.run import run_study
+    cfg = load_study(Path(__file__).resolve().parents[2]/'cases/cai2012-radial-resolution/study-local.yaml')
+    cfg = replace(cfg,controller=replace(cfg.controller,stability_relative=.5))
+    m = initial_local_model(cfg,.01)
+    # Deliberately enlarge only the test patch's transverse edges to exercise a
+    # measured domain correction. Default generation already fits predicted MFP.
+    m = _patch(m,m.r_out-m.r_in,np.radians(m.config.domain.angle_deg*4))
+    mesh = initial_mesh(m)
+    num,_ = sizing(m,mesh)
+    root = tmp_path/'Cases-local'
+    parent = root/'Kn0p01/r0_ppc20'
+    old = write_case(parent,m,mesh,delta_t_s=num['delta_t_s']/2)
+    result = run_study(root)
+    assert result['completed']==1
+    child,newmesh,new = load_case(result['cases'][0]['path'])
+    assert result['cases'][0]['retries']>=1 and newmesh.n_cells==100
+    assert child.config.domain.angle_deg<m.config.domain.angle_deg
+    assert new['sampling']['end_s']<=old['sampling']['end_s']*(1+1e-12)
+    assert new['inlet']==old['inlet']
+    assert not (parent/'constant/polyMesh').exists()
+    assert run_study(root,resume=True)['skipped']==1

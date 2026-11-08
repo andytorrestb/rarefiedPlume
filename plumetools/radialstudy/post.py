@@ -290,8 +290,10 @@ def _compute(case, *, incremental=None):
               'diameter_m':model.source.diameter_m,'status':status,
               'physical_identity':record['physical_identity'],'sampling_identity':record['sampling'],
               'numerics':record['numerics'],'sampling':sampling,'assessment':assessed.summary,
+              'measured_total_mean_parcels':float(np.sum(raw['parcels'])),
               'timestep':time_result,'recommended_delta_t_s':recommended,
               'predicted_breakdown':record['breakdown'],'measured_breakdown':measured_b,
+              'reference_breakdown':record.get('reference_breakdown'),
               'native_cross_checks':{k:raw[k] for k in ('mfp','mct') if k in raw},
               'diagnostic_strict_count_valid_cells':int(np.count_nonzero(ctx['valid'])),
               'comparison_required':False,'profile':profile_dict,'plan_id':plan_identity(plan)}
@@ -310,6 +312,7 @@ def assess_case(case):
                 'status':'missing_measurements' if missing else 'unresolved','reason':str(exc),
                 'numerics':r['numerics'],'physical_identity':r['physical_identity'],
                 'sampling_identity':r['sampling'],'predicted_breakdown':r['breakdown'],
+                'reference_breakdown':r.get('reference_breakdown'),
                 'comparison_required':False}
 
 

@@ -35,6 +35,9 @@ def generate_initial(config, output, *, kn_values=None, dry_run=False):
         row = {'path':str(p), 'Kn':kn,'numerics':num, 'sampling':sampling,
                'breakdown':predict_breakdown(model,**vars(config.breakdown)),
                'physical_identity':mesh.identity}
+        if config.local.enabled:
+            from .local import reference_breakdown
+            row['reference_breakdown'] = reference_breakdown(model)
         if not dry_run:
             row['record'] = write_case(p,model,mesh,target_parcels=config.targets.min_mean_parcels,particle_weight=weight)
         rows.append(row)
@@ -49,8 +52,11 @@ def revise_case(parent, plan, *, correction='needed', delta_t_s=None, dry_run=Fa
     if plan.action == 'unresolved':
         raise ValueError('measurements are unresolved; obtain adequate sampling before revision')
     parent = Path(parent).resolve()
-    verify_sources(parent,plan)
     model, mesh, old = load_case(parent)
+    if model.config.local.enabled:
+        from .local import revise_local_case
+        return revise_local_case(parent,plan,correction=correction,delta_t_s=delta_t_s,dry_run=dry_run)
+    verify_sources(parent,plan)
     weight, dt = old['numerics']['particle_weight'], old['numerics']['delta_t_s']
     changed = []
     if correction in ('needed','mesh') and plan.action == 'needs_mesh':
@@ -73,7 +79,8 @@ def revise_case(parent, plan, *, correction='needed', delta_t_s=None, dry_run=Fa
     child = parent.parent/f'r{revision}_ppc{label(plan.target_parcels)}'
     row = {'action':'create_revision','path':str(child),'corrections':changed,
            'parent_plan_id':plan_identity(plan),'requires_flow_rerun':True,
-           'numerics':sizing(model,mesh,plan.target_parcels,weight,dt)[0]}
+           'numerics':sizing(model,mesh,plan.target_parcels,weight,dt)[0],
+           'sampling':sizing(model,mesh,plan.target_parcels,weight,dt)[1]}
     if not dry_run:
         def finalize(stage):
             write_plan(plan,stage/'parent-plan')

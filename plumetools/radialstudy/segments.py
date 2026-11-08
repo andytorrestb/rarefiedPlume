@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import re
+import time
 
 from .case import load_case
 from .locking import exclusive_lock
@@ -108,7 +109,11 @@ def _run_segment(case,end_s,*,runner=None):
         if fresh:
             runner(['dsmcInitialise+','-case',str(case)],case,case/'log.dsmcInitialise')
         log = case/f'log.dsmcFoam.stage-{len(state["segments"])-1}'
-        runner(['dsmcFoam+','-case',str(case)],case,log)
+        solver_started = time.monotonic()
+        try:
+            runner(['dsmcFoam+','-case',str(case)],case,log)
+        finally:
+            segment['solver_wall_seconds'] = time.monotonic()-solver_started
         _recover_control(case)
         _,checkpoint = _restart_state(case,record,geometry['mesh_sha256'])
         if not math.isclose(float(checkpoint.resume),end_s,abs_tol=record['numerics']['delta_t_s']/2,rel_tol=0):

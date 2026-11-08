@@ -10,7 +10,7 @@ from _refinement import tree_hash,write_field
 from test_radialstudy_physics import model
 
 
-def configured(tmp_path,monkeypatch,*,first_parcels=40,max_retries=5,max_steps=10000000):
+def configured(tmp_path,monkeypatch,*,first_parcels=40,max_retries=5,max_steps=10000000,local=False,max_parcels=10000000):
     from plumetools.radialstudy.case import write_case,load_case
     from plumetools.radialstudy.mesh import initial_mesh,read_radial_mesh
     from plumetools.radialstudy.physics import source_for_kn
@@ -21,9 +21,16 @@ def configured(tmp_path,monkeypatch,*,first_parcels=40,max_retries=5,max_steps=1
     cfg = replace(m.config,domain=replace(m.config.domain,outer_over_D=.82,angle_deg=.5),
                   mesh=replace(m.config.mesh,initial_cells=3),
                   controller=replace(m.config.controller,enabled=True,max_retries=max_retries),
+                  run=replace(m.config.run,max_predicted_parcels=max_parcels),
                   time=replace(m.config.time,max_steps=max_steps))
-    m = source_for_kn(cfg,100)
-    p = tmp_path/'Cases'/'Kn100'/'r0_ppc20'
+    if local:
+        from plumetools.radialstudy.local import initial_local_model
+        cfg = replace(cfg,local=replace(cfg.local,enabled=True),mesh=replace(cfg.mesh,initial_cells=100),
+                      domain=replace(cfg.domain,outer_over_D=10,angle_deg=2.5))
+        m = initial_local_model(cfg,.01)
+    else:
+        m = source_for_kn(cfg,100)
+    p = tmp_path/'Cases'/('Kn0p01' if local else 'Kn100')/'r0_ppc20'
     r = write_case(p,m,initial_mesh(m))
     geometry = lambda path:read_radial_mesh(path).geometry
     def mesh(path,**kwargs):
@@ -51,7 +58,8 @@ def configured(tmp_path,monkeypatch,*,first_parcels=40,max_retries=5,max_steps=1
         (folder/'uniform/time').write_bytes(END_DIVIDER)
         (folder/'lagrangian/dsmc').mkdir(parents=True,exist_ok=True)
         (folder/'lagrangian/dsmc/positions').write_bytes(END_DIVIDER)
-        values = {'rhoN_Ar':(mesh.density_estimate,[0,-3,0,0,0,0,0]),
+        scale = 2 if local and path.name=='r0_ppc20' else 1
+        values = {'rhoN_Ar':(mesh.density_estimate*scale,[0,-3,0,0,0,0,0]),
                   'Ttra_Ar':(np.full(mesh.n_cells,300.),[0,0,0,1,0,0,0]),
                   'U_Ar':(np.tile([500.,0,0],(mesh.n_cells,1)),[0,1,-1,0,0,0,0]),
                   'dsmcNMean_Ar':(np.full(mesh.n_cells,first_parcels if path.name=='r0_ppc20' else 40),[0]*7)}

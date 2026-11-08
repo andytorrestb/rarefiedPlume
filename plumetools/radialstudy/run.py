@@ -14,7 +14,7 @@ from plumetools.foamio.checkpoints import plan_restart
 from plumetools.foamio.times import time_directories
 from plumetools.refinement.geometry import file_sha256,mesh_fingerprint,read_geometry
 from plumetools.refinement.openfoam import _run,_require_mesh_ok
-from .case import load_case
+from .case import load_case,study_identity
 
 
 def require_environment():
@@ -132,14 +132,14 @@ def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=Fals
                 if case.parent in legacy_roots:
                     raise ValueError('mixed legacy/adaptive attempts in one Kn directory')
                 if case.parent in adaptive_roots:
-                    if adaptive_roots[case.parent]!=record['physical_identity']:
+                    if adaptive_roots[case.parent]!=study_identity(record):
                         raise ValueError('incompatible physical identities in one adaptive Kn directory')
                     continue
                 from .adaptive import adaptive_preview
                 row = adaptive_preview(case,resume=resume)
                 row['controller'] = True
                 rows.append(row)
-                adaptive_roots[case.parent] = record['physical_identity']
+                adaptive_roots[case.parent] = study_identity(record)
                 continue
             if case.parent in adaptive_roots:
                 raise ValueError('mixed legacy/adaptive attempts in one Kn directory')

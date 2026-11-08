@@ -1,6 +1,9 @@
 """Small fixed-count patches; domain changes are explicit local experiments."""
 from dataclasses import replace
+import json
 import math
+from pathlib import Path
+import re
 
 import numpy as np
 
@@ -34,8 +37,8 @@ def contract_local_model(model,mesh,target):
     if not math.isfinite(target) or target<=0:
         raise ValueError('local contraction requires a finite positive measured target')
     target *= .95  # Small geometric margin, never a further resolution sweep.
-    angle = min(mesh.angle_rad,math.atan(target/(2*model.r_out)))
-    span = min(model.r_out-model.r_in,100*target/math.sqrt(1+2*math.tan(angle)**2))
+    span = min(model.r_out-model.r_in,100*target/math.sqrt(1+2*math.tan(mesh.angle_rad)**2))
+    angle = min(mesh.angle_rad,math.atan(target/(2*(model.r_in+span))))
     child = _patch(model,span,angle)
     result = initial_mesh(child)
     if result.n_cells!=100 or result.transverse!=1 or np.max(result.geometry.max_edge_m)>target*(1+1e-10):
@@ -66,3 +69,49 @@ def reference_breakdown(model):
     return {**result,'scope':'analytical reference, not measured by the local patch',
             'reference_outer_over_D':model.config.local.reference_outer_over_D,
             'outside_patch':bool(result.get('r_m',0)>model.r_out) if 'r_m' in result else None}
+
+
+def revise_local_case(parent,plan,*,correction='needed',delta_t_s=None,dry_run=False):
+    from .case import load_case,write_case,sizing
+    from plumetools.refinement.plan import verify_sources,write_plan,plan_identity
+    parent = Path(parent).resolve()
+    verify_sources(parent,plan)
+    model,mesh,old = load_case(parent)
+    if not model.config.local.enabled or plan.action=='unresolved':
+        raise ValueError('local contraction requires an enabled local case and trusted measurements')
+    weight,dt = old['numerics']['particle_weight'],old['numerics']['delta_t_s']
+    changed = []
+    if correction in ('needed','mesh') and plan.action=='needs_mesh':
+        if (len(plan.target_edge_m)!=100 or not np.all(np.isfinite(plan.target_edge_m)&(plan.target_edge_m>0))
+                or not np.all(np.isfinite(plan.density_estimate)&(plan.density_estimate>0))):
+            raise ValueError('local contraction requires complete measured coverage')
+        old_centres = mesh.geometry.centres_m[:,0]
+        model,mesh = contract_local_model(model,mesh,float(np.min(plan.target_edge_m)))
+        density = np.interp(mesh.geometry.centres_m[:,0],old_centres,plan.density_estimate)
+        mesh = replace(mesh,layer_density=density,density_kind='parent-measured')
+        weight = initial_weight(model,mesh,plan.target_parcels)
+        dt = min(dt,sizing(model,mesh,plan.target_parcels,weight)[0]['delta_t_s'])
+        changed.append('domain')
+    if correction in ('needed','parcels') and plan.recommended_weight is not None and plan.recommended_weight<weight:
+        weight = plan.recommended_weight
+        changed.append('parcels')
+    if correction in ('needed','timestep') and delta_t_s is not None and delta_t_s<dt:
+        dt = delta_t_s
+        changed.append('timestep')
+    if not changed:
+        return {'action':'no_revision_needed','reason':'no selected local correction is required'}
+    revisions = [int(p.name.split('_')[0][1:]) for p in parent.parent.glob('r*_ppc*')
+                 if re.fullmatch(r'r\d+_ppc[0-9pem+]+',p.name) and (p/'case.json').is_file()]
+    from .generation import label
+    child = parent.parent/f'r{max(revisions)+1}_ppc{label(plan.target_parcels)}'
+    num,sampling = sizing(model,mesh,plan.target_parcels,weight,dt)
+    row = {'action':'create_revision','path':str(child),'corrections':changed,'numerics':num,
+           'sampling':sampling,'physical_identity':mesh.identity,
+           'parent_plan_id':plan_identity(plan),'requires_flow_rerun':True}
+    if not dry_run:
+        def finalize(stage):
+            write_plan(plan,stage/'parent-plan')
+            (stage/'revision.json').write_text(json.dumps({k:v for k,v in row.items() if k!='record'},indent=2)+'\n')
+        row['record'] = write_case(child,model,mesh,target_parcels=plan.target_parcels,
+                                   particle_weight=weight,delta_t_s=dt,parent=parent,_finalize=finalize)
+    return row
