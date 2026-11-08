@@ -136,6 +136,7 @@ cases/cai2012-kn-extension/baseCase/results/
 cases/cai2012-kn-extension/baseCase/case-summary.json
 cases/cai2012-kn-extension/Cases/
 cases/cai2012-radial-resolution/Cases-adaptive/
+cases/cai2012-radial-resolution/Cases-local/
 cases/cai2012-kn-extension/Cases_full_suite/
 cases/cai2012-kn-extension/manifest-full-suite.yaml
 cases/cai2012-kn-extension/manifest-full-suite.yaml.tmp

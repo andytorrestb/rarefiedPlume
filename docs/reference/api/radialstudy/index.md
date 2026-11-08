@@ -10,11 +10,12 @@ exit physics to the portable measured-target API. See the
 
 | Module | Purpose | Principal interfaces |
 |---|---|---|
-| `plumetools.radialstudy.config` | strict study controls | `RadialStudyConfig`, `Controller`, `load_study` |
+| `plumetools.radialstudy.config` | strict study controls | `RadialStudyConfig`, `Controller`, `Local`, `load_study` |
 | `plumetools.radialstudy.physics` | existing source and Bird wrappers | `RadialModel`, `source_for_kn`, `predict_breakdown` |
 | `plumetools.radialstudy.mesh` | actual streamtube geometry and targets | `RadialMesh`, `initial_mesh`, `RadialRefiner`, `render_block_mesh`, `read_radial_mesh` |
 | `plumetools.radialstudy.case` | native dictionaries and sizing | `write_case`, `load_case`, `sizing` |
 | `plumetools.radialstudy.generation` | seven initial cases and revisions | `generate_initial`, `revise_case` |
+| `plumetools.radialstudy.local` | fixed-count local geometry and attempts | `initial_local_model`, `contract_local_model`, `revise_local_case`, `reference_breakdown` |
 | `plumetools.radialstudy.run` | serial lifecycle and sampling provenance | `mesh_case`, `run_case`, `run_study`, `read_windows`, `collect_case` |
 | `plumetools.radialstudy.segments` | audited native checkpoint stops | `run_segment`, `recover_control`, `verify_segment_inputs` |
 | `plumetools.radialstudy.locking` | process exclusion with crash-safe release | `exclusive_lock` |

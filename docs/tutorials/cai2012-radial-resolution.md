@@ -1,5 +1,31 @@
 # Run the adaptive radial sizing study
 
+For the fixed-count alternative, generate separate local patches:
+
+```bash
+python cases/cai2012-radial-resolution/generate_local_cases.py --dry-run
+python cases/cai2012-radial-resolution/generate_local_cases.py
+cd cases/cai2012-radial-resolution
+bash Allrun --cases "$PWD/Cases-local" --jobs 4
+bash Allrestart --cases "$PWD/Cases-local" --jobs 4
+tail -f Cases-local/adaptive-study.log
+```
+
+The local settings in `study-local.yaml` keep100 radial cells with1x1 transverse
+cells. Initial radial span is at most1D_e; both length and angle are reduced
+from predicted MFP, then corrected from measurements. The fixed inlet and exit
+reference stay unchanged, while each new domain gets new physical sampling
+durations and fresh initialization. Local retries do not add cells. Population
+corrections aim for25/cell, accept>=20, and have a5000 predicted-parcel budget.
+The cumulative step budget is50000 and the retry limit5. There is no wall-clock
+cutoff. The physical sampling interval remains finite: an unsettled field at its
+end reports unresolved. Increase sampling only in a fresh settings/output tree.
+
+The persistent log includes dimensions, sampling duration and solver/assessment/
+controller-I-O wall times. `reference_breakdown` in case/report JSON is an
+analytical prediction through25D_e, explicitly separate from the local patch.
+The existing Cases-adaptive workflow below remains available unchanged.
+
 Use WSL/Linux with Python and the installed OpenFOAM v2512 hyStrath port. The
 owner's setup below is an example:
 

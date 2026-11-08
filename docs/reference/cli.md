@@ -50,6 +50,12 @@ mode respectively; their default tree is the adjacent `Cases-adaptive`, also
 the default of `generate_cases.py`. Use `--cases` for existing trees.
 The shell wrappers choose up to7 jobs automatically, reserving one available
 CPU when possible; `--jobs N` or `JOBS=N` overrides this.
+`python cases/cai2012-radial-resolution/generate_local_cases.py [--dry-run]`
+uses separate `study-local.yaml` and writes `Cases-local`. Run it with
+`Allrun --cases "$PWD/Cases-local" --jobs N`, and use the same selection for
+Allrestart. Local mode keeps100 cells and contracts the domain; no wall-time
+cutoff is configured. Numerical step/population/retry and physical sampling
+limits remain explicit in that settings file.
 `Cases-adaptive/adaptive-study.log` is the persistent summary. The budget flag
 does not override retry limits or the mesh cell cap.
 The family wrappers call these same entry points. See the

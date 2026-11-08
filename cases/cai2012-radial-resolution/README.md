@@ -1,5 +1,29 @@
 # Cai exit radial resolution
 
+For a quick fixed-count sizing study, use **Cases-local**. Every attempt retains
+100 cells; the radial span and angle contract instead of adding cells. Current
+Cases-adaptive runs and results are independent and remain untouched.
+
+```bash
+python generate_local_cases.py --dry-run
+python generate_local_cases.py
+bash Allrun --cases "$PWD/Cases-local" --jobs 4
+# Continue later:
+bash Allrestart --cases "$PWD/Cases-local" --jobs 4
+tail -f Cases-local/adaptive-study.log
+```
+
+Local defaults cap initial radial span at1 D_e and half-angle at2.5degrees;
+each Kn is sized from its predicted MFP. Accepted requirements remain edge/MFP
+<=0.8 and mean parcels>=20, with an initial aim of25. Estimated populations are
+about2500–2650 for the seven defaults. Sampling durations are recalculated for
+each patch. There is **no wall-clock cutoff**; numerical population/step/retry
+limits and the maximum physical sampling interval still apply. An unresolved
+stability check is reported honestly and may need a fresh study with more
+sampling. The JSON reference_breakdown prediction extends to25 D_e separately
+from the small measured patch. Timings distinguish solver work from controller
+and assessment/file-I/O overhead. A local pass does not validate the full plume.
+
 Seven argon exit Kn values, a fixed mapped upstream inlet, a 2.5-degree
 half-angle, and an outlet at 10 exit diameters. Each case starts with 100 cells.
 Native OpenFOAM v2512 hyStrath dsmcFoam+ runs independent single-core cases

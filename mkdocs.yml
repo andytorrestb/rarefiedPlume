@@ -206,4 +206,6 @@ nav:
       - Radial sizing implementation: superpowers/plans/2026-11-07-portable-refinement-and-cai-radial-study.md
       - Adaptive radial sizing design: superpowers/specs/2026-11-08-radial-checkpoint-controller-design.md
       - Adaptive radial sizing implementation: superpowers/plans/2026-11-08-radial-checkpoint-controller.md
+      - Fixed-count local sizing design: superpowers/specs/2026-11-08-fixed-count-local-sizing-design.md
+      - Fixed-count local sizing implementation: superpowers/plans/2026-11-08-fixed-count-local-sizing.md
   - Archive: archive/index.md
