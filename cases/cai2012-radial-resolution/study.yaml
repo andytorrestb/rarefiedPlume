@@ -1,0 +1,31 @@
+# Physical exit reference; its numerical controls are not inherited.
+model: cai_exit_radial_resolution
+reference_case: ../cai2012-kn-extension/baseCase/case.yaml
+knudsen_numbers: [100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
+domain:
+  inlet_over_D: null  # fixed mapped anchor, upstream when continuum exists
+  outer_over_D: 25
+  angle_deg: null     # resolve once from predicted mesh, then freeze
+mesh:
+  predicted_edge_over_mfp: 1.0
+  geometric_cap_over_D: 0.05
+  max_cells: 1000000
+targets:
+  edge_over_mfp: 0.8  # final target against measured LOCAL lambda
+  min_mean_parcels: 20
+time:
+  startup_transits: 2
+  sampling_transits: 6
+  blocks: 6
+  windows_per_block: 2
+  collision_ratio: 0.2
+  transport_ratio: 0.2
+  max_steps: 10000000
+run:
+  cores: 1
+  seed: 1729
+  max_predicted_parcels: 10000000
+breakdown:
+  definition: general
+  threshold: 0.05
+analysis: {}  # optional profile tolerances; no mandatory extra refinement sweep
