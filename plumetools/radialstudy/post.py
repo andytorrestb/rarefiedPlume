@@ -153,12 +153,39 @@ def measured_breakdown(r,n,u,lam,cbar,valid,*,threshold=.05,density_se=None):
     return {**result,'status':'CROSSING_IN_DOMAIN','r_m':float(np.interp(threshold,b[i:i+2],r[i:i+2]))}
 
 
-def _compute(case):
+def _sizing_statistics(windows,species,settings):
+    result = {'basis':'adaptive_sizing','complete':False,'stationary':False,
+              'independence_supported':False,'relative_tolerance':settings.stability_relative,
+              'floors':{'n':settings.density_floor,'U':settings.velocity_floor,'T':settings.temperature_floor},
+              'reason':'need more complete post-startup windows'}
+    if len(windows)<settings.min_windows:
+        return result,{}
+    if any(np.any(w['bad']) for w in windows):
+        return {**result,'reason':'missing or invalid per-cell measurements'},{}
+    mid = len(windows)//2
+    states = [primitive({key:np.mean([w[key] for w in group],axis=0)
+                         for key in ('rho','momentum','energy')},species)
+              for group in (windows[:mid],windows[mid:])]
+    changes = {}
+    for key,floor in (('n',settings.density_floor),('U',settings.velocity_floor),('T',settings.temperature_floor)):
+        a,b = (st[key] for st in states)
+        magnitude = (lambda x:np.linalg.norm(x,axis=1)) if key=='U' else np.abs
+        ratio = magnitude(a-b)/np.maximum(np.maximum(magnitude(a),magnitude(b)),floor)
+        changes[key] = float(np.max(ratio))
+    stable = all(math.isfinite(x) and x<=settings.stability_relative for x in changes.values())
+    return {**result,'stationary':stable,'blocks':2,'max_relative_change':changes,
+            'reason':'stable sizing measurements' if stable else 'per-cell block means still changing'},{}
+
+
+def _compute(case, *, incremental=False):
     case = Path(case).resolve()
     model,mesh,record = load_case(case)
     windows = read_windows(case)
     if not windows:
         raise ValueError('no measured post-startup windows')
+    observed_windows = len(windows)
+    if incremental:
+        windows = windows[-model.config.controller.min_windows:]
     geometry = read_geometry(case,time='0')
     if len(geometry.volumes_m3) != mesh.n_cells:
         raise ValueError('actual mesh differs from radial metadata')
@@ -168,11 +195,14 @@ def _compute(case):
     for relative in ('0/C','0/V','run-state.json','sampling-windows.json'):
         source_files[relative] = file_sha256(case/relative)
     total,blocks,weight_total = None,[],0.
+    recent = []
     complete = True
     for block,group in itertools.groupby(windows,key=lambda w:w['block']):
         accum,steps,count = None,0.,0
         for w in group:
             raw = _read_window(case,w,mesh.n_cells,model.source.species)
+            if incremental:
+                recent.append(raw)
             if accum is None:
                 accum = {k:np.zeros_like(v) for k,v in raw.items()}
             if set(raw) != set(accum):
@@ -196,11 +226,14 @@ def _compute(case):
     profile_raw = _profile(raw,mesh,geometry)
     profile = primitive(profile_raw,model.source.species)
     volume = geometry.volumes_m3.reshape(-1,mesh.transverse**2).sum(axis=1)
-    sampling,se = _statistics(blocks,model.source.species,volume,record['sampling']['blocks'])
+    sampling,se = (_sizing_statistics(recent,model.source.species,model.config.controller) if incremental else
+                   _statistics(blocks,model.source.species,volume,record['sampling']['blocks']))
     expected = record['sampling']['blocks']*record['sampling']['windows_per_block']
-    sampling['complete'] &= complete and len(windows)==expected
-    sampling['stationary'] &= sampling['complete']
+    if not incremental:
+        sampling['complete'] &= complete and len(windows)==expected
+        sampling['stationary'] &= sampling['complete']
     sampling['windows'] = len(windows)
+    sampling['observed_windows'] = observed_windows
     window = {'start_s':windows[0]['start_s'],'end_s':windows[-1]['end_s'],
               'basis':'mean_per_cell','source':'verified','stationary':sampling['stationary'],
               'steps':int(weight_total),'native_basis':'disjoint_native_windows'}
@@ -281,6 +314,15 @@ def assess_case(case):
 def case_plan(case):
     result,data = _compute(case)
     return data[-1],result['recommended_delta_t_s']
+
+
+def checkpoint_assessment(case):
+    """Assess a partial run for sizing, without certifying flow convergence."""
+    try:
+        result,data = _compute(case,incremental=True)
+        return serial(result),data[-1] if result['status']!='unresolved' else None
+    except (ValueError,OSError) as exc:
+        return {'status':'unresolved','reason':str(exc)},None
 
 
 def comparison_metrics(coarse,fine,species,*,targets=None,trusted=False):
