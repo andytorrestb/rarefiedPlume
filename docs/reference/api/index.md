@@ -35,6 +35,8 @@ own docstrings.
 | [hybridplume](hybridplume/index.md) | `plumetools.hybridplume` | one-way 3-D CFD → DSMC hybrid | active |
 | [virtualcollision](virtualcollision/index.md) | `plumetools.virtualcollision` | reduced virtual-collision model and its assessment | active |
 | [rarefaction](rarefaction/index.md) | `plumetools.rarefaction` | mean free path, Knudsen numbers and mesh resolution from a sampled run | shared tool |
+| [refinement](refinement/index.md) | `plumetools.refinement` | portable measured targets and actual local hex refinement | shared tool |
+| [radialstudy](radialstudy/index.md) | `plumetools.radialstudy` | fixed-inlet seven-Kn radial sizing using native plus | active, bounded solver test |
 | [viz](viz/index.md) | `plumetools.viz` | ParaView slice imagery, video, dissection | shared tool |
 | [foamio](foamio/index.md) | `plumetools.foamio` | OpenFOAM field and dictionary I/O, checkpoints | shared layer |
 | [mesh](mesh/index.md) | `plumetools.mesh` | `polyMesh` parsing and patch geometry | shared layer |

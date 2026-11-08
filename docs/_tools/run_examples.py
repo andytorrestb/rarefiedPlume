@@ -53,6 +53,8 @@ EXAMPLES = {
     "nozzleplume-load": ["cases/r-4d"],
     "hybrid-config": ["cases/cai2012-hybrid"],
     "rarefaction-mfp": [],
+    "portable-refinement": [],
+    "radial-prediction": ["cases/cai2012-radial-resolution", "cases/cai2012-kn-extension"],
     "viz-spec": [],
     "foamio-checkpoints": [],
     "casemanifest": [],
@@ -74,6 +76,10 @@ class Command:
 
 PY = "{python}"
 COMMANDS = [
+    Command("Radial resolution generate --dry-run",
+            [PY, "cases/cai2012-radial-resolution/generate_cases.py", "--dry-run"],
+            ["cases/cai2012-radial-resolution", "cases/cai2012-kn-extension"],
+            expect_stdout=r"r0_ppc20"),
     Command("cai2012 generate --dry-run",
             [PY, "cases/cai2012/generate_cases.py", "--dry-run"], ["cases/cai2012"],
             expect_stdout=r"Kn100_np1x"),

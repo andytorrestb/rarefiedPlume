@@ -49,6 +49,8 @@ FAMILIES = {
     "hybridplume": "hybridplume",
     "virtualcollision": "virtualcollision",
     "rarefaction": "rarefaction",
+    "refinement": "refinement (portable DSMC targets)",
+    "radialstudy": "radialstudy (Cai exit sizing)",
     "viz": "viz",
     "foamio": "foamio",
     "mesh": "mesh",

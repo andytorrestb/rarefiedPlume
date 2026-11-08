@@ -1,0 +1,102 @@
+{
+  "scope": "bounded mechanics, not scientific validation",
+  "recorded": "2026-11-07",
+  "portable": {
+    "source_cells": 2,
+    "selected_cells": [
+      0
+    ],
+    "source_mesh_sha256": "12c36fd15faad96ed4955c45fb52ac1544c4c3e0928cd4781cce557415e9dcd7",
+    "source_fields_sha256": "be80f8493552c6bb47a19c1049a82ad7455f54e3840fd52147b7f5c416e2b660",
+    "built_cells": 9,
+    "built_volume_m3": 2.0,
+    "built_mesh_sha256": "8f76b6176d661970979fbbd3a5c2dec55313e73b2c5a7b3cd9471f1aa9d7632c"
+  },
+  "plus": {
+    "application": "/home/andy/OpenFOAM/andy-v2512/platforms/linux64GccDPInt32Opt/bin/dsmcFoam+",
+    "executable_sha256": "081dd14597b49131bfb18ebd0cb06818aa0270f6fbd3d69d8d87cbf5b27cb671",
+    "openfoam": "2512",
+    "cells": 3,
+    "iterations": 656,
+    "end_time_s": 0.00022533585514481627,
+    "predicted_parcels": 92.30033334734813,
+    "windows": 12,
+    "field_names": [
+      "rhoN_Ar",
+      "Ttra_Ar",
+      "U_Ar",
+      "dsmcNMean_Ar",
+      "mfp_Ar",
+      "mct_Ar"
+    ],
+    "post_status": "needs_parcels",
+    "minimum_mean_parcels": 19.983739837398375
+  },
+  "focused_python_tests": 251,
+  "native_integration_tests": 6,
+  "docs_examples": {
+    "passed": 29,
+    "skipped": 2
+  },
+  "full_scientific_matrix_run": false,
+  "local_artifacts": "verification-artifacts/v1",
+  "historical_suite": {
+    "passed": 2351,
+    "failed": 5,
+    "skipped": 21,
+    "deselected_openfoam": 72,
+    "failures_preexist_implementation": true,
+    "failure_ids": [
+      "tests/unit/test_cai2012ext_hpc.py::test_the_requested_resources[runMeshAll.sh-shortq-4:00:00-nodes=1:ppn=1-knx-meshall]",
+      "tests/unit/test_cai2012ext_hpc.py::test_the_requested_resources[runAnalyse.sh-shortq-1:00:00-nodes=1:ppn=1-knx-analyse]",
+      "tests/unit/test_cai2012ext_hpc.py::test_the_family_jobs_generate_validate_mesh_and_analyse_in_order",
+      "tests/unit/test_cai2012ext_hpc.py::test_every_shell_script_parses[AllreconstructCases]",
+      "tests/unit/test_nozzleplume_config.py::test_the_hpc_free_plume_case_loads_without_a_plate"
+    ]
+  },
+  "combined_focused_tests": {
+    "passed": 257,
+    "skipped_windows_only": 1
+  },
+  "native_windows_tests": {
+    "passed": 20,
+    "scope": "case generation, frozen records, LF scripts, transient publication locks, plan API"
+  },
+  "review": {
+    "independent_reviewer": "gpt-6-astra",
+    "critical_findings": 0,
+    "important_findings_fixed": 5,
+    "documented_plan_directory_issue_fixed": true,
+    "additional_cross_platform_regressions_fixed": [
+      "frozen source/domain/inlet/sampling roundoff",
+      "bounded Windows publication locks"
+    ],
+    "deferred_minors": [
+      "timestep-only same-mesh comparisons labeled parcels",
+      "normalized study overlay figures; current figures dimensional and per case"
+    ]
+  },
+  "generated_cases": {
+    "count": 7,
+    "flow_runs_launched": 0,
+    "windows_wrappers_lf": 21,
+    "regeneration_preserved_all_files": true,
+    "inventory": "analysis/report.md"
+  },
+  "initial_meshes_built": [
+    {
+      "Kn": 100.0,
+      "cells": 486,
+      "mesh_sha256": "85ee6cabe0107841b7968ee01507212e39d681ae157ed3256bafbc4149dd2986",
+      "total_volume_m3": 4.166568254731276e-05,
+      "flow_run": false
+    },
+    {
+      "Kn": 0.0001,
+      "cells": 8366,
+      "mesh_sha256": "cf43ff72413c73a10a8806be88cfa7d4e9f90ad882c4925cb260d42913bd094e",
+      "total_volume_m3": 2.0240664863795127e-07,
+      "flow_run": false
+    }
+  ]
+}

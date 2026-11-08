@@ -19,6 +19,8 @@ where they matter; the committed files themselves annotate every value
 | `interfaces.yaml`, `<case>/interface.yaml` | Kn extension | `plumetools.cai2012ext.interface_study`, `interface_config` | [interface track](#interfaceyaml-and-interfacesyaml) |
 | `scaling.yaml`, `scaling-registration.yaml` | Kn extension | `plumetools.cai2012ext.scaling_workflow`, `scaling_inventory` | [field scaling](#scalingyaml) |
 | `diagnostics.yaml`, `diagnostics:` section | Kn extension, nozzle plume | `plumetools.rarefaction.settings` | [rarefaction diagnostics](#rarefaction-settings) |
+| standalone refinement YAML | any compatible DSMC case | `plumetools.refinement.config.load_settings` | gas, field roles, averaging window, measured targets; [example](../mesh-refinement.md) |
+| `study.yaml` (`model: cai_exit_radial_resolution`) | radial resolution | `plumetools.radialstudy.config.load_study` | reference physics, seven Kn, fixed domain, initial mesh, targets, time, run, breakdown and analysis controls; [method](../cai2012-radial-resolution.md) |
 | `assessment.yaml` | virtual collisions | `plumetools.virtualcollision.assessment.load_yaml` | [assessment](#assessmentyaml) |
 | `hybrid.yaml` | cai2012-hybrid | `plumetools.hybridplume.config` | [hybrid](#hybridyaml) |
 | `case.yaml` (`model: nozzle_exit_plume`) | r-4d | `plumetools.nozzleplume.config` | [nozzle plume](#nozzleplume-caseyaml-r-4d) |

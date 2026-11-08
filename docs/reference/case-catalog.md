@@ -20,6 +20,7 @@ What each test establishes, and does not: [What the tests establish](../explanat
 
 | Family | Directory | Model | Evidence | Runnable today with the supported stack? | External prerequisites | Known blockers / limits | Tutorial |
 |---|---|---|---|---|---|---|---|
+| Cai exit radial sizing | `cases/cai2012-radial-resolution` | fixed-inlet expanding streamtube; local measured targets | mechanically tested; bounded native plus solver/mesh tests | yes, serial | OpenFOAM v2512 hyStrath `dsmcFoam+` and `dsmcInitialise+` | full seven-case scientific matrix unrun; streamtube costs do not represent a full plume | [Radial sizing](../tutorials/cai2012-radial-resolution.md) |
 | Legacy reference | `cases/3d-inflow` | legacy source flow (`plumetools.sourceflow`) | mechanically tested; bit-exact regression golden vs the pre-refactor script | **only after obtaining a mesh** | OpenFOAM v2512 (`blockMesh`, `snappyHexMesh`, `dsmcFoam`) | `constant/polyMesh` is gitignored and absent; the restore tag in older text does not exist (use `git checkout f83233f^ -- …`); outer boundary reflects; post-processing not wired (RP-17); HA-06, HA-07 unresolved | [3d-inflow](../tutorials/3d-inflow.md) |
 | Cai collisionless plume | `cases/cai2012` | 3-D `dsmcFoam`, nozzle exit as inlet | mechanically tested; solver-tested (short runs); recorded Kn 100 and 0.1 runs | yes | OpenFOAM v2512 + `libplumeDsmcBoundaryModels.so` | Kn = 0.01 under-resolved against Cai's Δx/λ₀ = 1 | [cai2012](../tutorials/cai2012.md) |
 | Statistical health | `cases/cai2012-health` | `cai2012` case, two axes swept | mechanically tested; recorded cheapest-pair runs | yes, **with CaseFoam** for generation | as cai2012, plus CaseFoam, ffmpeg, `pvpython` | generation needs CaseFoam (not installed here); disk is the binding resource | [cai2012-health](../tutorials/cai2012-health.md) |
@@ -33,7 +34,7 @@ What each test establishes, and does not: [What the tests establish](../explanat
 | ISS solar panels | `cases/iss_solar_panels`, `_2`, `_3` | per-case legacy `processInflowData.py` | none | **no** | the MNF fork's `dsmcFoam+` | fork not available; no run script; inputs hard-coded; unguarded `clean.sh` (RP-01) | [ISS](../tutorials/iss-solar-panels.md) |
 | Particle-weight study | `cases/solar_panel_particle_resolution_study/Fnum_*` | as ISS | none | **no** | `dsmcFoam+`; the CSV exports | as ISS, plus every plotting input CSV missing (RP-06) | [Particle resolution](../tutorials/particle-resolution.md) |
 
-No other case directory exists under `cases/` in the current tree.
+Archived geometric examples are listed below.
 
 ## Templates and generated trees
 

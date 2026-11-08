@@ -5,6 +5,28 @@ consumes it. Paths are relative to the case or study directory named. Read the
 [quantity distinctions](#quantities-that-are-easy-to-confuse) first: most
 misreadings of these files come from them.
 
+## Portable refinement and radial sizing
+
+Portable assessment directories contain `assessment.json` and per-cell `cells.csv`.
+Plan directories contain `plan.json`, `arrays.npz` and `cells.csv`, binding target
+edges and source geometry to mesh/field checksums. Native mesh artifacts contain
+fresh geometry, tool logs and `refinement-result.json`; inherited target/density
+fields are planning estimates and require new flow measurements.
+
+Radial cases embed `case.json`, `reference.yaml`, `study.yaml`, `radial-mesh.json`
+and complete plus dictionaries. `case.json` records source/inlet/domain, predicted
+resource costs, mesh identity, weight, timestep, seed, sampling and input hashes.
+`run-state.json` records serial run/restart segments. `sampling-windows.json` maps
+actual native write times to disjoint windows, blocks and field hashes.
+Revisions add `parent-plan/` and `revision.json`; no parent cloud is copied.
+
+`Allpost` writes `postProcessing/radialstudy/<plan-id-prefix>/`: shared assessment
+and plan artifacts, `summary.json`, `radial.csv` and optional `profiles.png` /
+`timestep.png`. The study `analyse.py` writes sibling `analysis/summary.csv`,
+`summary.json`, `report.md` and per-case overlays. Measured gaps, sampling and
+optional comparison verdicts remain separate. See the
+[method](../cai2012-radial-resolution.md) and [tutorial](../tutorials/cai2012-radial-resolution.md).
+
 ## Quantities that are easy to confuse
 
 | Pair | Here |

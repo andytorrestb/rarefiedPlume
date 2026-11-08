@@ -29,6 +29,21 @@ the hybrid family.
 
 ## Shared tools
 
+Portable measured sizing: `python -m plumetools.refinement assess CASE --settings FILE
+[--time TIME] [--output DIR] [--dry-run]`; replace `assess` with `plan` and supply
+`--output DIR` to export a plan. `apply CASE --plan DIR --backend hex --output NEW
+[--max-stages 20] [--max-cells N]` builds a fresh mesh with OpenFOAM v2512.
+See [portable refinement](../mesh-refinement.md).
+
+Radial study: `python -m plumetools.radialstudy generate --study FILE --output DIR
+[--kn KN ...] [--dry-run]`; `refine CASE [--plan DIR] [--correction
+needed|mesh|parcels|timestep] [--delta-t SECONDS] [--dry-run]`; `mesh CASE`,
+`run CASE [--resume] [--allow-budget-exceedance]`, `post CASE`, and `analyse ROOT`.
+The family wrappers call these same entry points. See the
+[radial tutorial](../tutorials/cai2012-radial-resolution.md). Both CLIs return 2
+for invalid input or a failed command; a reported measurement gap is a diagnostic
+status, not a solver launch.
+
 | Command | Purpose | Options | Writes | Needs | Exit |
 |---|---|---|---|---|---|
 | `python -m plumetools.foamio.checkpoints report <case>` | newest complete checkpoint in the case directory and across `processor*`, and every incomplete time | — | nothing | Py | 0; 2 no such directory |
