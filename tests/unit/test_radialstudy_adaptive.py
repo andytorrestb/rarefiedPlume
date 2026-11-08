@@ -245,13 +245,16 @@ def test_cleanup_preserves_unknown_files_inside_output_directories(tmp_path,monk
     assert note.read_text()=='my analysis'
 
 
-def test_concurrent_controller_refuses_before_any_mutation(tmp_path,monkeypatch):
+@pytest.mark.parametrize('legacy',[False,True])
+def test_concurrent_controller_refuses_before_any_mutation(tmp_path,monkeypatch,legacy):
     from plumetools.radialstudy.adaptive import run_adaptive
     from plumetools.radialstudy.locking import exclusive_lock
     p,_,calls = configured(tmp_path,monkeypatch)
-    with exclusive_lock(p.parent.parent/'.adaptive-study.lock'):
-        before = tree_hash(p.parent)
+    lockpath = p.parent.parent/'.adaptive-study.lock' if legacy else p.parent/'.adaptive-controller.lock'
+    with exclusive_lock(lockpath):
+        before = tree_hash(p)
         with pytest.raises(RuntimeError,match='already running|locked'):
             run_adaptive(p,resume=True)
-        assert not calls and tree_hash(p.parent)==before
+        assert not calls and tree_hash(p)==before
+        assert not (p.parent/'controller-state.json').exists()
         assert not (p.parent.parent/'adaptive-study.log').exists()

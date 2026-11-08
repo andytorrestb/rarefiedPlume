@@ -26,7 +26,11 @@ bash ./Allrun --dry-run
 bash ./Allrun
 ```
 
-`Allrun` runs Kn 100 down to 0.0001 serially. It builds/verifies meshes, then
+`Allrun` queues Kn 100 down to 0.0001 with bounded case-level parallelism. Each
+solver uses one core. The default is min(7, available CPUs minus1), at least1;
+use `bash Allrun --jobs 4` to choose a limit, or `--jobs 1` for serial execution.
+Allrestart accepts the same option. Failure stops further launches while active
+cases finish safely. Shared summary writes are protected. It builds/verifies meshes, then
 runs short native segments ending at complete writes. After startup, four
 post-startup windows supply two blocks for a per-cell 5% n/U/T change check.
 Stable measurements allow assessment of edge/MFP, occupancy and timestep

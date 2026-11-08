@@ -91,7 +91,8 @@ This port writes `rhoN_Ar`, `Ttra_Ar`, `U_Ar`, and `dsmcNMean_Ar`; `UMean_Ar` is
 accepted velocity alias. Native `mfp_Ar`/`mct_Ar` are cross-checks. Empty-cell
 sentinels cannot count as physical measurements. Window records contain times,
 steps, field hashes and mesh/physical identity. Cases have reproducible distinct
-hash-derived seeds. Execution is serial; MPI streams are not exposed.
+hash-derived seeds. Each solver is serial; the study can run independent cases
+in parallel with `Allrun --jobs N`. MPI streams are not exposed.
 
 Post-processing combines density/momentum/energy moments, then derives velocity
 and temperature. Legacy full-run analysis retains native radial layers, six block profiles and block

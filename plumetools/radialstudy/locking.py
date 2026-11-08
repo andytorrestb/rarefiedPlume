@@ -4,7 +4,7 @@ import os
 
 
 @contextmanager
-def exclusive_lock(path):
+def exclusive_lock(path,*,blocking=False):
     with path.open('a+b') as stream:
         if os.name=='nt':
             import msvcrt
@@ -12,11 +12,11 @@ def exclusive_lock(path):
                 stream.write(b'0')
                 stream.flush()
             stream.seek(0)
-            lock = lambda:msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
+            lock = lambda:msvcrt.locking(stream.fileno(),msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK,1)
             unlock = lambda:msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
         else:
             import fcntl
-            lock = lambda:fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+            lock = lambda:fcntl.flock(stream.fileno(),fcntl.LOCK_EX|(0 if blocking else fcntl.LOCK_NB))
             unlock = lambda:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
         try:
             lock()

@@ -19,7 +19,8 @@ def main(argv=None):
     r.add_argument('--correction',choices=['needed','mesh','parcels','timestep'],default='needed')
     r.add_argument('--delta-t',type=float)
     r.add_argument('--dry-run',action='store_true')
-    batch = sub.add_parser('run-all',help='run generated cases sequentially; stop on the first failure')
+    batch = sub.add_parser('run-all',help='run serial cases with bounded case-level parallelism')
+    batch.add_argument('--jobs',type=int,default=1,help='maximum simultaneous single-core cases (default: 1)')
     batch.add_argument('--cases',type=Path,default=Path('Cases'),help='generated case tree')
     batch.add_argument('--resume',action='store_true',help='skip finished cases, resume checkpoints and start untouched cases')
     batch.add_argument('--dry-run',action='store_true',help='report the queue without writing or launching commands')
@@ -50,6 +51,7 @@ def main(argv=None):
         elif a.command == 'run-all':
             from .run import run_study
             result = run_study(a.cases,resume=a.resume,dry_run=a.dry_run,
+                               jobs=a.jobs,
                                allow_budget_exceedance=a.allow_budget_exceedance,
                                progress=lambda message:print(message,file=sys.stderr,flush=True))
         elif a.command in ('mesh','run'):

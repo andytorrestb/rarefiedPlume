@@ -39,14 +39,17 @@ Radial study: `python -m plumetools.radialstudy generate --study FILE --output D
 [--kn KN ...] [--dry-run]`; `refine CASE [--plan DIR] [--correction
 needed|mesh|parcels|timestep] [--delta-t SECONDS] [--dry-run]`; `mesh CASE`,
 `run CASE [--resume] [--allow-budget-exceedance]`, `post CASE`, and `analyse ROOT`.
-`run-all [--cases DIR] [--resume] [--dry-run] [--allow-budget-exceedance]` checks
-the generated tree before running cases sequentially, stopping on the first
-failure. In restart mode it skips completed cases, resumes checkpoints, and
+`run-all [--cases DIR] [--jobs N] [--resume] [--dry-run] [--allow-budget-exceedance]` checks
+the generated tree before launching up to N independent serial solvers (CLI
+default1). Failure stops further launches while active cases finish safely.
+In restart mode it skips completed cases, resumes checkpoints, and
 starts untouched cases. Controller-enabled cases run checkpoint segments,
 correct trusted failures with clean retries, and stop early on numerical
 acceptance. The family-level `Allrun` and `Allrestart` select fresh and restart
 mode respectively; their default tree is the adjacent `Cases-adaptive`, also
 the default of `generate_cases.py`. Use `--cases` for existing trees.
+The shell wrappers choose up to7 jobs automatically, reserving one available
+CPU when possible; `--jobs N` or `JOBS=N` overrides this.
 `Cases-adaptive/adaptive-study.log` is the persistent summary. The budget flag
 does not override retry limits or the mesh cell cap.
 The family wrappers call these same entry points. See the

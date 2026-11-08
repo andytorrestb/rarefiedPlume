@@ -2,7 +2,9 @@
 
 Seven argon exit Kn values, a fixed mapped upstream inlet, a 2.5-degree
 half-angle, and an outlet at 10 exit diameters. Each case starts with 100 cells.
-Native OpenFOAM v2512 hyStrath dsmcFoam+ runs one case at a time in WSL.
+Native OpenFOAM v2512 hyStrath dsmcFoam+ runs independent single-core cases
+in parallel in WSL. The default is min(7, available CPUs minus1), at least1.
+Set `--jobs N` or `JOBS=N`; `--jobs 1` runs serially.
 
 With this checkout on PYTHONPATH, Python with numpy/scipy/PyYAML, and OpenFOAM
 sourced, edit [study.yaml](study.yaml), then:
@@ -30,7 +32,10 @@ Unsettled measurements continue sampling on the same cloud.
 
 `Cases-adaptive/adaptive-study.log` is append-only across retries and command
 restarts. It records Kn, attempt, time, cells, particle weight, timestep, measured
-requirements and actions. Small per-attempt records and plans remain; accepted
+requirements and actions. Concurrent log writes are serialized; each Kn has its
+own lock. Failure stops further launches while active cases finish safely; then
+the command exits nonzero. Use Allrestart to continue.
+Small per-attempt records and plans remain; accepted
 and crashed runs are retained. Retry/resource/sampling limits stop with an honest
 non-passing outcome. `--allow-budget-exceedance` explicitly overrides step/parcel
 budgets, but never the retry limit or mesh cell cap.

@@ -3,6 +3,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -161,4 +162,33 @@ def test_native_adaptive_clean_retry_and_persistent_summary(tmp_path):
     assert 'retry' in log and 'cleanup' in log and 'accepted' in log
     before = tree_hash(root)
     assert run_study(root,resume=True)['skipped']==1
+    assert tree_hash(root)==before
+
+
+def test_native_parallel_adaptive_cases_and_restart(tmp_path):
+    if not shutil.which('dsmcFoam+'):
+        pytest.skip('requires the v2512 hyStrath plus port')
+    from plumetools.radialstudy.case import write_case,sizing
+    from plumetools.radialstudy.physics import source_for_kn
+    from plumetools.radialstudy.mesh import initial_mesh
+    from plumetools.radialstudy.run import run_study
+    from _refinement import tree_hash
+    root = tmp_path/'parallel cases'
+    for kn in (100,10):
+        m = model(kn)
+        cfg = replace(m.config,domain=replace(m.config.domain,outer_over_D=.82,angle_deg=.5),
+                      mesh=replace(m.config.mesh,initial_cells=3),
+                      controller=replace(m.config.controller,enabled=True,stability_relative=.5))
+        m = source_for_kn(cfg,kn)
+        mesh = initial_mesh(m)
+        num,_ = sizing(m,mesh)
+        write_case(root/f'Kn{kn}/r0_ppc20',m,mesh,
+                   particle_weight=num['particle_weight']/2,delta_t_s=num['delta_t_s']/2)
+    result = run_study(root,jobs=2)
+    assert result['completed']==2 and result['jobs']==2
+    lines = (root/'adaptive-study.log').read_text().splitlines()
+    assert sum(' accepted ' in line for line in lines)==2
+    assert all(re.match(r'^\d{4}-\d\d-\d\dT',line) for line in lines)
+    before = tree_hash(root)
+    assert run_study(root,resume=True,jobs=2)['skipped']==2
     assert tree_hash(root)==before

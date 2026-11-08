@@ -97,12 +97,14 @@ def _restart_state(case,record,mesh_sha256):
     return state,restart
 
 
-def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=False, progress=None):
-    """Preflight all generated revisions, then run one serial case at a time.
+def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=False, progress=None, jobs=1):
+    """Preflight all cases, then run up to jobs independent serial solvers.
 
     Restart mode skips complete cases, resumes complete checkpoints and starts
     untouched cases. Dry runs only read inputs/checkpoints and report the queue.
     """
+    if isinstance(jobs,bool) or not isinstance(jobs,int) or jobs<1:
+        raise ValueError('jobs must be a positive integer')
     root = Path(root).resolve()
     queue = []
     for recordpath in root.glob('Kn*/r*_ppc*/case.json'):
@@ -158,17 +160,13 @@ def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=Fals
         details = '; '.join(f"{Path(row['path']).relative_to(root)}: {', '.join(row['budget_gaps'])}" for row in blocked)
         raise ValueError(f'resource budget exceeded: {details}; inspect --dry-run, then use --allow-budget-exceedance if intended')
     result = {'mode':'restart' if resume else 'fresh','dry_run':dry_run,
-              'cases':rows,'completed':0,'skipped':0}
+              'cases':rows,'completed':0,'skipped':0,'jobs':min(jobs,len(rows))}
     if dry_run:
         return result
-    for index,row in enumerate(rows,1):
+    def execute(index,row):
         case = Path(row['path'])
         if progress:
             progress(f"[{index}/{len(rows)}] {row['action']}: {case.relative_to(root)}")
-        if row['action']=='skip':
-            row['status'] = 'already_finished'
-            result['skipped'] += 1
-            continue
         try:
             if row.get('controller'):
                 from .adaptive import run_adaptive
@@ -179,7 +177,39 @@ def run_study(root, *, resume=False, allow_budget_exceedance=False, dry_run=Fals
                                     allow_budget_exceedance=allow_budget_exceedance))
         except (ValueError,OSError,RuntimeError) as exc:
             raise RuntimeError(f'{case.relative_to(root)}: {exc}') from exc
-        result['completed'] += 1
+    runnable = []
+    for index,row in enumerate(rows,1):
+        if row['action']=='skip':
+            row['status'] = 'already_finished'
+            result['skipped'] += 1
+        else:
+            runnable.append((index,row))
+    if jobs==1:
+        for index,row in runnable:
+            execute(index,row)
+            result['completed'] += 1
+    else:
+        from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
+        remaining = iter(runnable)
+        failure = None
+        with ThreadPoolExecutor(max_workers=result['jobs']) as pool:
+            pending = {pool.submit(execute,*item) for item in
+                       [next(remaining,None) for _ in range(result['jobs'])] if item is not None}
+            while pending:
+                done,pending = wait(pending,return_when=FIRST_COMPLETED)
+                for future in done:
+                    try:
+                        future.result()
+                        result['completed'] += 1
+                    except Exception as exc:
+                        failure = failure or exc
+                if failure is None:
+                    for _ in done:
+                        item = next(remaining,None)
+                        if item is not None:
+                            pending.add(pool.submit(execute,*item))
+        if failure is not None:
+            raise RuntimeError(f'{failure}; active cases finished safely; use Allrestart to continue') from failure
     return result
 
 

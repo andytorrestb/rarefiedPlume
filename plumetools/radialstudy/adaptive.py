@@ -45,10 +45,11 @@ def _log(root,event,**values):
     stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     data = json_safe(values)
     line = stamp+' '+event+' '+' '.join(f'{k}={json.dumps(v,separators=(",",":"),allow_nan=False)}' for k,v in data.items())+'\n'
-    with path.open('a',encoding='utf-8',newline='\n') as stream:
-        stream.write(line)
-        stream.flush()
-        os.fsync(stream.fileno())
+    with exclusive_lock(root.parent/'.adaptive-log.lock',blocking=True):
+        with path.open('a',encoding='utf-8',newline='\n') as stream:
+            stream.write(line)
+            stream.flush()
+            os.fsync(stream.fileno())
 
 
 def _owner(case,state):
@@ -249,7 +250,11 @@ def _finish_retry(root,state):
 def run_adaptive(case,*,resume=False,allow_budget_exceedance=False,progress=None):
     """Run/retry one Kn case; the persistent study log survives every retry."""
     case = Path(case).resolve()
-    with exclusive_lock(case.parent.parent/'.adaptive-study.lock'):
+    legacy_lock = case.parent.parent/'.adaptive-study.lock'
+    if legacy_lock.exists():
+        with exclusive_lock(legacy_lock):
+            pass  # Refuse to race a still-running older serial controller.
+    with exclusive_lock(case.parent/'.adaptive-controller.lock'):
         return _run_adaptive(case,resume=resume,allow_budget_exceedance=allow_budget_exceedance,progress=progress)
 
 

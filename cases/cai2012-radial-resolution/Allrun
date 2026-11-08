@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Run every generated case sequentially. Use --dry-run to inspect the queue.
+# Run independent single-core cases in parallel. Override with --jobs N or JOBS=N.
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
-exec "${PYTHON:-python3}" -m plumetools.radialstudy run-all --cases "$PWD/Cases-adaptive" "$@"
+repo_root="$(cd -- ../.. && pwd)"
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+available="$(nproc)"
+jobs=$((available > 1 ? available - 1 : 1))
+if (( jobs > 7 )); then jobs=7; fi
+exec "${PYTHON:-python3}" -m plumetools.radialstudy run-all --cases "$PWD/Cases-adaptive" --jobs "${JOBS:-$jobs}" "$@"

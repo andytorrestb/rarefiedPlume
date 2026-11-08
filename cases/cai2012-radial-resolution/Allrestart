@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Skip finished cases, resume checkpoints and start untouched cases, sequentially.
+# Skip finished cases and resume/start remaining cases with bounded parallelism.
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
-exec "${PYTHON:-python3}" -m plumetools.radialstudy run-all --cases "$PWD/Cases-adaptive" --resume "$@"
+exec bash ./Allrun --resume "$@"
