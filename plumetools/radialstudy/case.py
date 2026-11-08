@@ -164,15 +164,27 @@ def write_case(destination, model, mesh, *, target_parcels=20., particle_weight=
                delta_t_s=None, parent=None, _finalize=None):
     destination = Path(destination).resolve()
     require_same_physics(mesh.identity, model.identity(angle_rad=mesh.angle_rad))
+    local_id = None
+    if model.config.local.enabled:
+        from .local import initial_weight,local_identity
+        if mesh.n_cells!=100 or mesh.transverse!=1:
+            raise ValueError('local study must retain100 radial cells and1x1 transverse cells')
+        local_id = local_identity(model)
+        if particle_weight is None:
+            particle_weight = initial_weight(model,mesh,target_parcels)
     num, sampling = sizing(model,mesh,target_parcels,particle_weight,delta_t_s)
     seed = 1+(model.config.run.seed+int(digest({'physical':mesh.identity,'numerics':num}),16)) % 2147483646
     parent_record = None
     if parent is not None:
         parent = Path(parent).resolve()
         old = json.loads((parent/'case.json').read_text())
-        require_same_physics(old['physical_identity'],mesh.identity)
-        if old['sampling'] != sampling:
-            raise ValueError('numerical revision changes physical sampling times')
+        if local_id is not None:
+            if old.get('local_study_identity')!=local_id:
+                raise ValueError('local revision changes fixed inlet, reference, Kn or study policy')
+        else:
+            require_same_physics(old['physical_identity'],mesh.identity)
+            if old['sampling'] != sampling:
+                raise ValueError('numerical revision changes physical sampling times')
         parent_record = {'relative_path': os.path.relpath(parent,destination).replace('\\','/'), 'case_id': old['case_id']}
     record = {'schema_version':1, 'model':'cai_exit_radial_resolution',
               'physical_identity':mesh.identity, 'reference_sha256':model.config.reference_sha256,
@@ -183,6 +195,9 @@ def write_case(destination, model, mesh, *, target_parcels=20., particle_weight=
               'parent':parent_record, 'generator':'plumetools.radialstudy/1',
               'solver':{'application':'dsmcFoam+','initialiser':'dsmcInitialise+','openfoam':'v2512','execution':'serial'},
               'breakdown':predict_breakdown(model,**asdict(model.config.breakdown))}
+    if local_id is not None:
+        from .local import reference_breakdown
+        record.update(local_study_identity=local_id,reference_breakdown=reference_breakdown(model))
     record['case_id'] = digest(record)
     if destination.exists():
         existing_path = destination/'case.json'
@@ -231,3 +246,8 @@ def load_case(case):
                     inlet_state=record['inlet'],sampling_record=record['sampling'])
     require_same_physics(record['physical_identity'],model.identity(angle_rad=mesh.angle_rad))
     return model, mesh, record
+
+
+def study_identity(record):
+    """Compare fixed domains normally; compare fixed inlet/reference for local patches."""
+    return record.get('local_study_identity',record['physical_identity'])

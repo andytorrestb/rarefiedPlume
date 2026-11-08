@@ -78,6 +78,14 @@ class Controller:
 
 
 @dataclass(frozen=True)
+class Local:
+    enabled: bool = False
+    max_span_over_D: float = 1.
+    initial_parcels: float = 25.
+    reference_outer_over_D: float = 25.
+
+
+@dataclass(frozen=True)
 class RadialStudyConfig:
     path: Path
     reference: object
@@ -92,10 +100,11 @@ class RadialStudyConfig:
     breakdown: Breakdown
     analysis: Analysis
     controller: Controller = Controller()
+    local: Local = Local()
 
     def settings(self):
         return {key: asdict(getattr(self, key)) for key in
-                ('domain', 'mesh', 'targets', 'time', 'run', 'breakdown', 'analysis', 'controller')}
+                ('domain', 'mesh', 'targets', 'time', 'run', 'breakdown', 'analysis', 'controller', 'local')}
 
 
 def _section(cls, raw, name):
@@ -111,7 +120,7 @@ def load_study(path: Path) -> RadialStudyConfig:
     path = Path(path).resolve()
     raw = yaml.safe_load(path.read_text(encoding='utf-8-sig'))
     allowed = {'model', 'reference_case', 'knudsen_numbers', 'domain', 'mesh',
-               'targets', 'time', 'run', 'breakdown', 'analysis', 'controller'}
+               'targets', 'time', 'run', 'breakdown', 'analysis', 'controller', 'local'}
     if not isinstance(raw, dict) or set(raw) - allowed:
         raise ValueError('study: expected mapping with known study keys')
     if raw.get('model') != 'cai_exit_radial_resolution':
@@ -128,7 +137,7 @@ def load_study(path: Path) -> RadialStudyConfig:
         physical, tuple(float(k) for k in raw.get('knudsen_numbers', [100, 10, 1, .1, .01, .001, .0001])),
         *[_section(cls, raw.get(key, {}), key) for key, cls in (
             ('domain', Domain), ('mesh', Mesh), ('targets', Targets), ('time', Time),
-            ('run', Run), ('breakdown', Breakdown), ('analysis', Analysis), ('controller', Controller))])
+            ('run', Run), ('breakdown', Breakdown), ('analysis', Analysis), ('controller', Controller), ('local', Local))])
     if not cfg.knudsen_numbers or len(set(cfg.knudsen_numbers)) != len(cfg.knudsen_numbers):
         raise ValueError('knudsen_numbers must be nonempty and unique')
     positive = [*cfg.knudsen_numbers, cfg.domain.outer_over_D, cfg.mesh.predicted_edge_over_mfp,
@@ -167,4 +176,13 @@ def load_study(path: Path) -> RadialStudyConfig:
             raise ValueError('controller tolerances, floors and parcel target must be finite and positive')
     if c.stability_relative>=1:
         raise ValueError('controller.stability_relative must be below one')
+    local = cfg.local
+    if not isinstance(local.enabled,bool):
+        raise ValueError('local.enabled must be boolean')
+    for value in (local.max_span_over_D,local.initial_parcels,local.reference_outer_over_D):
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
+            raise ValueError('local sizes and parcel target must be finite and positive')
+    if local.enabled and (not c.enabled or cfg.mesh.initial_cells!=100 or cfg.domain.angle_deg is None
+                          or local.initial_parcels<cfg.targets.min_mean_parcels):
+        raise ValueError('local mode requires controller enabled,100 initial cells, an angle cap and adequate initial parcels')
     return cfg

@@ -1,0 +1,36 @@
+model: cai_exit_radial_resolution
+reference_case: ../cai2012-kn-extension/baseCase/case.yaml
+knudsen_numbers: [100, 10, 1, 0.1, 0.01, 0.001, 0.0001]
+domain:
+  inlet_over_D: null
+  outer_over_D: 10
+  angle_deg: 2.5
+mesh:
+  initial_cells: 100
+  max_cells: 100
+targets:
+  edge_over_mfp: 0.8
+  min_mean_parcels: 20
+time:
+  startup_transits: 2
+  sampling_transits: 6
+  blocks: 6
+  windows_per_block: 2
+  collision_ratio: 0.2
+  transport_ratio: 0.2
+  max_steps: 50000
+run:
+  cores: 1
+  seed: 1729
+  max_predicted_parcels: 5000
+controller:
+  enabled: true
+  min_windows: 4
+  stability_relative: 0.05
+  retry_parcels: 25
+  max_retries: 5
+local:
+  enabled: true
+  max_span_over_D: 1
+  initial_parcels: 25
+  reference_outer_over_D: 25

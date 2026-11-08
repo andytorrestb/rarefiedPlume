@@ -20,15 +20,23 @@ def generate_initial(config, output, *, kn_values=None, dry_run=False):
         raise ValueError('selected Kn is absent from the study')
     rows = []
     for kn in values:
-        model = source_for_kn(config,kn)
+        if config.local.enabled:
+            from .local import initial_local_model
+            model = initial_local_model(config,kn)
+        else:
+            model = source_for_kn(config,kn)
         mesh = initial_mesh(model)
         p = Path(output)/f'Kn{label(kn)}'/f'r0_ppc{label(config.targets.min_mean_parcels)}'
-        num, sampling = sizing(model,mesh,config.targets.min_mean_parcels)
+        weight = None
+        if config.local.enabled:
+            from .local import initial_weight
+            weight = initial_weight(model,mesh,config.targets.min_mean_parcels)
+        num, sampling = sizing(model,mesh,config.targets.min_mean_parcels,weight)
         row = {'path':str(p), 'Kn':kn,'numerics':num, 'sampling':sampling,
                'breakdown':predict_breakdown(model,**vars(config.breakdown)),
                'physical_identity':mesh.identity}
         if not dry_run:
-            row['record'] = write_case(p,model,mesh,target_parcels=config.targets.min_mean_parcels)
+            row['record'] = write_case(p,model,mesh,target_parcels=config.targets.min_mean_parcels,particle_weight=weight)
         rows.append(row)
     return rows
 

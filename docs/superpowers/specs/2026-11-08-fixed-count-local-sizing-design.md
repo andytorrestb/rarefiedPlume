@@ -1,6 +1,6 @@
 # Fixed-count local DSMC sizing study
 
-Status: proposed for approval. Approach1 selected by the owner on2026-11-08.
+Status: approved on2026-11-08; owner subsequently removed the wall-time budget.
 
 ## Purpose and agreed scope
 
@@ -58,8 +58,7 @@ Proposed cost controls, chosen by the implementer for owner review:
 - Maximum5,000 predicted parcels per case; check measured population when
   available. Population is budgeted separately from the100-cell count.
 - Maximum50,000 cumulative solver steps and five retries per Kn.
-- A five-minute wall-time budget checked at safe write boundaries. This is a
-  checkpoint budget, not a hard real-time termination guarantee.
+- No wall-clock cutoff. Record runtime to evaluate the improvement.
 - If a budget prevents sufficient evidence or a passing result, stop and log
   the unmet requirement. Do not relax the numerical criteria to force success.
 
