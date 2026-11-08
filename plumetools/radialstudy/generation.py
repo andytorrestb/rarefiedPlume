@@ -62,7 +62,8 @@ def revise_case(parent, plan, *, correction='needed', delta_t_s=None, dry_run=Fa
     revision = 1+max(int(p.name.split('_')[0][1:]) for p in parent.parent.glob('r*_ppc*') if (p/'case.json').is_file())
     child = parent.parent/f'r{revision}_ppc{label(plan.target_parcels)}'
     row = {'action':'create_revision','path':str(child),'corrections':changed,
-           'parent_plan_id':plan_identity(plan),'requires_flow_rerun':True}
+           'parent_plan_id':plan_identity(plan),'requires_flow_rerun':True,
+           'numerics':sizing(model,mesh,plan.target_parcels,weight,dt)[0]}
     if not dry_run:
         row['record'] = write_case(child,model,mesh,target_parcels=plan.target_parcels,
                                    particle_weight=weight,delta_t_s=dt,parent=parent)
