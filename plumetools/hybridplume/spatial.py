@@ -20,6 +20,15 @@ def _footprints(mesh):
     return mesh.cell_centres-half, mesh.cell_centres+half
 
 
+def _mesh_identity(case_dir, expected=None):
+    directory = Path(case_dir)/"dsmc/constant/polyMesh"
+    actual = {name: wf.provenance.sha256(directory/name)
+              for name in ("points", "faces", "owner", "neighbour", "boundary")}
+    if expected is not None and actual != expected:
+        raise wf.WorkflowError("DSMC mesh identity changed; use a fresh case instead of reusing the cloud")
+    return actual
+
+
 def certify_facets(vertices, fit, lower, upper, retained, tolerance):
     axes = np.array([fit["a"], fit["b"], fit["b"]])
     q = np.sum(((vertices-np.array([fit["xc"], 0, 0]))/axes)**2, axis=1)
@@ -92,7 +101,14 @@ def dsmc_setup(case_dir, np_ranks=None):
     old = json.loads((res/"dsmc_setup.json").read_text()) if (res/"dsmc_setup.json").is_file() else {}
     if old.get("fitted_identity") not in (None, doc["fitted_identity"]):
         raise wf.WorkflowError("DSMC checkpoints belong to another interface")
-    if not (case_dir/"dsmc/constant/polyMesh/owner").is_file():
+    mesh_identity = None
+    if (case_dir/"dsmc/constant/polyMesh/owner").is_file():
+        if old.get("mesh_identity") is None and (
+                any((case_dir/"dsmc").glob("processor[0-9]*"))
+                or any((case_dir/"dsmc").glob("*/lagrangian"))):
+            raise wf.WorkflowError("saved cloud has no verified DSMC mesh identity; use a fresh case")
+        mesh_identity = _mesh_identity(case_dir, old.get("mesh_identity"))
+    else:
         build = (case_dir/"mesh-build").resolve()
         for generated in [build/"constant/polyMesh", *build.glob("processor[0-9]*")]:
             if generated.exists():
@@ -106,7 +122,8 @@ def dsmc_setup(case_dir, np_ranks=None):
     (case_dir/"dsmc/spatial.foam").touch()
     result = {"geometry": "cartesian", "ranks": ranks, "run": run.describe(),
               "fitted_identity": doc["fitted_identity"], "pending_actual_geometry": True,
-              "inflow_patches": ["interface", "source"], "interface_status": doc["status"]}
+              "mesh_identity": mesh_identity, "inflow_patches": ["interface", "source"],
+              "interface_status": doc["status"]}
     wf.write_json(res/"dsmc_setup.json", result)
     return result
 
@@ -185,6 +202,8 @@ def dsmc_fields(case_dir):
     if doc.get("fitted_identity") != fitted._identity(case_dir, cfg, fit, doc["time"]):
         raise wf.WorkflowError("CFD inputs changed since fitting")
     data = fitted._load_breakdown(case_dir)
+    setup = json.loads((res/"dsmc_setup.json").read_text())
+    mesh_identity = _mesh_identity(case_dir, setup.get("mesh_identity"))
     cmesh, mesh = read_mesh(case_dir/"cfd"), read_mesh(case_dir/"dsmc")
     faces, normals, areas, geo = _geometry(mesh, cmesh, data, fit, cfg, source)
     cells = fitted.sample_containing_cells(cmesh, mesh.face_centres[faces], data["retained"], axes=(0, 1, 2))
@@ -209,7 +228,6 @@ def dsmc_fields(case_dir):
     wf.write_json(res/"interface.json", doc)
     if doc["smoke_only"] and not doc.get("allow_unsuitable"):
         raise wf.WorkflowError("3D interface unsuitable: "+"; ".join(doc["reasons"])+"; explicit smoke-only override required")
-    setup = json.loads((res/"dsmc_setup.json").read_text())
     cost_cfg = config.CaseConfig(config.deep_merge(cfg.doc, {"resources": {"max_ranks": setup["ranks"]}}), cfg.path, cfg.profile)
     estimate = resources.dsmc_estimate(cost_cfg, source, number_density=state.rho[all_cells]/source.gas.mass_kg,
         temperature=state.T[all_cells], speed=state.speed[all_cells], volumes=mesh.cell_volumes,
@@ -219,6 +237,7 @@ def dsmc_fields(case_dir):
     wf.write_json(res/"memory_estimate.json", peak)
     if not peak["fits_memory_budget"]:
         raise wf.WorkflowError("estimated peak memory exceeds configured node budget; DSMC not initialized")
+    _mesh_identity(case_dir, mesh_identity)
     run = dsmc.plan_run(cfg, source, estimate, float(mesh.points[:, 0].max()))
     n_source = mesh.patches["source"].n_faces if "source" in mesh.patches else 0
     patches = dsmc.inflow_patches(True, n_source)
@@ -228,9 +247,123 @@ def dsmc_fields(case_dir):
         inflow["source"] = mapping.source_inflow(n_source, source)
     dsmc.write_fields(case_dir/"dsmc", mesh.patches, source.gas.name, inflow, source)
     setup.update(run=run.describe(), dsmc_cells=mesh.n_cells, inflow_patches=patches,
-                 pending_actual_geometry=False, interface_status=doc["status"], smoke_only=doc["smoke_only"], memory=peak)
+                 pending_actual_geometry=False, interface_status=doc["status"],
+                 mesh_identity=mesh_identity, smoke_only=doc["smoke_only"], memory=peak)
     wf.write_json(res/"dsmc_setup.json", setup)
     result = {"geometry": "cartesian", "interface_faces": len(faces), "geometry_checks": geo,
               "mapping": "containing accepted 3D CFD cells", "memory": peak}
     wf.write_json(res/"dsmc_fields.json", result)
     return result
+
+
+def dsmc_post(case_dir, time=None):
+    """Reuse 3D moment/flux readers without scattering to CFD cell numbering."""
+    return wf._dsmc_post_3d(Path(case_dir), time=time)
+
+
+def plots(case_dir):
+    """Thin meridional sections on each mesh; never project all 3D cells."""
+    case_dir = Path(case_dir)
+    cfg = wf.load_case(case_dir)
+    source = config.build_source(cfg)
+    res = wf.results_dir(case_dir)
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LogNorm
+        from matplotlib.collections import LineCollection
+    except ImportError:
+        wf.write_json(res/"plot_status.json", {"status": "unavailable",
+                      "reason": "optional matplotlib missing; inspect spatial.foam and interface.vtk"})
+        return []
+    from .ellipse import ellipse_points
+    from . import report
+    d = source.diameter_m
+    label = cfg.get("label", cfg.profile)
+    doc = json.loads((res/"interface.json").read_text()) if (res/"interface.json").is_file() else {}
+    if doc.get("smoke_only"):
+        label += " — MACHINERY SMOKE"
+    fit = json.loads((res/"ellipsoid.json").read_text()) if (res/"ellipsoid.json").is_file() else {}
+    arc = ellipse_points(fit, 401)/d if fit.get("status") == "fitted" else None
+    out = []
+    if (res/"breakdown.npz").is_file():
+        data = fitted._load_breakdown(case_dir)
+        mesh = read_mesh(case_dir/"cfd")
+        c, widths = mesh.cell_centres, mesh.cell_size()
+        select = np.abs(c[:, 2]) <= .51*widths[:, 2]
+        fig, ax = plt.subplots(figsize=(9, 5), constrained_layout=True)
+        values = data["Kn_GLL"][select]
+        values = np.where(np.isfinite(values) & (values > 0), values, np.nan)
+        image = ax.scatter(c[select, 0]/d, c[select, 1]/d, c=values, s=6, marker="s",
+                           cmap="viridis", norm=LogNorm(vmin=1e-4, vmax=1))
+        fig.colorbar(image, ax=ax, label="Kn_GLL")
+        retained = data["retained"]
+        cuts = np.flatnonzero((retained[mesh.owner[:mesh.n_internal]] != retained[mesh.neighbour])
+                             & select[mesh.owner[:mesh.n_internal]])
+        segments = []
+        for face in cuts:
+            v = mesh.face_vertices(face)
+            if v[:, 2].min() > 1e-10 or v[:, 2].max() < -1e-10 or np.ptp(v[:, 2]) < 1e-10:
+                continue
+            cross = []
+            for a, b in zip(v, np.roll(v, -1, axis=0)):
+                if abs(a[2]) < 1e-10:
+                    cross.append(a[:2])
+                elif a[2]*b[2] < 0:
+                    cross.append((a+(b-a)*(-a[2]/(b[2]-a[2])))[:2])
+            points = np.unique(np.round(cross, 12), axis=0)
+            if len(points) == 2:
+                segments.append(points/d)
+        if segments:
+            ax.add_collection(LineCollection(segments, colors="#c44e52", linewidths=1,
+                                             label="raw continuum boundary at z = 0"))
+        if arc is not None:
+            ax.plot(arc[:, 0], arc[:, 1], color="#202020", lw=2, label="fitted spheroid section")
+        ax.plot([0, 0], [-.5, .5], color="#2369b4", lw=3, label="circular source section")
+        ax.set(xlabel="x / D", ylabel="y / D", title=label+"\nCFD cells adjacent to z = 0")
+        ax.set_aspect("equal")
+        ax.legend(fontsize=8)
+        path = res/"breakdown_ellipsoid.png"
+        fig.savefig(path, dpi=130)
+        plt.close(fig)
+        out.append(path)
+    if (res/"spatial_fields.npz").is_file():
+        with np.load(res/"spatial_fields.npz") as fields:
+            c = fields["centres"]
+            select = fields["valid"] & fields["meridional"]
+            values = (fields["n"]/source.number_density, fields["T"]/source.temperature_K,
+                      fields["U"][:, 0]/source.thermal_speed)
+        fig, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
+        for ax, value, name in zip(axes, values, ("n / n_e", "T / T_e", "Ux / a_e")):
+            image = ax.scatter(c[select, 0]/d, c[select, 1]/d, c=value[select], s=4, cmap="viridis")
+            fig.colorbar(image, ax=ax, label=name)
+            if arc is not None:
+                ax.plot(arc[:, 0], arc[:, 1], color="#202020", lw=1)
+            ax.set(xlabel="x / D", ylabel="y / D")
+            ax.set_aspect("equal")
+        fig.suptitle(label+"\nDSMC cells adjacent to z = 0; unoccupied/invalid cells omitted")
+        path = res/"spatial_dsmc.png"
+        fig.savefig(path, dpi=130)
+        plt.close(fig)
+        out.append(path)
+    if (res/"centreline.csv").is_file():
+        data = np.atleast_1d(np.genfromtxt(res/"centreline.csv", delimiter=",", names=True))
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+        for ax, quantity, suffix, ylabel in zip(axes, ("n", "T", "U"),
+                ("over_ne", "over_Te", "over_ae_x"), ("n / n_e", "T / T_e", "Ux / a_e")):
+            for key, name, style in (("fa", "DSMC fieldAverage", "-"),
+                                     ("ref", "collisionless limit", ":")):
+                column = f"{quantity}_{key}_{suffix}"
+                if column in data.dtype.names:
+                    ax.plot(data["x_over_D"], data[column], style, label=name, color=report.SERIES[f"dsmc_{key}" if key == "fa" else key])
+            report._style(ax, "x / D (finite axis tube; DSMC portion)", ylabel)
+        axes[0].legend(frameon=False, fontsize=8)
+        fig.suptitle(label)
+        path = res/"centreline.png"
+        fig.savefig(path, dpi=130)
+        plt.close(fig)
+        out.append(path)
+    wf.write_json(res/"plot_status.json", {"status": "written", "artifacts": out,
+                  "section": "cells with |z centre| <= 0.51 of their z bounding width"})
+    return out

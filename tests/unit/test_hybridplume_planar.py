@@ -203,11 +203,17 @@ def test_zero_clearance_still_separates_the_ellipse_from_outer_boundaries():
     assert fit["b"] < 1-1e-9
 
 
-def test_changed_same_time_cfd_fields_invalidate_breakdown(tmp_path):
+@pytest.mark.parametrize("profile", ["planar-laptop-kn0p01", "hpc-kn1em3-ellipsoid"])
+def test_changed_same_time_cfd_fields_invalidate_breakdown(tmp_path, profile):
+    import yaml
     from _hybridmesh import box_mesh
     from plumetools.hybridplume import workflow
     case = tmp_path/"planar"
-    workflow.setup(case, STUDY, "planar-laptop-kn0p01")
+    from plumetools.hybridplume import config
+    cfg = config.load(STUDY, profile)
+    case.mkdir()
+    (case/workflow.RESOLVED).write_text(yaml.safe_dump(
+        {"profile": cfg.profile, "digest": cfg.digest, "config": cfg.doc}))
     box_mesh(case/"cfd", [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
     # Initial fields are expanded because this fixture has four cells.
     td=case/"cfd/0.001"

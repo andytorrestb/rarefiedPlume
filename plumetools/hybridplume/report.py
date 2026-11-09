@@ -85,9 +85,13 @@ def _style(ax, xlabel, ylabel):
 
 def plots(case_dir: Path) -> list:
     from .workflow import load_case
-    if load_case(case_dir).get("mesh.geometry") == "planar":
+    cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
         from .planar import plot_interface
         return plot_interface(case_dir)
+    if cfg.get("interface.mode") == "fitted-ellipsoid":
+        from .spatial import plots as spatial_plots
+        return spatial_plots(case_dir)
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

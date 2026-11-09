@@ -121,7 +121,8 @@ profiles:
       fit: {clearance_cells: 0.25, geometry_relative_tolerance: 0.02, max_source_area_error: 0.01}
     dsmc:
       mesh: {background_cell_over_D: 0.2, surface_level: 3, source_cell_over_mfp: 0.8, max_global_cells: 12000000, max_local_cells: 1000000}
-    resources: {default_ranks: 192, max_ranks: 192, max_memory_GB: 1200.0, memory_safety_factor: 1.2, analysis_bytes_per_cell: 25000, mpi_overhead_MiB_per_rank: 256}
+    # 1100 GiB < 1200 decimal GB, so the guard fits either interpretation of PBS gb.
+    resources: {default_ranks: 192, max_ranks: 192, max_memory_GB: 1100.0, memory_safety_factor: 1.2, analysis_bytes_per_cell: 25000, mpi_overhead_MiB_per_rank: 256}
 
 
   # Planar prototype: same exit state and diagnostics; no circular-disk reference.

@@ -129,6 +129,8 @@ def setup(case_dir: Path, config_path: Path, profile: str | None, *,
     written = cfd_mod.write_case(target, cfg, source, plan, n_ranks=ranks)
     if cfg.get("mesh.geometry") == "planar":
         (target / "planar.foam").touch()
+    elif cfg.get("interface.mode") == "fitted-ellipsoid":
+        (target / "spatial.foam").touch()
     assessment = resources.assess_configuration(cfg, source, plan)
     doc = {
         "label": cfg.get("label", cfg.profile),
@@ -543,13 +545,23 @@ def _log_series(log: Path, pattern: str) -> np.ndarray:
 
 def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
     """Sampled DSMC solution, measured injection/return, budgets, comparisons."""
-    from . import collisionless, halfrange, mapping, particles, post, resources
-    from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.dsmc_post(case_dir, time=time)
+    if cfg.get("interface.mode") == "fitted-ellipsoid":
+        from . import spatial
+        return spatial.dsmc_post(case_dir, time=time)
+    return _dsmc_post_3d(case_dir, time=time)
+
+
+def _dsmc_post_3d(case_dir: Path, time: str | None = None) -> dict:
+    """Shared 3D moment/flux readers; remeshed cases retain their own geometry."""
+    from . import collisionless, halfrange, mapping, particles, post, resources
+    from .meshgeom import read_mesh
+    cfg = load_case(case_dir)
+    own_mesh = cfg.get("interface.mode") == "fitted-ellipsoid"
     source = config_mod.build_source(cfg)
     gas = source.gas
     res = results_dir(case_dir)
@@ -571,6 +583,25 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
 
     # -- fieldAverage moments ------------------------------------------------
     fa = post.dsmc_fieldaverage(dsmc_dir / t_final, gas)
+    if any(len(values) != dmesh.n_cells for values in fa.values()):
+        raise WorkflowError("DSMC mean field length does not match its mesh")
+    if own_mesh:
+        from . import breakdown as bd
+        valid = ((fa["n"] > 0) & (fa["T"] > 0) & np.isfinite(fa["n"])
+                 & np.isfinite(fa["T"]) & np.isfinite(fa["U"]).all(axis=1))
+        np.savez_compressed(res / "spatial_fields.npz", centres=dmesh.cell_centres,
+                            volumes=dmesh.cell_volumes, valid=valid,
+                            meridional=np.abs(dmesh.cell_centres[:, 2]) <= .51*sizes[:, 2], **fa)
+        bd.write_fields(dsmc_dir, t_final, dmesh, {
+            "spatial_n_over_ne": np.where(valid, fa["n"] / source.number_density, np.nan),
+            "spatial_T_over_Te": np.where(valid, fa["T"] / source.temperature_K, np.nan),
+            "spatial_Ux_over_ae": np.where(valid, fa["U"][:, 0] / source.thermal_speed, np.nan)})
+        (dsmc_dir / "spatial.foam").touch()
+        doc.update(geometry="cartesian", cells=dmesh.n_cells, valid_cells=int(valid.sum()),
+                   invalid_or_unoccupied_cells=int((~valid).sum()),
+                   mesh_basis="actual independent 3D DSMC mesh; no CFD addressing map",
+                   artifacts={"spatial_fields": str(res / "spatial_fields.npz"),
+                              "paraview": str(dsmc_dir / "spatial.foam")})
     occ = fa["parcels_per_step"]
     doc["sampling"] = {
         "average_start_s": t_avg, "end_s": float(t_final),
@@ -644,7 +675,7 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
         dsmc_fields_[name] = particles.block_statistics([b[k] for b in per_block])["stderr"]
     cell_map = res / "dsmc_to_cfd_cells.npy"
     t_cfd = _latest_or_none(case_dir / "cfd") if (case_dir / "cfd").is_dir() else None
-    hybrid = cell_map.is_file() and t_cfd is not None and float(t_cfd) > 0
+    hybrid = not own_mesh and cell_map.is_file() and t_cfd is not None and float(t_cfd) > 0
     if hybrid:
         from . import breakdown as bd
         cmesh = read_mesh(case_dir / "cfd")
@@ -674,7 +705,8 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
     else:
         centres, volumes, n_all = dmesh.cell_centres, dmesh.cell_volumes, dmesh.n_cells
         fields = dict(dsmc_fields_)
-        h = float(np.min(sizes[:, 1]))
+        h = (float(cfg.require("mesh.core_cell_over_D")) * source.diameter_m
+             if own_mesh else float(np.min(sizes[:, 1])))
     axis = post.axis_cells(centres, h * 0.51)
     ref = collisionless.reference(centres[axis], source)
     for k in ("n", "T", "U"):

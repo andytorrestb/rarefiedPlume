@@ -118,3 +118,93 @@ not applicable. Matplotlib is optional for plots; the `.foam` cases remain usabl
 This intentionally under-resolved prototype is for assessing the interface and
 workflow. Development checks covered numerical fitting, cell mapping and native
 mesh generation; neither CFD nor DSMC was run for this prototype.
+
+## 3D fitted ellipsoid on the HPC
+
+`hpc-kn1em3-ellipsoid` uses the full circular argon source at **exit Kn = 0.001**,
+D = 0.2 m, T = 300 K and speed ratio 2. The domain is x = 0…8 D and
+y,z = −5…5 D (1.6 m downstream, 2 m across). There are no wedge, symmetry or
+planar reductions. VHS collisions, Minmod and the 0.25 viscous timestep factor
+are retained. This is an initial resolution for manual assessment, without a
+convergence or cluster performance claim.
+
+On the cluster, submit from the **repository root**:
+
+```bash
+qsub cases/cai2012-hybrid/run3DCase.sh
+# Alternatively, from cases/cai2012-hybrid:
+qsub run3DCase.sh
+```
+
+The dedicated wrapper requests one node, **192 cores**, `mem=1200gb`, `longq`
+and a 120-hour ceiling. It sources the existing cluster environment and builds
+the two plume libraries if absent. Its default stage is `all`: CFD precursor,
+breakdown/fit, parallel DSMC meshing, face transfer and suitability checks,
+`dsmcInitialise`, parallel `dsmcFoam` startup **and sampling**, then post-processing.
+Nothing is submitted remotely by the development workflow.
+
+The default output directory is `cases/cai2012-hybrid/runs/hpc-kn1em3-ellipsoid`.
+Use an absolute `CASE_DIR` for a different output location. Resubmit the same
+command after interruption to resume complete checkpoints. To resume only DSMC,
+or regenerate reports from a completed run:
+
+```bash
+qsub -v STAGE=dsmc cases/cai2012-hybrid/run3DCase.sh
+qsub -v STAGE=post-dsmc cases/cai2012-hybrid/run3DCase.sh
+# Optional different output directory (same value on every restart):
+qsub -v CASE_DIR=/absolute/scratch/my-plume cases/cai2012-hybrid/run3DCase.sh
+```
+
+The initial Cartesian CFD lattice is 160 × 240 × 240 (9,216,000 cells), with
+D/40 core spacing and graded outer cells. The fit maximizes clipped spheroid
+volume `(xc,a,b,b)` within the source-connected accepted **3D voxel footprints**,
+including off-axis exclusions and interior pockets. Clearance is 0.25 CFD core
+cells; an independent all-voxel verification follows optimization. No feasible
+fit means a stop, with diagnostics, rather than a relaxed breakdown threshold.
+The result is a local constrained optimum; no global optimum is claimed.
+
+Native `snappyHexMesh` uses a `searchableSphere` with vector radius `(a b b)`.
+The DSMC background spacing is 0.2 D; interface refinement level is 3. Hollow
+refinement regions around the source rim target 0.8 exit mean free paths so the
+uncovered source remains resolved without filling the entire box at that size.
+Initial caps are 12 million global / 1 million local cells. These controls live
+in `dsmc.mesh`; they do not establish a converged collision-cell resolution.
+Meshing uses `mesh-build/processor*`, separate from DSMC restart ownership.
+
+Actual snapped facets must stay within a certified continuum-valid enclosure
+and within 2% of the fitted radius. Source area coverage must agree with the
+intended disk to 1%; density is never rescaled to hide geometry error. The
+existing Mach, return-flow, overlap and flux criteria still apply. A larger
+domain may help, but does not guarantee a suitable coupling surface.
+
+Resource reports use **GiB = 2³⁰ bytes**, including the historically named
+`resources.max_memory_GB`. This profile stops at an estimated **1100 GiB**,
+below 1200 decimal GB as well as 1200 GiB, to accommodate site-specific PBS
+`gb` units and reserve headroom on the 1.5 TB node. The estimate includes both
+meshes, analysis temporaries (25,000 bytes/cell), DSMC parcels/cells, 256 MiB
+per MPI rank and a 1.2 safety factor. Controls are under `resources`; the
+actual-cell estimate is written before DSMC initialization. It is an estimate,
+not measured peak RAM. Particle weight and physical density are not adjusted
+merely to pass the memory guard.
+
+Inspect `results/ellipsoid.json`, `interface.json`, `dsmc_fields.json` and
+`memory_estimate.json` for the fit, actual-facet certification, source coverage,
+suitability and resolution/resource statistics. `breakdown_ellipsoid.png` shows
+the raw continuum boundary and smooth spheroid at z = 0. `spatial_dsmc.png`,
+`spatial_fields.npz` and `centreline.csv` use the actual independent DSMC mesh;
+the centreline covers its downstream portion. Plots select thin meridional
+bands rather than projecting all azimuths. Open `cfd/spatial.foam`,
+`dsmc/spatial.foam` and `results/interface.vtk` in ParaView. Circular-source
+reference comparisons are labelled **collisionless-limit comparisons**, not
+accuracy errors for this collisional case. Empty cells stay flagged.
+
+An unsuitable verdict stops before DSMC initialization. After examining it,
+an explicitly authorized machinery smoke run can use
+`qsub -v ALLOW_UNSUITABLE=1 cases/cai2012-hybrid/run3DCase.sh`; the verdict and
+`smoke_only` label remain recorded. Infeasible geometry, stale CFD inputs, invalid
+mesh geometry and excess memory cannot be overridden. Changes to the fit,
+configuration or frozen CFD state require a fresh case directory.
+
+Development ran only focused checks and a synthetic, very coarse native 3D
+fixture: 7,134 DSMC cells, two-rank meshing, initialization and five serial DSMC
+steps. The production mesh and HPC job were not run on the laptop.

@@ -43,7 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
-_HEADER = re.compile(rb"^\s*(\d+)\s*$", re.M)
+_HEADER = re.compile(rb"^\s*(\d+)\s*(?=\()", re.M)
 
 
 def _list_body(path: Path) -> tuple:

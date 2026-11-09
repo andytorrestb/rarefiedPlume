@@ -46,6 +46,17 @@ def test_reads_both_list_forms(tmp_path):
         assert np.array_equal(c.ident & 0xFFFFFFFF, [10, 11])
 
 
+def test_reads_short_ascii_parcel_lists(tmp_path):
+    _write_cloud(tmp_path/"1", [[.1, .2, .3], [.4, .5, .6]], [3, 7],
+                 [[1, 2, 3], [4, 5, 6]], [10, 11])
+    d = tmp_path/"1/lagrangian/dsmc"
+    (d/"U").write_text(HEAD.format(cls="vectorField", obj="U")+"2((1 2 3) (4 5 6))\n")
+    (d/"origId").write_text(HEAD.format(cls="labelField", obj="origId")+"2(10 11)\n")
+    cloud = particles.read_cloud(tmp_path/"1")
+    assert cloud.velocity.tolist() == [[1, 2, 3], [4, 5, 6]]
+    assert (cloud.ident & 0xFFFFFFFF).tolist() == [10, 11]
+
+
 def test_moments_recover_a_drifting_maxwellian():
     rng = np.random.default_rng(7)
     gas = BIRD_ARGON

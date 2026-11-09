@@ -52,7 +52,7 @@ def peak_memory_estimate(cfg, cfd_cells, dsmc_estimate, *, ranks):
     peak = factor*(analysis+simulation+mpi)/GB
     budget = float(cfg.get("resources.max_memory_GB", 1200))
     return {"peak_GiB": peak, "budget_GiB": budget, "fits_memory_budget": peak <= budget,
-            "safety_factor": factor, "units": "GiB; PBS gb is treated as GiB",
+            "safety_factor": factor, "units": "GiB (2^30 bytes); PBS resource units are site-defined",
             "basis": "both meshes, analysis temporaries, DSMC cells/parcels and MPI overhead; estimate, not a measured peak"}
 
 
@@ -176,6 +176,9 @@ def assess_configuration(cfg: CaseConfig, source: SourceState, plan: MeshPlan) -
     if cfg.get("mesh.geometry") == "planar":
         n = np.full(len(centres), source.number_density)
         basis = "planar pre-CFD sizing bound: exit density and temperature throughout; not a disk reference"
+    elif cfg.get("interface.mode") == "fitted-ellipsoid":
+        n = np.full(len(centres), source.number_density)
+        basis = "3D fitted pre-CFD sizing bound: exit density and temperature throughout; actual-cell estimate follows transfer"
     else:
         n = source.number_density * analytical.density_ratio(
             centres[:, 0], centres[:, 1], centres[:, 2], source.radius_m, source.speed_ratio)

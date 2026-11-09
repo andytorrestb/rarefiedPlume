@@ -175,8 +175,8 @@ stage_post_cfd() {
     $HP cfd-report "$CASE" >/dev/null || die "cfd-report failed"
     $HP breakdown "$CASE" >/dev/null || die "breakdown failed"
     $HP interface "$CASE" $ALLOW || true    # an unsuitable verdict is a result
-    if [ "$(cfg_value mesh.geometry cartesian)" = planar ]; then
-        $HP report "$CASE" >/dev/null || die "planar interface report failed"
+    if [ "$(cfg_value mesh.geometry cartesian)" = planar ] || [ "$(cfg_value interface.mode automatic)" = fitted-ellipsoid ]; then
+        $HP report "$CASE" >/dev/null || die "fitted interface report failed"
     fi
 }
 
