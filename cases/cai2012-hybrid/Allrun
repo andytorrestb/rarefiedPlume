@@ -182,12 +182,43 @@ stage_post_cfd() {
 
 stage_prepare_dsmc() {
     need_lib libplumeDsmcBoundaryModels.so
-    if [ "$(cfg_value mesh.geometry cartesian)" = planar ] && [ -n "$ALLOW" ]; then
+    if { [ "$(cfg_value mesh.geometry cartesian)" = planar ] || [ "$(cfg_value interface.mode automatic)" = fitted-ellipsoid ]; } && [ -n "$ALLOW" ]; then
         $HP interface "$CASE" $ALLOW >/dev/null || die "interface override failed"
     fi
     $HP dsmc-setup "$CASE" ${NP:+--np $NP} >/dev/null || die "dsmc-setup refused (see results/interface.json)"
     cd "$CASE/dsmc" || die "no $CASE/dsmc"
-    if [ "$(cfg_value mesh.geometry cartesian)" = planar ]; then
+    if [ "$(cfg_value interface.mode automatic)" = fitted-ellipsoid ]; then
+        if [ ! -f constant/polyMesh/owner ]; then
+            local mesh_ranks
+            mesh_ranks=$(ranks)
+            cd "$CASE/mesh-build" || die "no meshing workspace"
+            run blockMesh blockMesh
+            if [ "$mesh_ranks" -gt 1 ]; then
+                cp "$CASE/dsmc/system/decomposeParDict" system/decomposeParDict
+                run decomposePar decomposePar -time none -force
+                run snappyHexMesh mpirun -np "$mesh_ranks" snappyHexMesh -parallel -overwrite
+                run reconstructParMesh reconstructParMesh -constant
+            else
+                run snappyHexMesh snappyHexMesh -overwrite
+            fi
+            run topoSet topoSet
+            run createPatch createPatch -overwrite
+            $PYTHON - "$CASE" <<'PYMESH'
+import sys
+from pathlib import Path
+from plumetools.hybridplume.spatial import publish_mesh
+publish_mesh(Path(sys.argv[1]))
+PYMESH
+            [ "$?" -eq 0 ] || die "3D mesh publication failed"
+            cd "$CASE/dsmc" || die "no DSMC case"
+        fi
+        if [ ! -f .mesh-checked ]; then
+            run checkMesh checkMesh
+            grep -q "Mesh OK" log.checkMesh || die "3D mesh quality failed"
+            touch .mesh-checked
+        fi
+        $HP dsmc-fields "$CASE" >/dev/null || die "3D face mapping/suitability/memory check refused"
+    elif [ "$(cfg_value mesh.geometry cartesian)" = planar ]; then
         [ -f constant/polyMesh/owner ] || run blockMesh blockMesh
         [ -f log.checkMesh ] || run checkMesh checkMesh
         $HP dsmc-fields "$CASE" >/dev/null || die "planar face assessment/mapping refused (see results/interface.json)"

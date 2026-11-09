@@ -359,6 +359,9 @@ def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = 
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("interface.mode") == "fitted-ellipsoid":
+        from . import spatial
+        return spatial.interface(case_dir, time=time, allow_unsuitable=allow_unsuitable)
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.interface(case_dir, time=time, allow_unsuitable=allow_unsuitable)
@@ -460,6 +463,9 @@ def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
     np_ranks = kwargs.get("np", np_ranks)
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("interface.mode") == "fitted-ellipsoid":
+        from . import spatial
+        return spatial.dsmc_setup(case_dir, np_ranks=np_ranks)
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.dsmc_setup(case_dir, np_ranks=np_ranks)
@@ -1030,6 +1036,9 @@ def dsmc_fields(case_dir: Path) -> dict:
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("interface.mode") == "fitted-ellipsoid":
+        from . import spatial
+        return spatial.dsmc_fields(case_dir)
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.dsmc_fields(case_dir)

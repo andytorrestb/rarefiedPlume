@@ -59,3 +59,34 @@ def test_hpc_profile_is_3d_kn001_with_predicted_budget():
     assert plan.divisions == (160, 240, 240)
     assert cfg.get("interface.mode") == "fitted-ellipsoid"
     assert cfg.get("resources.default_ranks") == 192
+
+
+def test_facet_enclosure_refuses_excluded_voxel():
+    from plumetools.hybridplume.spatial import certify_facets
+    from plumetools.hybridplume.workflow import WorkflowError
+    lo = np.array([[.4, -.1, -.1]])
+    hi = np.array([[.6, .1, .1]])
+    # Vertices lie on a large enclosing surface whose interior crosses the hole.
+    with pytest.raises(WorkflowError, match="excluded|continuum"):
+        certify_facets(np.array([[1, 0, 0], [0, .5, 0], [0, 0, .5]]),
+                       dict(xc=0, a=1, b=.5), lo, hi, np.array([False]), .1)
+
+
+def test_peak_budget_counts_parcels_before_initialization():
+    from plumetools.hybridplume import config, resources
+    cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
+    result = resources.peak_memory_estimate(cfg, 9216000,
+                                          dict(cells=1000000, parcels=1e9), ranks=192)
+    assert not result["fits_memory_budget"]
+    assert result["peak_GiB"] > 1200
+
+
+def test_mesh_publication_never_publishes_mesher_processors(tmp_path):
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume.spatial import publish_mesh
+    box_mesh(tmp_path/"mesh-build", [0, .1], [-.1, .1], [-.1, .1], .1)
+    (tmp_path/"mesh-build/processor0").mkdir()
+    (tmp_path/"dsmc/constant").mkdir(parents=True)
+    publish_mesh(tmp_path)
+    assert (tmp_path/"dsmc/constant/polyMesh/owner").is_file()
+    assert not (tmp_path/"dsmc/processor0").exists()

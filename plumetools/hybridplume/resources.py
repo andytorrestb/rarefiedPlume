@@ -40,6 +40,22 @@ from .physics import SourceState
 GB = 1024.0 ** 3
 
 
+def peak_memory_estimate(cfg, cfd_cells, dsmc_estimate, *, ranks):
+    """Conservative single-node peak estimate, in GiB (not decimal GB)."""
+    cells = float(dsmc_estimate["cells"])
+    parcels = float(dsmc_estimate["parcels"])
+    analysis = (float(cfd_cells)+cells)*float(cfg.get("resources.analysis_bytes_per_cell", 25000))
+    simulation = (cells*float(cfg.get("resources.bytes_per_cell", 25000))
+                  + parcels*float(cfg.get("resources.bytes_per_parcel", 3000)))
+    mpi = ranks*float(cfg.get("resources.mpi_overhead_MiB_per_rank", 256))*1024**2
+    factor = float(cfg.get("resources.memory_safety_factor", 1.2))
+    peak = factor*(analysis+simulation+mpi)/GB
+    budget = float(cfg.get("resources.max_memory_GB", 1200))
+    return {"peak_GiB": peak, "budget_GiB": budget, "fits_memory_budget": peak <= budget,
+            "safety_factor": factor, "units": "GiB; PBS gb is treated as GiB",
+            "basis": "both meshes, analysis temporaries, DSMC cells/parcels and MPI overhead; estimate, not a measured peak"}
+
+
 def _lattice_sample(plan: MeshPlan, max_points: int = 60_000):
     """Cell centres and volumes of the box lattice, sub-sampled for big meshes.
 
