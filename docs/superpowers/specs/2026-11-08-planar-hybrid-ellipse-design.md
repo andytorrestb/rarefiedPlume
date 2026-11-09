@@ -1,6 +1,6 @@
 # Planar CFD–DSMC prototype with a conservative elliptical interface
 
-Status: proposed for owner approval, 2026-11-08.
+Status: approved by the owner, 2026-11-08.
 
 ## Intent and agreed scope
 
