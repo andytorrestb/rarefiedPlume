@@ -84,3 +84,66 @@ def test_curved_mesh_keeps_partial_slit_and_native_ellipsoid():
     assert "type searchableSphere;" in dictionary
     assert dictionary.count("type empty;") == 2
     assert "source" in dictionary and "interface" in dictionary
+
+
+def test_containing_cell_mapping_refuses_invalid_and_outside_points(tmp_path):
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume.meshgeom import read_mesh
+    from plumetools.hybridplume.planar import sample_containing_cells
+    from plumetools.hybridplume.workflow import WorkflowError
+    box_mesh(tmp_path, [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
+    mesh = read_mesh(tmp_path)
+    allowed = np.ones(4, bool)
+    points = np.array([[.03, -.03, 0], [.16, .02, 0]])
+    assert sample_containing_cells(mesh, points, allowed).tolist() == [0, 3]
+    allowed[3] = False
+    with pytest.raises(WorkflowError, match="accepted|allowed"):
+        sample_containing_cells(mesh, points, allowed)
+    with pytest.raises(WorkflowError, match="outside"):
+        sample_containing_cells(mesh, [[.3, 0, 0]], np.ones(4, bool))
+
+
+def test_empty_depth_planes_add_no_reconstructed_flux(tmp_path):
+    from types import SimpleNamespace
+    from plumetools.hybridplume.budgets import reconstructed_patch_fluxes
+    from plumetools.hybridplume.physics import BIRD_ARGON
+    mesh = SimpleNamespace(patches={"front": SimpleNamespace(n_faces=1, type="empty")})
+    assert reconstructed_patch_fluxes(tmp_path, "1", mesh, BIRD_ARGON) == {}
+
+
+def test_planar_timestep_uses_actual_inplane_width():
+    from plumetools.hybridplume import config, resources
+    cfg = config.load(STUDY, "planar-laptop-kn0p01", {"dsmc": {"collisions": False}})
+    source = config.build_source(cfg)
+    est = resources.dsmc_estimate(
+        cfg, source, number_density=[1e15], temperature=[300], speed=[10],
+        volumes=[1e-6], sizes=[[.1, .1]], tracking_sizes=[.001],
+        length_scale_m=.4, basis="synthetic planar cell")
+    expected = .2*.001/(10 + 3*np.sqrt(source.gas.gas_constant*300))
+    assert est["dt_s"] == pytest.approx(expected)
+    assert est["densest_cell"]["cell_size_m"] == pytest.approx(.1)
+
+
+def test_planar_workflow_reports_infeasible_fit_before_dsmc(tmp_path):
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume import workflow
+    case = tmp_path/"planar"
+    setup = workflow.setup(case, STUDY, "planar-laptop-kn0p01")
+    assert setup["n_ranks"] == 1
+    box_mesh(case/"cfd", [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
+    np.savez(case/"results/breakdown.npz", retained=np.zeros(4, bool), time="0.001")
+    result = workflow.interface(case)
+    assert result["status"] == "no_continuum_region"
+    with pytest.raises(workflow.WorkflowError, match="no feasible ellipse"):
+        workflow.dsmc_setup(case)
+
+
+def test_mapping_tolerates_mesh_writer_coordinate_roundoff(tmp_path):
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume.meshgeom import read_mesh
+    from plumetools.hybridplume.planar import sample_containing_cells
+    box_mesh(tmp_path, [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
+    mesh = read_mesh(tmp_path)
+    mesh.points[(mesh.points[:, 1] == 0) & (mesh.points[:, 2] < 0), 1] += 1e-16
+    points = [[.03, -.03, 0], [.16, .02, 0]]
+    assert sample_containing_cells(mesh, points, np.ones(4, bool)).tolist() == [0, 3]

@@ -80,7 +80,7 @@ def cfd_estimate(cfg: CaseConfig, source: SourceState, plan: MeshPlan) -> dict:
 
 def dsmc_estimate(cfg: CaseConfig, source: SourceState, *, number_density, temperature,
                   speed, volumes, sizes, length_scale_m: float, cell_weight=1.0,
-                  basis: str) -> dict:
+                  basis: str, tracking_sizes=None) -> dict:
     """Parcels, memory, step, runtime and resolution for a set of DSMC cells."""
     gas = source.gas
     n = np.asarray(number_density, float)
@@ -102,7 +102,10 @@ def dsmc_estimate(cfg: CaseConfig, source: SourceState, *, number_density, tempe
     collisions = bool(cfg.get("dsmc.collisions", True))
     sigma = np.sqrt(gas.gas_constant * t)
     signal = float(np.max((u + 3.0 * sigma)[ok]))
-    dt_courant = float(cfg.get("dsmc.max_courant", 0.2)) * float(np.min(dx[ok])) / signal
+    tracking = dx if tracking_sizes is None else np.asarray(tracking_sizes, float)
+    if np.any(~np.isfinite(tracking)) or np.any(tracking <= 0):
+        raise ValueError("tracking cell sizes must be positive and finite")
+    dt_courant = float(cfg.get("dsmc.max_courant", 0.2)) * float(np.min(tracking[ok])) / signal
     dt_coll = float(cfg.get("dsmc.max_dt_over_collision_time", 0.5)) * float(np.nanmin(tau[ok]))
     dt = min(dt_courant, dt_coll) if collisions else dt_courant
     transit = length_scale_m / source.velocity

@@ -121,7 +121,7 @@ def setup(case_dir: Path, config_path: Path, profile: str | None, *,
     source = config_mod.build_source(cfg)
     plan = mesh_mod.plan(cfg, source)
     pred = mesh_mod.predicted_source(plan, source)
-    ranks = int(n_ranks or cfg.get("resources.max_ranks", 1))
+    ranks = int(n_ranks or cfg.get("resources.default_ranks", cfg.get("resources.max_ranks", 1)))
     ranks = max(1, min(ranks, int(cfg.get("resources.max_ranks", ranks))))
 
     target = case_dir / subdir
@@ -347,6 +347,9 @@ def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = 
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        return planar.interface(case_dir, time=time, allow_unsuitable=allow_unsuitable)
     source = config_mod.build_source(cfg)
     gas = source.gas
     mode = cfg.get("interface.mode", "automatic")
@@ -445,6 +448,9 @@ def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
     np_ranks = kwargs.get("np", np_ranks)
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        return planar.dsmc_setup(case_dir, np_ranks=np_ranks)
     source = config_mod.build_source(cfg)
     res = results_dir(case_dir)
     itf_path = res / "interface.json"
@@ -1006,6 +1012,9 @@ def dsmc_fields(case_dir: Path) -> dict:
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        return planar.dsmc_fields(case_dir)
     source = config_mod.build_source(cfg)
     res = results_dir(case_dir)
     dsmc_dir = case_dir / "dsmc"

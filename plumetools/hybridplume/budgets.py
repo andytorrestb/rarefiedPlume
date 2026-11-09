@@ -50,7 +50,7 @@ def reconstructed_patch_fluxes(case: Path, time: str, mesh: MeshGeometry, gas) -
     out = {}
     d = Path(case) / time
     for name, info in mesh.patches.items():
-        if info.n_faces == 0:
+        if info.n_faces == 0 or info.type == "empty":
             continue
         sl = mesh.patch_slice(name)
         s = mesh.face_areas[sl]

@@ -5,6 +5,7 @@
 #   ./Allrun <case-dir> setup [--profile NAME] [--config FILE] [-np N]
 #   ./Allrun <case-dir> cfd   [-np N] [--subdir cfd|cfd_bgXe-YY]
 #   ./Allrun <case-dir> post-cfd                     # cfd-report, breakdown, interface
+#   ./Allrun <case-dir> prepare-dsmc [-np N]          # mesh and inflow; no solver
 #   ./Allrun <case-dir> dsmc  [-np N]                # dsmc-setup, mesh, fields, solve
 #   ./Allrun <case-dir> post-dsmc                    # dsmc-post, reference, report
 #   ./Allrun <case-dir> crossings [-np N]            # exact exits: N extra steps,
@@ -81,7 +82,8 @@ ranks() {
     $PYTHON - "$CASE" <<'EOF'
 import sys, yaml, pathlib
 doc = yaml.safe_load((pathlib.Path(sys.argv[1]) / "hybrid.resolved.yaml").read_text())
-print(int(doc["config"].get("resources", {}).get("max_ranks", 1)))
+resources = doc["config"].get("resources", {})
+print(int(resources.get("default_ranks", resources.get("max_ranks", 1))))
 EOF
 }
 
@@ -175,20 +177,32 @@ stage_post_cfd() {
     $HP interface "$CASE" $ALLOW || true    # an unsuitable verdict is a result
 }
 
-stage_dsmc() {
+stage_prepare_dsmc() {
     need_lib libplumeDsmcBoundaryModels.so
+    if [ "$(cfg_value mesh.geometry cartesian)" = planar ] && [ -n "$ALLOW" ]; then
+        $HP interface "$CASE" $ALLOW >/dev/null || die "interface override failed"
+    fi
     $HP dsmc-setup "$CASE" ${NP:+--np $NP} >/dev/null || die "dsmc-setup refused (see results/interface.json)"
     cd "$CASE/dsmc" || die "no $CASE/dsmc"
-    # dsmc-setup copied the CFD mesh, appended a zero-face 'interface' patch of
-    # type patch (subsetMesh would otherwise create it as 'empty') and wrote the
-    # set of cells the DSMC keeps. subsetMesh removes the retained continuum.
-    if [ -f constant/polyMesh/sets/continuumComplement ] && [ ! -f log.subsetMesh ]; then
-        run subsetMesh subsetMesh continuumComplement -patch interface -overwrite
+    if [ "$(cfg_value mesh.geometry cartesian)" = planar ]; then
+        [ -f constant/polyMesh/owner ] || run blockMesh blockMesh
+        [ -f log.checkMesh ] || run checkMesh checkMesh
+        $HP dsmc-fields "$CASE" >/dev/null || die "planar face assessment/mapping refused (see results/interface.json)"
+    else
+        # Original 3D path: shared mesh minus the retained continuum.
+        if [ -f constant/polyMesh/sets/continuumComplement ] && [ ! -f log.subsetMesh ]; then
+            run subsetMesh subsetMesh continuumComplement -patch interface -overwrite
+        fi
+        if [ ! -f 0/boundaryT ]; then
+            run checkMesh checkMesh
+            $HP dsmc-fields "$CASE" >/dev/null || die "dsmc-fields failed"
+        fi
     fi
-    if [ ! -f 0/boundaryT ]; then
-        run checkMesh checkMesh
-        $HP dsmc-fields "$CASE" >/dev/null || die "dsmc-fields failed"
-    fi
+}
+
+stage_dsmc() {
+    stage_prepare_dsmc
+    cd "$CASE/dsmc" || die "no $CASE/dsmc"
     if [ ! -d "$(ls -d [0-9]* 2>/dev/null | sort -g | tail -1)/lagrangian" ] \
        && [ ! -d processor0 ]; then
         run dsmcInitialise dsmcInitialise
@@ -206,6 +220,7 @@ case "$STAGE" in
     setup)     stage_setup ;;
     cfd)       stage_cfd ;;
     post-cfd)  stage_post_cfd ;;
+    prepare-dsmc) stage_prepare_dsmc ;;
     dsmc)      stage_dsmc ;;
     post-dsmc) stage_post_dsmc ;;
     crossings) stage_crossings ;;
