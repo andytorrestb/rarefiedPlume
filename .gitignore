@@ -203,3 +203,7 @@ applications/dsmcBoundaryModels/plumeFieldInflow/Make/linux64*/
 /cases/**/*.o[0-9]*
 /cases/**/*.log
 *.swp
+
+
+cases/cai2012-radial-resolution/Cases-local-more-sampling/
+cases/cai2012-radial-resolution/analysis-local-completed-2026-11-08/
