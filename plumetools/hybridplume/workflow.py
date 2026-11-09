@@ -127,6 +127,8 @@ def setup(case_dir: Path, config_path: Path, profile: str | None, *,
     target = case_dir / subdir
     mesh_mod.write_mesh_setup(target, plan, source)
     written = cfd_mod.write_case(target, cfg, source, plan, n_ranks=ranks)
+    if cfg.get("mesh.geometry") == "planar":
+        (target / "planar.foam").touch()
     assessment = resources.assess_configuration(cfg, source, plan)
     doc = {
         "label": cfg.get("label", cfg.profile),
@@ -529,6 +531,9 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        return planar.dsmc_post(case_dir, time=time)
     source = config_mod.build_source(cfg)
     gas = source.gas
     res = results_dir(case_dir)
@@ -847,6 +852,9 @@ def reference(case_dir: Path, **_) -> dict:
     from plumetools.cai2012 import analytical
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        return planar.reference(case_dir)
     source = config_mod.build_source(cfg)
     pts = collisionless.centreline_and_angular_points(source)
     res = results_dir(case_dir)

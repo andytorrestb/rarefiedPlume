@@ -147,3 +147,46 @@ def test_mapping_tolerates_mesh_writer_coordinate_roundoff(tmp_path):
     mesh.points[(mesh.points[:, 1] == 0) & (mesh.points[:, 2] < 0), 1] += 1e-16
     points = [[.03, -.03, 0], [.16, .02, 0]]
     assert sample_containing_cells(mesh, points, np.ones(4, bool)).tolist() == [0, 3]
+
+
+def test_planar_reference_is_not_applicable_before_a_solver_run(tmp_path):
+    from plumetools.hybridplume import workflow
+    case = tmp_path/"planar"
+    workflow.setup(case, STUDY, "planar-laptop-kn0p01")
+    result = workflow.reference(case)
+    assert result["status"] == "not_applicable"
+    assert "planar" in result["reason"]
+
+
+def test_planar_post_and_report_use_dsmc_geometry_without_a_cfd_map(tmp_path):
+    import json
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume import workflow
+    from plumetools.hybridplume.physics import BIRD_ARGON
+    case = tmp_path/"planar"
+    workflow.setup(case, STUDY, "planar-laptop-kn0p01")
+    box_mesh(case/"dsmc", [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
+    td=case/"dsmc/0.001"
+    td.mkdir(parents=True)
+    rho = 2e20*BIRD_ARGON.mass_kg
+    mean_values = {
+        "rhoNMean": ("scalar", "2e20"), "rhoMMean": ("scalar", str(rho)),
+        "momentumMean": ("vector", f"({rho*150} 0 0)"),
+        "linearKEMean": ("scalar", str(.5*rho*(3*BIRD_ARGON.gas_constant*300+150**2))),
+        "dsmcRhoNMean": ("scalar", "20"),
+    }
+    for name,(kind,row) in mean_values.items():
+        (td/name).write_text(f"FoamFile {{ version 2.0; format ascii; object {name}; }}\n"
+                            f"internalField nonuniform List<{kind}>\n4\n(\n"
+                            + "\n".join([row]*4)+"\n);\n")
+    (case/"results/dsmc_setup.json").write_text(json.dumps({
+        "run": {"average_start_s": 0, "dt_s": 1e-6, "weight": 1e10}, "smoke_only": True}))
+    doc = workflow.dsmc_post(case)
+    assert doc["geometry"] == "planar" and doc["valid_cells"] == 4
+    assert doc["analytical_reference"]["status"] == "not_applicable"
+    assert not (case/"results/dsmc_to_cfd_cells.npy").exists()
+    with np.load(case/"results/planar_fields.npz") as fields:
+        assert np.allclose(fields["T"], 300)
+    assert (case/"results/centreline.csv").is_file()
+    report = workflow.report(case)
+    assert "dsmc_post" in report["stages_present"]

@@ -139,6 +139,7 @@ def dsmc_setup(case_dir, np_ranks=None):
         patches.append("source")
     dsmc.write_case(case_dir/"dsmc", cfg, source, run, patches, ranks)
     (case_dir/"dsmc/system/blockMeshDict").write_text(render_dsmc_mesh(cfg, source, fit))
+    (case_dir/"dsmc/planar.foam").touch()
     out = {"label": cfg.get("label", cfg.profile), "geometry": "planar",
            "interface_status": doc["status"], "inflow_patches": patches, "ranks": ranks,
            "run": run.describe(), "pending_actual_geometry": True,
@@ -355,3 +356,147 @@ def dsmc_fields(case_dir):
     wf.write_json(res/"dsmc_fields.json", result)
     (case_dir/"dsmc/planar.foam").touch()
     return result
+
+
+def reference(case_dir):
+    doc = {"status": "not_applicable",
+           "reason": "the circular-disk collisionless reference does not describe a planar slit plume"}
+    wf.write_json(wf.results_dir(case_dir)/"reference.json", doc)
+    return doc
+
+
+def dsmc_post(case_dir, time=None):
+    from . import post, particles
+    case_dir = Path(case_dir)
+    cfg = wf.load_case(case_dir)
+    source = config.build_source(cfg)
+    res = wf.results_dir(case_dir)
+    dsmc_dir = case_dir/"dsmc"
+    mesh = read_mesh(dsmc_dir)
+    time = time or wf._latest(dsmc_dir)
+    setup_doc = json.loads((res/"dsmc_setup.json").read_text())
+    try:
+        fields = post.dsmc_fieldaverage(dsmc_dir/time, source.gas)
+    except (OSError, ValueError) as exc:
+        raise wf.WorkflowError(f"planar DSMC mean fields are unavailable at {time}: {exc}") from exc
+    if len(fields["n"]) != mesh.n_cells:
+        raise wf.WorkflowError("DSMC mean field length does not match its curved mesh")
+    valid = ((fields["n"] > 0) & (fields["T"] > 0) & np.isfinite(fields["n"])
+             & np.isfinite(fields["T"]) & np.isfinite(fields["U"]).all(axis=1))
+    np.savez_compressed(res/"planar_fields.npz", centres=mesh.cell_centres,
+                        volumes=mesh.cell_volumes, valid=valid, **fields)
+    h = float(cfg.require("mesh.core_cell_over_D"))*source.diameter_m
+    axis = np.abs(mesh.cell_centres[:, 1]) <= .51*h
+    profile = post.line_profile(mesh.cell_centres, mesh.cell_volumes, axis, {
+        "n_over_ne": fields["n"]/source.number_density,
+        "T_over_Te": fields["T"]/source.temperature_K,
+        "Ux_over_ae": fields["U"][:, 0]/source.thermal_speed})
+    profile["x_over_D"] = profile.pop("x")/source.diameter_m
+    post.write_csv(res/"centreline.csv", {"x_over_D": profile.pop("x_over_D"), **profile})
+    bd.write_fields(dsmc_dir, time, mesh, {
+        "planar_n_over_ne": np.where(valid, fields["n"]/source.number_density, np.nan),
+        "planar_T_over_Te": np.where(valid, fields["T"]/source.temperature_K, np.nan),
+        "planar_Ux_over_ae": np.where(valid, fields["U"][:, 0]/source.thermal_speed, np.nan)})
+    doc = {"geometry": "planar", "time": time, "label": cfg.get("label", cfg.profile),
+           "smoke_only": setup_doc.get("smoke_only", False), "cells": mesh.n_cells,
+           "valid_cells": int(valid.sum()), "invalid_or_unoccupied_cells": int((~valid).sum()),
+           "flux_depth_m": source.depth_m,
+           "sampling": {"parcels_per_cell_mean": float(np.mean(fields["parcels_per_step"])),
+                        "note": "fieldAverage moments on the actual DSMC mesh; planar slit, three molecular velocity components"},
+           "analytical_reference": reference(case_dir),
+           "artifacts": {"planar_fields": str(res/"planar_fields.npz"),
+                         "dsmc_centreline": str(res/"centreline.csv"),
+                         "paraview": str(dsmc_dir/"planar.foam")}}
+    log = dsmc_dir/"log.dsmcFoam"
+    count = wf._log_series(log, r"Number of molecules\s*=\s*([0-9.eE+]+)")
+    if len(count) > 10 and count[-1] > 0:
+        quarter = max(2, len(count)//4)
+        doc["stationarity"] = {"parcels_last_quarter_rel_change":
+                              float((count[-1]-count[-quarter])/count[-1]),
+                              "parcels_final": float(count[-1])}
+    inserted = particles.inserted_from_log(log) if log.is_file() else np.empty(0)
+    run = setup_doc.get("run", {})
+    dt, weight = run.get("dt_s"), run.get("weight")
+    average_start = float(run.get("average_start_s", 0))
+    if inserted.size and dt and weight and float(time) > average_start:
+        window = int(round((float(time)-average_start)/dt))
+        if 0 < window <= len(inserted):
+            doc["injection"] = {"measured_gross_number_rate_per_s":
+                                float(inserted[-window:].mean()*weight/dt),
+                                "note": "gross injection, not net mass transport"}
+    (dsmc_dir/"planar.foam").touch()
+    wf.write_json(res/"dsmc_post.json", doc)
+    return doc
+
+
+def plot_interface(case_dir):
+    """Raw CFD boundary / fitted ellipse, then fields on the actual DSMC mesh."""
+    case_dir = Path(case_dir)
+    cfg = wf.load_case(case_dir)
+    source = config.build_source(cfg)
+    res = wf.results_dir(case_dir)
+    if not (res/"breakdown.npz").is_file() and not (res/"planar_fields.npz").is_file():
+        return []
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LogNorm
+        from matplotlib.collections import LineCollection
+    except ImportError:
+        wf.write_json(res/"plot_status.json", {"status": "unavailable",
+                      "reason": "optional matplotlib dependency is not installed; inspect the .foam cases"})
+        return []
+    from .ellipse import ellipse_points
+    d = source.diameter_m
+    out = []
+    fit = json.loads((res/"ellipse.json").read_text()) if (res/"ellipse.json").is_file() else {}
+    if (res/"breakdown.npz").is_file():
+        data = _load_breakdown(case_dir)
+        mesh = read_mesh(case_dir/"cfd")
+        fig, ax = plt.subplots(figsize=(8, 4.6), constrained_layout=True)
+        values = data.get("Kn_GLL", np.full(mesh.n_cells, np.nan))
+        image = ax.scatter(mesh.cell_centres[:, 0]/d, mesh.cell_centres[:, 1]/d,
+                           c=np.maximum(values, 1e-8), s=14, marker="s",
+                           cmap="viridis", norm=LogNorm(vmin=1e-4, vmax=1))
+        fig.colorbar(image, ax=ax, label="Kn_GLL")
+        retained = data["retained"]
+        cuts = np.flatnonzero(retained[mesh.owner[:mesh.n_internal]] != retained[mesh.neighbour])
+        segments = []
+        for f in cuts:
+            points = np.unique(np.round(mesh.face_vertices(f)[:, :2], 12), axis=0)
+            if len(points) == 2:
+                segments.append(points/d)
+        if segments:
+            ax.add_collection(LineCollection(segments, colors="#c44e52", linewidths=1,
+                                             label="raw source-connected breakdown boundary"))
+        if fit.get("status") == "fitted":
+            arc = ellipse_points(fit, 401)/d
+            ax.plot(arc[:, 0], arc[:, 1], color="#202020", lw=2, label="conservative fitted ellipse")
+        ax.plot([0, 0], [-.5, .5], color="#2369b4", lw=3, label="source slit")
+        ax.set(xlabel="x / D", ylabel="y / D", title="Planar prototype: raw breakdown and smooth interface")
+        ax.set_aspect("equal")
+        ax.legend(fontsize=8, loc="upper right")
+        path = res/"breakdown_ellipse.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        out.append(path)
+    if (res/"planar_fields.npz").is_file():
+        with np.load(res/"planar_fields.npz") as z:
+            centres, valid = z["centres"], z["valid"]
+            values = (z["n"]/source.number_density, z["T"]/source.temperature_K,
+                      z["U"][:, 0]/source.thermal_speed)
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+        for ax, value, label in zip(axes, values, ("n / n_e", "T / T_e", "Ux / a_e")):
+            image = ax.scatter(centres[valid, 0]/d, centres[valid, 1]/d,
+                               c=value[valid], s=5, cmap="viridis")
+            fig.colorbar(image, ax=ax, label=label)
+            ax.set(xlabel="x / D", ylabel="y / D")
+            ax.set_aspect("equal")
+        fig.suptitle("Planar DSMC moments on the curved mesh")
+        path = res/"planar_dsmc.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        out.append(path)
+    wf.write_json(res/"plot_status.json", {"status": "written", "artifacts": out})
+    return out

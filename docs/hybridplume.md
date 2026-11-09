@@ -7,8 +7,11 @@ continuum-breakdown surface, and DSMC (standard `dsmcFoam` + this repository's
 Spacecraft and Rockets* 49(1), 2012, DOI 10.2514/1.A32046 — its physical source
 is reproduced in 3-D; its axisymmetric numerics are **not**.
 
-Everything is full three-dimensional Cartesian: no wedge, no symmetry plane, no
-empty patch, no radial weighting. The configuration loader refuses those keys.
+Original profiles are full three-dimensional Cartesian, without wedges,
+symmetry planes or radial weighting. The opt-in `planar-laptop-kn0p01` prototype
+adds a one-layer planar slit plume with an elliptical interface; it changes the
+source geometry and does not reproduce axisymmetric physics. See the
+[planar run instructions](../cases/cai2012-hybrid/README.md#laptop-planar-ellipse-prototype).
 
 Case family: [`cases/cai2012-hybrid/`](../cases/cai2012-hybrid/README.md); how to run it:
 [the tutorial](tutorials/cai2012-hybrid.md).

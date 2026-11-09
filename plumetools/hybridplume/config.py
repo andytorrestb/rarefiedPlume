@@ -152,8 +152,8 @@ def validate(cfg: CaseConfig) -> None:
     for key in ("mesh.axisymmetric", "mesh.wedge", "dsmc.axisymmetric",
                 "dsmc.radial_weighting", "domain.symmetry"):
         if cfg.get(key):
-            raise ConfigError(f"{key} is set: this family is full 3-D only "
-                              "(no axisymmetry, wedges, symmetry planes or radial weights)")
+            raise ConfigError(f"{key} is unsupported: use explicit planar geometry for a slit prototype; "
+                              "axisymmetry, wedges, symmetry planes and radial weights are unavailable")
     half = float(cfg.require("domain.half_width_over_D"))
     if half <= 0.5:
         raise ConfigError("domain.half_width_over_D must exceed 0.5 so the source disk fits")

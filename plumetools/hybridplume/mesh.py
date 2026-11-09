@@ -1,4 +1,6 @@
-"""The full 3-D Cartesian mesh shared by the CFD precursor and the DSMC region.
+"""Cartesian CFD mesh; shared with DSMC in 3D, separate from the planar DSMC mesh.
+
+An explicit planar profile uses one z cell and empty front/back patches.
 
 One ``blockMesh`` box ``0 <= x <= X``, ``|y|, |z| <= W``: a uniform core around
 the source and the near plume, and geometrically expanding segments outside it

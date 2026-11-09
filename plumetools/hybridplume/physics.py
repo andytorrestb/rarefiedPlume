@@ -252,7 +252,7 @@ BIRD_ARGON = Gas(
 
 @dataclass(frozen=True)
 class SourceState:
-    """The uniform drifting-Maxwellian circular source, and everything derived from it.
+    """Uniform drifting-Maxwellian disk or opt-in planar slit source.
 
     Inputs are the four Cai quantities plus the gas. Every other number is a
     property, so no derived value can be stored inconsistently.
