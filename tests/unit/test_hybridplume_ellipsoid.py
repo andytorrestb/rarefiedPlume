@@ -104,7 +104,8 @@ def test_mesh_publication_never_publishes_mesher_processors(tmp_path):
     assert not (tmp_path/"dsmc/processor0").exists()
 
 
-def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path):
+@pytest.mark.parametrize("half_cell", [.005, .04])
+def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path, half_cell):
     import json
     import yaml
     from _hybridmesh import box_mesh
@@ -115,7 +116,8 @@ def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path):
         {"profile": cfg.profile, "digest": cfg.digest, "config": cfg.doc}))
     res = tmp_path/"results"
     res.mkdir()
-    box_mesh(tmp_path/"dsmc", [.1, .2, .3], [-.005, 0, .005], [-.005, 0, .005], .1)
+    box_mesh(tmp_path/"dsmc", [.1, .2, .3], [-half_cell, 0, half_cell],
+             [-half_cell, 0, half_cell], .1)
     td = tmp_path/"dsmc/0.000002"
     td.mkdir()
     n, u, temp = source.number_density, source.velocity, 300.0
@@ -129,7 +131,7 @@ def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path):
                             + "\n".join([row]*8)+"\n);\n")
     (res/"dsmc_setup.json").write_text(json.dumps({
         "run": {"average_start_s": 0, "end_time_s": 2e-6, "dt_s": 1e-6,
-                "weight": n*2.5e-6/12}, "inflow_patches": [], "ranks": 1,
+                "weight": n*.1*half_cell**2/12}, "inflow_patches": [], "ranks": 1,
         "smoke_only": True, "interface_status": "unsuitable"}))
     (tmp_path/"dsmc/log.dsmcFoam").touch()
     from plumetools.hybridplume.meshgeom import read_mesh
@@ -154,6 +156,30 @@ def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path):
         assert np.allclose(fields["T"], 300)
     assert (td/"spatial_n_over_ne").is_file()
     assert (tmp_path/"dsmc/spatial.foam").is_file()
+    profile = np.atleast_1d(np.genfromtxt(res/"centreline.csv", delimiter=",", names=True))
+    assert len(profile) == 2
+    assert np.allclose(profile["x_over_D"], [.75, 1.25])
+    assert np.allclose(profile["n_fa_over_ne"], 1)
+
+
+def test_geometry_refuses_excess_cfd_source_area_error(monkeypatch):
+    from types import SimpleNamespace as NS
+    from plumetools.hybridplume import config, spatial, workflow
+    cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
+    source = config.build_source(cfg)
+    area = source.area_m2
+    # Isolate the area gate: the independent DSMC aperture is exact while the
+    # CFD source injects through a staircase that is 20% too large.
+    mesh = NS(cell_volumes=np.ones(1), patches={"interface": NS(type="patch")},
+              patch_slice=lambda name: slice(0, 1), offsets=np.array([0, 3]),
+              labels=np.arange(3), points=np.array([[1, 0, 0], [1, .1, 0], [1, 0, .1]]),
+              face_areas=np.array([[-area, 0, 0]]), face_centres=np.array([[1, 0, 0]]))
+    cmesh = NS(cell_centres=np.array([[.5, 0, 0]]), cell_size=lambda: np.ones((1, 3)),
+               face_areas=np.array([[-1.2*area, 0, 0]]), patch_slice=lambda name: slice(0, 1))
+    monkeypatch.setattr(spatial, "certify_facets", lambda *args: {})
+    with pytest.raises(workflow.WorkflowError, match="CFD source.*area"):
+        spatial._geometry(mesh, cmesh, {"retained": np.ones(1, bool)},
+                          {"xc": 0, "a": 1, "b": .2}, cfg, source)
 
 
 def test_retry_refuses_a_changed_dsmc_mesh_before_reusing_cloud(tmp_path, monkeypatch):

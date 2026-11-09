@@ -705,9 +705,14 @@ def _dsmc_post_3d(case_dir: Path, time: str | None = None) -> dict:
     else:
         centres, volumes, n_all = dmesh.cell_centres, dmesh.cell_volumes, dmesh.n_cells
         fields = dict(dsmc_fields_)
-        h = (float(cfg.require("mesh.core_cell_over_D")) * source.diameter_m
-             if own_mesh else float(np.min(sizes[:, 1])))
-    axis = post.axis_cells(centres, h * 0.51)
+        h = float(np.min(sizes[:, 1]))
+    axis = (np.all(np.abs(centres[:, 1:]) <= .51*sizes[:, 1:], axis=1)
+            if own_mesh else post.axis_cells(centres, h * 0.51))
+    if own_mesh:
+        doc["centreline_sampling"] = {
+            "cells": int(axis.sum()),
+            "selection": "finite tube using each DSMC cell's local transverse bounding widths",
+            "reference": "volume averaged over the identical selected cell centres"}
     ref = collisionless.reference(centres[axis], source)
     for k in ("n", "T", "U"):
         full = np.full((n_all,) + np.shape(ref[k])[1:], np.nan)
@@ -767,7 +772,8 @@ def _dsmc_post_3d(case_dir: Path, time: str | None = None) -> dict:
     r_cell = np.hypot(c[:, 1], c[:, 2])
     off = {}
     for r0 in cfg.get("post.off_axis_r_over_D", [0.25, 0.5, 0.75]):
-        ring = np.abs(r_cell - float(r0) * d) <= 0.5 * h
+        half_width = .5*np.max(sizes[:, 1:], axis=1) if own_mesh else .5*h
+        ring = np.abs(r_cell - float(r0) * d) <= half_width
         if ring.sum() < 4:
             continue
         ref_r = collisionless.reference(c[ring], source)

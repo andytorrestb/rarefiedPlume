@@ -95,7 +95,7 @@
 - [x] Dispatch post-processing/plots for the new remeshed 3D path. Reuse moment/flux readers, use actual 3D coordinates, and label circular-source reference comparisons as collisionless-limit comparisons for this collisional case. Do not treat the new mesh as a CFD subset.
 - [x] Document exact qsub and restart commands, the memory units/controls, local refinement settings, actual-fit diagnostics and the fact that this is an initial HPC case without convergence validation.
 - [x] Run shell syntax, the stubbed workflow checks, the new focused tests and only existing hybrid tests affected by shared edits. Do not repeat a passing native mesh check unless mesh code changes. Run git diff --check.
-- [ ] Commit the deliverable, request one focused whole-change review, address important findings with reproducing checks, and deliver the ready-to-submit script/profile. Do not submit remotely or launch local solvers.
+- [x] Commit the deliverable, request one focused whole-change review, address important findings with reproducing checks, and deliver the ready-to-submit script/profile. Do not submit remotely or launch local solvers.
 
 ## Self-review
 
@@ -103,3 +103,38 @@ The three tasks cover all approved stages and the five review concerns. Shared
 interfaces use metre-based fit parameters and actual DSMC geometry throughout.
 Native meshing stays separate from checkpoint ownership. Tests are bounded to the
 new numerical/data-flow behavior and one small native fixture, as requested.
+
+## Execution record
+
+- Development stayed on the laptop. The owner's later instruction permitted a
+  very coarse, short solver smoke test; no production mesh, HPC solver run or
+  remote submission was performed.
+- 86 directly affected Python checks passed, plus four WSL stubbed PBS/Allrun
+  lifecycle checks. Shell syntax and `git diff --check` passed. The repository's
+  unrelated tests were intentionally omitted to respect the usage limit.
+- Native synthetic fixture: 8,000 CFD cells; two-rank snappy meshing produced
+  7,134 DSMC cells and 408 interface faces. `checkMesh`, whole-facet containment,
+  normals, source coverage and closure passed. Closure residual was 5.99e-17;
+  source area error was 1.117% under an explicitly coarse 8% fixture tolerance.
+  The HPC profile retains its stricter 1% source area tolerance.
+- Actual `dsmcInitialise` and exactly five serial `dsmcFoam` steps completed,
+  ending with 48 parcels. Own-mesh post-processing produced the JSON/CSV/NPZ
+  reports and three PNG plots. Five steps provided no resolved temperature
+  samples; this fixture checks execution, not flow accuracy or stationarity.
+- Snapshot replacement, off-axis exclusions, full-facet exclusion, 3D cell
+  mapping, memory refusal, changed-mesh restart refusal and compact ASCII parcel
+  parsing have focused regression coverage. Mesher processor directories stay
+  outside DSMC restart ownership.
+- The estimate ceiling is 1100 GiB beneath the requested PBS `mem=1200gb` to
+  accommodate decimal or binary site units. Peak RAM/runtime on the cluster and
+  mesh convergence remain unverified. Fit/assessment failures still stop the
+  default job before DSMC initialization.
+- One fresh whole-change review identified two important reporting/geometry
+  issues. Both were reproduced by failing synthetic checks and fixed in one
+  pass: centreline/ring selection now uses local DSMC transverse widths, and
+  CFD source area error is enforced against the same physical tolerance as
+  DSMC coverage. The 86 affected checks passed afterward; no further mesh or
+  solver runs were needed. No minor findings were deferred.
+- Review explicitly left production mesh feasibility, cluster RAM/runtime and
+  long-run stability unassessed under the owner's laptop-only scope. Those
+  limits stand: the first HPC run may expose resource or suitability limits.

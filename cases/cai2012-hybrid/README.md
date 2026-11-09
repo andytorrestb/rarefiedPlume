@@ -192,7 +192,8 @@ Inspect `results/ellipsoid.json`, `interface.json`, `dsmc_fields.json` and
 suitability and resolution/resource statistics. `breakdown_ellipsoid.png` shows
 the raw continuum boundary and smooth spheroid at z = 0. `spatial_dsmc.png`,
 `spatial_fields.npz` and `centreline.csv` use the actual independent DSMC mesh;
-the centreline covers its downstream portion. Plots select thin meridional
+the centreline covers its downstream portion using local DSMC cell widths for
+the finite axis tube and the same cell centres for reference averaging. Plots select thin meridional
 bands rather than projecting all azimuths. Open `cfd/spatial.foam`,
 `dsmc/spatial.foam` and `results/interface.vtk` in ParaView. Circular-source
 reference comparisons are labelled **collisionless-limit comparisons**, not

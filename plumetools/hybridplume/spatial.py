@@ -172,15 +172,20 @@ def _geometry(mesh, cmesh, data, fit, cfg, source):
     source_info = mesh.patches.get("source")
     direct = float(np.linalg.norm(mesh.face_areas[mesh.patch_slice("source")], axis=1).sum()) if source_info else 0.0
     error = abs((covered+direct)/source.area_m2-1)
-    if covered <= 0 or error > float(cfg.get("interface.fit.max_source_area_error", .01)):
+    tolerance = float(cfg.get("interface.fit.max_source_area_error", .01))
+    if covered <= 0 or error > tolerance:
         raise wf.WorkflowError(f"source coverage area error {error:.4g} exceeds tolerance")
+    cfd_area = float(np.linalg.norm(cmesh.face_areas[cmesh.patch_slice("source")], axis=1).sum())
+    cfd_error = abs(cfd_area/source.area_m2-1)
+    if not math.isfinite(cfd_error) or cfd_error > tolerance:
+        raise wf.WorkflowError(f"CFD source area error {cfd_error:.4g} exceeds tolerance {tolerance:.4g}")
     closure = float(np.linalg.norm(area_vectors.sum(axis=0)-[covered, 0, 0])/(areas.sum()+covered))
     if closure > 1e-6:
         raise wf.WorkflowError("retained region does not close at the source plane")
     checks.update(positive_volumes=True, closure_relative=closure,
                   source_covered_area_m2=covered, source_uncovered_area_m2=direct,
                   source_covered_area_fraction=covered/source.area_m2, source_area_error=error,
-                  cfd_source_area_m2=float(np.linalg.norm(cmesh.face_areas[cmesh.patch_slice("source")], axis=1).sum()))
+                  cfd_source_area_m2=cfd_area, cfd_source_area_error=cfd_error)
     return faces, normals, areas, checks
 
 
