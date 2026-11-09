@@ -147,6 +147,8 @@ def render_fields(cfg: CaseConfig, source: SourceState) -> dict:
         lines += ["    }"]
         for patch in (e, f):
             lines += [f"    {patch}", "    {"] + [f"        {x}" for x in open_entry] + ["    }"]
+        if cfg.get("mesh.geometry") == "planar":
+            lines += ["    front { type empty; }", "    back { type empty; }"]
         lines += ["}", ""]
         return "\n".join(lines) + "\n"
 

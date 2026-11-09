@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,7 +38,7 @@ PAPER_VALUES = {
 }
 
 BACKENDS = ("dsmcFoam",)
-INTERFACE_MODES = ("automatic", "manual", "none")
+INTERFACE_MODES = ("automatic", "manual", "none", "fitted-ellipse")
 MANUAL_SURFACES = ("sphere", "cylinder", "box")
 
 
@@ -134,7 +135,20 @@ def validate(cfg: CaseConfig) -> None:
         kind = cfg.get("interface.manual.type")
         if kind not in MANUAL_SURFACES:
             raise ConfigError(f"interface.manual.type must be one of {MANUAL_SURFACES}")
-    # Forbidden shortcuts: the requirement is a full 3-D Cartesian calculation.
+    geometry = cfg.get("mesh.geometry", "cartesian")
+    if geometry not in ("cartesian", "planar"):
+        raise ConfigError("mesh.geometry must be cartesian or planar")
+    fitted = cfg.get("interface.mode") == "fitted-ellipse"
+    if fitted != (geometry == "planar"):
+        raise ConfigError("planar geometry requires the fitted-ellipse interface mode")
+    if geometry == "planar":
+        depth = float(cfg.get("mesh.depth_over_D", 0))
+        clearance = float(cfg.get("interface.fit.clearance_cells", 0.25))
+        if not math.isfinite(depth) or depth <= 0:
+            raise ConfigError("mesh.depth_over_D must be positive and finite")
+        if not math.isfinite(clearance) or clearance < 0:
+            raise ConfigError("interface.fit.clearance_cells must be finite and nonnegative")
+    # Axisymmetry and radial weighting remain unsupported.
     for key in ("mesh.axisymmetric", "mesh.wedge", "dsmc.axisymmetric",
                 "dsmc.radial_weighting", "domain.symmetry"):
         if cfg.get(key):
@@ -168,12 +182,16 @@ def build_source(cfg: CaseConfig) -> SourceState:
                        temperature_K=float(s["temperature_K"]),
                        knudsen=float(s["knudsen"]),
                        mean_free_path_convention=str(
-                           s.get("mean_free_path_convention", "vhs")))
+                           s.get("mean_free_path_convention", "vhs")),
+                       depth_m=(float(cfg.require("mesh.depth_over_D")) * float(s["diameter_m"])
+                                if cfg.get("mesh.geometry") == "planar" else None))
 
 
 def departures_from_paper(cfg: CaseConfig) -> dict:
     """Paper-stated inputs this configuration does not use, for the report."""
     out = {}
+    if cfg.get("mesh.geometry") == "planar":
+        out["source.geometry"] = {"value": "planar slit", "paper": "circular disk"}
     for key, value in PAPER_VALUES.items():
         if key == "knudsen_cases":
             kn = float(cfg.require("source.knudsen"))

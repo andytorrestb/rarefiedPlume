@@ -26,6 +26,9 @@ def test_every_profile_validates_and_is_full_3d():
         src = config.build_source(cfg)
         plan = hm.plan(cfg, src)
         text = hm.render_block_mesh_dict(plan)
+        if cfg.get("mesh.geometry") == "planar":
+            assert plan.divisions[2] == 1 and text.count("type empty;") == 2
+            continue
         for forbidden in ("wedge", "empty", "symmetry"):
             assert f"type {forbidden}" not in text
         assert plan.divisions[1] == plan.divisions[2]   # no half domain

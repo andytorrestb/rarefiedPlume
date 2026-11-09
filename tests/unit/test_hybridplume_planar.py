@@ -44,3 +44,43 @@ def test_no_source_connected_ellipse_is_reported():
     fit = fit_ellipse(lower, upper, retained, source_radius=0.5, clearance=0.01)
     assert fit["status"] == "no_feasible_ellipse"
     assert "a" not in fit
+
+
+ROOT = Path(__file__).resolve().parents[2]
+STUDY = ROOT / "cases/cai2012-hybrid/hybrid.yaml"
+
+
+def test_planar_profile_generates_one_layer_and_slit_flux(tmp_path):
+    from plumetools.hybridplume import config, mesh, cfd
+    cfg = config.load(STUDY, "planar-laptop-kn0p01")
+    source = config.build_source(cfg)
+    plan = mesh.plan(cfg, source)
+    assert plan.divisions == (40, 40, 1)
+    assert source.area_m2 == pytest.approx(0.002)
+    assert source.with_knudsen(0.1).area_m2 == pytest.approx(0.002)
+    assert mesh.predicted_source(plan, source).area_m2 == pytest.approx(0.002)
+    dictionary = mesh.render_block_mesh_dict(plan)
+    assert dictionary.count("type empty;") == 2
+    assert all(text.count("type empty;") == 2 for text in cfd.render_fields(cfg, source).values())
+
+
+@pytest.mark.parametrize("overrides", [
+    {"mesh": {"geometry": "cartesian"}},
+    {"mesh": {"depth_over_D": 0}},
+    {"interface": {"fit": {"clearance_cells": -0.1}}},
+])
+def test_incompatible_planar_settings_are_refused(overrides):
+    from plumetools.hybridplume import config
+    with pytest.raises(config.ConfigError, match="geometry|depth|clearance|requires"):
+        config.load(STUDY, "planar-laptop-kn0p01", overrides)
+
+
+def test_curved_mesh_keeps_partial_slit_and_native_ellipsoid():
+    from plumetools.hybridplume import config
+    from plumetools.hybridplume.planar_mesh import render_dsmc_mesh
+    cfg = config.load(STUDY, "planar-laptop-kn0p01")
+    fit = {"xc": 0.025, "a": 0.11, "b": 0.07}
+    dictionary = render_dsmc_mesh(cfg, config.build_source(cfg), fit)
+    assert "type searchableSphere;" in dictionary
+    assert dictionary.count("type empty;") == 2
+    assert "source" in dictionary and "interface" in dictionary

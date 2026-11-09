@@ -154,13 +154,18 @@ def assess_configuration(cfg: CaseConfig, source: SourceState, plan: MeshPlan) -
     """Pre-CFD: CFD cost, and a full-domain DSMC estimate from the collisionless field."""
     from plumetools.cai2012 import analytical
     centres, volumes, sizes, weight = _lattice_sample(plan)
-    n = source.number_density * analytical.density_ratio(
-        centres[:, 0], centres[:, 1], centres[:, 2], source.radius_m, source.speed_ratio)
+    if cfg.get("mesh.geometry") == "planar":
+        n = np.full(len(centres), source.number_density)
+        basis = "planar pre-CFD sizing bound: exit density and temperature throughout; not a disk reference"
+    else:
+        n = source.number_density * analytical.density_ratio(
+            centres[:, 0], centres[:, 1], centres[:, 2], source.radius_m, source.speed_ratio)
+        basis = "full-domain DSMC, collisionless density at T = Te (shape estimate)"
     full = dsmc_estimate(
         cfg, source, number_density=n, temperature=np.full(n.shape, source.temperature_K),
         speed=np.full(n.shape, source.velocity), volumes=volumes, sizes=sizes,
         length_scale_m=plan.x_segments[-1].hi, cell_weight=weight,
-        basis="full-domain DSMC, collisionless density at T = Te (shape estimate)")
+        basis=basis)
     cfd = (cfd_estimate(cfg, source, plan) if cfg.get("interface.mode", "automatic") != "none"
            else {"not_run": "interface.mode is none: full DSMC, no CFD precursor"})
     # Cai's startup is 1e4 t0 with t0 the Kne = 0.01 collision time, for EVERY case.

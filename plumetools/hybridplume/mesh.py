@@ -62,6 +62,7 @@ class MeshPlan:
     y_segments: tuple
     z_segments: tuple
     core_cell_m: float
+    geometry: str = "cartesian"
 
     @property
     def divisions(self) -> tuple:
@@ -88,6 +89,8 @@ class MeshPlan:
         for segs in (self.x_segments, self.y_segments, self.z_segments):
             widths = np.diff(np.concatenate(
                 [segs[0].cell_edges()] + [s.cell_edges()[1:] for s in segs[1:]]))
+            if widths.size < 2:
+                continue
             ratios.append(float(np.max(widths[1:] / widths[:-1])))
             ratios.append(float(np.max(widths[:-1] / widths[1:])))
         return max(ratios)
@@ -95,6 +98,7 @@ class MeshPlan:
     def describe(self) -> dict:
         return {
             "divisions": list(self.divisions), "n_cells": self.n_cells,
+            "geometry": self.geometry,
             "n_blocks": self.n_blocks, "core_cell_m": self.core_cell_m,
             "max_adjacent_cell_ratio": self.max_expansion_ratio,
             "x_range_m": [self.x_segments[0].lo, self.x_segments[-1].hi],
@@ -142,7 +146,13 @@ def plan(cfg: CaseConfig, source: SourceState) -> MeshPlan:
                              "mesh.outer_cells is 0")
         ys = [_outer(-w, -core_w, n_out, h, cap, True), ys[0],
               _outer(core_w, w, n_out, h, cap, False)]
-    return MeshPlan(tuple(xs), tuple(ys), tuple(ys), h)
+    geometry = cfg.get("mesh.geometry", "cartesian")
+    if geometry == "planar":
+        depth = float(cfg.require("mesh.depth_over_D")) * d
+        zs = (uniform_segment(-depth / 2, depth / 2, depth),)
+    else:
+        zs = tuple(ys)
+    return MeshPlan(tuple(xs), tuple(ys), zs, h, geometry)
 
 
 @dataclass(frozen=True)
@@ -173,7 +183,8 @@ def predicted_source(p: MeshPlan, source: SourceState) -> SourcePrediction:
     yy, zz = np.meshgrid(yc, zc, indexing="ij")
     dy = np.diff(ye)[:, None] * np.ones_like(zz)
     dz = np.ones_like(yy) * np.diff(ze)[None, :]
-    inside = yy ** 2 + zz ** 2 <= source.radius_m ** 2
+    inside = (np.abs(yy) <= source.radius_m if p.geometry == "planar"
+              else yy ** 2 + zz ** 2 <= source.radius_m ** 2)
     centres = np.stack([np.zeros(inside.sum()), yy[inside], zz[inside]], axis=1)
     return SourcePrediction(int(inside.sum()), float((dy * dz)[inside].sum()),
                             source.area_m2, centres)
@@ -205,7 +216,7 @@ def render_block_mesh_dict(p: MeshPlan) -> str:
     nx, ny, nz = p.divisions
     lines = _header("blockMeshDict",
                     f"{p.n_blocks} blocks, {nx}x{ny}x{nz} = {p.n_cells} cells, "
-                    f"core cell {_fmt(p.core_cell_m)} m. Full 3-D: no wedge, no symmetry.")
+                    f"core cell {_fmt(p.core_cell_m)} m; geometry {p.geometry}.")
     lines += ["scale 1;", "", "vertices", "("]
     for z in zs:
         for y in ys:
@@ -224,6 +235,8 @@ def render_block_mesh_dict(p: MeshPlan) -> str:
                     f"{_fmt(yseg.expansion)} {_fmt(zseg.expansion)})")
     lines += [");", "", "edges ();", "", "boundary", "("]
     faces = {"exit_plane": [], "far_field": []}
+    if p.geometry == "planar":
+        faces.update(front=[], back=[])
     ni, nj, nk = len(p.x_segments), len(p.y_segments), len(p.z_segments)
     for k in range(nk):
         for j in range(nj):
@@ -244,14 +257,15 @@ def render_block_mesh_dict(p: MeshPlan) -> str:
                 if j == nj - 1:
                     faces["far_field"].append(quad("y_max"))
                 if k == 0:
-                    faces["far_field"].append(quad("z_min"))
+                    faces["front" if p.geometry == "planar" else "far_field"].append(quad("z_min"))
                 if k == nk - 1:
-                    faces["far_field"].append(quad("z_max"))
+                    faces["back" if p.geometry == "planar" else "far_field"].append(quad("z_max"))
     notes = {"exit_plane": "x = 0; the source disk is carved out of it by topoSet",
              "far_field": "open vacuum boundary"}
-    for role in ("exit_plane", "far_field"):
-        lines += [f"    {PATCHES[role]}", "    {", "        type patch;",
-                  f"        // {notes[role]}", "        faces", "        ("]
+    for role in faces:
+        patch_type = "empty" if role in ("front", "back") else "patch"
+        lines += [f"    {PATCHES.get(role, role)}", "    {", f"        type {patch_type};",
+                  f"        // {notes.get(role, 'planar depth plane')}", "        faces", "        ("]
         lines += [f"            ({a} {b} {c} {d})" for a, b, c, d in faces[role]]
         lines += ["        );", "    }"]
     lines += [");", "", "mergePatchPairs ();", ""]
@@ -260,6 +274,15 @@ def render_block_mesh_dict(p: MeshPlan) -> str:
 
 def render_topo_set_dict(p: MeshPlan, source: SourceState) -> str:
     half = SELECTOR_HALF_THICKNESS_FRACTION * p.core_cell_m
+    if p.geometry == "planar":
+        depth = p.edges(2)[-1] - p.edges(2)[0]
+        radius = source.radius_m
+        return "\n".join(_header("topoSetDict", "select the planar source slit") + [
+            "actions", "(",
+            "    { name sourceFaces; type faceSet; action new; source patchToFace; patch exitPlane; }",
+            "    { name sourceFaces; type faceSet; action subset; source boxToFace;",
+            f"      box ({-half:.12g} {-radius:.12g} {-depth:.12g}) "
+            f"({half:.12g} {radius:.12g} {depth:.12g}); }}", ");", ""])
     lines = _header("topoSetDict", f"x = 0 faces with centre radius <= {_fmt(source.radius_m)} m")
     lines += [
         "// patchToFace first, then cylinderToFace subset: reversed, the cylinder",

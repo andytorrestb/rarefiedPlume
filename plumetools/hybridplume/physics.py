@@ -264,8 +264,11 @@ class SourceState:
     temperature_K: float = 300.0
     knudsen: float = 0.01
     mean_free_path_convention: str = "vhs"
+    depth_m: float | None = None
 
     def __post_init__(self) -> None:
+        if self.depth_m is not None:
+            _positive(self.depth_m, "source.depth_m")
         _positive(self.diameter_m, "source.diameter_m")
         _positive(self.temperature_K, "source.temperature_K")
         _positive(self.knudsen, "source.knudsen")
@@ -281,7 +284,9 @@ class SourceState:
 
     @property
     def area_m2(self) -> float:
-        """Exact disk area ``pi D^2 / 4`` [m^2]."""
+        """Disk area, or slit height times the planar extrusion depth [m^2]."""
+        if self.depth_m is not None:
+            return self.diameter_m * self.depth_m
         return math.pi * self.radius_m ** 2
 
     @property
@@ -345,12 +350,13 @@ class SourceState:
 
     def with_knudsen(self, knudsen: float) -> "SourceState":
         return SourceState(self.gas, self.diameter_m, self.speed_ratio,
-                           self.temperature_K, knudsen, self.mean_free_path_convention)
+                           self.temperature_K, knudsen, self.mean_free_path_convention, self.depth_m)
 
     def describe(self) -> dict:
         return {
             "inputs": {
                 "diameter_m": self.diameter_m, "speed_ratio": self.speed_ratio,
+                "depth_m": self.depth_m,
                 "temperature_K": self.temperature_K, "knudsen": self.knudsen,
                 "mean_free_path_convention": self.mean_free_path_convention,
             },
