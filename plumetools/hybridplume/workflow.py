@@ -269,9 +269,9 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     cfd = case_dir / "cfd"
     time = time or _latest(cfd)
     input_identity = None
-    if cfg.get("mesh.geometry") == "planar":
-        from . import planar
-        input_identity = planar.breakdown_identity(case_dir, cfg, time)
+    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+        from . import fitted
+        input_identity = fitted.breakdown_identity(case_dir, cfg, time)
     mesh = read_mesh(cfd)
     graph = mesh.cell_graph()
     state = bd.read_state(cfd, time, gas)
@@ -334,8 +334,8 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     fields["continuumMask"] = mask.astype(float)
     fields["retainedRegion"] = reg["retained"].astype(float)
     identity_fields = {}
-    if cfg.get("mesh.geometry") == "planar":
-        if input_identity != planar.breakdown_identity(case_dir, cfg, time):
+    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+        if input_identity != fitted.breakdown_identity(case_dir, cfg, time):
             raise WorkflowError("CFD inputs changed during breakdown; rerun breakdown on a stable snapshot")
         identity_fields["input_identity"] = input_identity
         doc["input_identity"] = input_identity

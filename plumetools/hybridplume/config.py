@@ -38,7 +38,7 @@ PAPER_VALUES = {
 }
 
 BACKENDS = ("dsmcFoam",)
-INTERFACE_MODES = ("automatic", "manual", "none", "fitted-ellipse")
+INTERFACE_MODES = ("automatic", "manual", "none", "fitted-ellipse", "fitted-ellipsoid")
 MANUAL_SURFACES = ("sphere", "cylinder", "box")
 
 
@@ -141,6 +141,8 @@ def validate(cfg: CaseConfig) -> None:
     fitted = cfg.get("interface.mode") == "fitted-ellipse"
     if fitted != (geometry == "planar"):
         raise ConfigError("planar geometry requires the fitted-ellipse interface mode")
+    if cfg.get("interface.mode") == "fitted-ellipsoid" and geometry != "cartesian":
+        raise ConfigError("fitted-ellipsoid requires cartesian 3D geometry")
     if geometry == "planar":
         depth = float(cfg.get("mesh.depth_over_D", 0))
         clearance = float(cfg.get("interface.fit.clearance_cells", 0.25))
