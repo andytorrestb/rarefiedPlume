@@ -54,7 +54,9 @@ mesh is 40 x 40 x 1 (1,600 cells), D/20 spacing and D/20 depth, with front/back
 The fit maximizes clipped elliptical area while remaining inside the original
 source-connected continuum-valid cell footprints, including interior exclusions.
 It keeps the existing `Kn_GLL` and `abs(B_exp)` tests and uses a default inward
-clearance of 0.25 core-cell widths. Invalid or disconnected pockets stay outside
+clearance of 0.25 core-cell widths. Outer-domain separation is always at least
+one quarter of the smallest CFD cell, including when excluded-cell clearance
+is set to zero. Invalid or disconnected pockets stay outside
 the ellipse. The deterministic optimizer supplies a local fit, not a proof of
 global optimality; infeasibility is reported instead of relaxing the criteria.
 

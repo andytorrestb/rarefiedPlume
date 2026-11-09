@@ -50,8 +50,11 @@ def fit_ellipse(lower, upper, retained, *, source_radius, clearance):
     lo, hi = lower / scale, upper / scale
     pad = clearance / scale
     bad_lo, bad_hi = lo[~retained] - pad, hi[~retained] + pad
-    xmax = hi[:, 0].max() - pad
-    ymax = min(hi[:, 1].max(), -lo[:, 1].min()) - pad
+    # A usable exterior mesh needs positive outer-domain separation even
+    # when the optional excluded-cell clearance is zero.
+    domain_pad = max(pad, 0.25*float(np.min(hi-lo)))
+    xmax = hi[:, 0].max() - domain_pad
+    ymax = min(hi[:, 1].max(), -lo[:, 1].min()) - domain_pad
     if min(xmax, ymax) <= 0:
         return empty
     if len(bad_lo):
@@ -90,7 +93,8 @@ def fit_ellipse(lower, upper, retained, *, source_radius, clearance):
     return {"status": "fitted", "xc": float(physical[0]), "a": float(physical[1]),
             "b": float(physical[2]), "area_m2": clipped_area(physical),
             "source_half_height_m": float(physical[2]*np.sqrt(1-(xc/a)**2)),
-            "clearance_m": float(clearance), "feasible": True,
+            "clearance_m": float(clearance), "domain_clearance_m": float(domain_pad*scale),
+            "feasible": True,
             "optimizer_success": bool(result.success),
             "optimizer_message": str(result.message), "optimizer_iterations": int(result.nit),
             "optimality": "local constrained optimum; no global optimality claim",

@@ -58,11 +58,29 @@ def sample_containing_cells(mesh, positions, allowed):
     return cells
 
 
+def breakdown_identity(case_dir, cfg, time):
+    """Bind the classification to the exact source fields, mesh and configuration."""
+    from .provenance import sha256
+    case_dir = Path(case_dir)
+    fields = {name: sha256(case_dir/"cfd"/time/name) for name in ("p", "rho", "T", "U")}
+    mesh = {name: sha256(case_dir/"cfd/constant/polyMesh"/name)
+            for name in ("points", "faces", "owner", "neighbour", "boundary")}
+    data = {"config": cfg.digest, "time": time, "fields": fields, "mesh": mesh}
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+def _assert_breakdown_current(case_dir, data, cfg=None):
+    cfg = cfg or wf.load_case(case_dir)
+    expected = str(data.get("input_identity", ""))
+    if not expected or expected != breakdown_identity(case_dir, cfg, str(data["time"])):
+        raise wf.WorkflowError("breakdown inputs changed or lack provenance; rerun the breakdown step")
+
+
 def _identity(case_dir, cfg, fit, time):
     from .provenance import sha256
     fields = {name: sha256(Path(case_dir)/"cfd"/time/name) for name in ("p", "rho", "T", "U")}
     data = {"config": cfg.digest, "fit": [fit[k] for k in ("xc", "a", "b")],
-            "time": time, "fields": fields}
+            "time": time, "fields": fields, "breakdown_inputs": breakdown_identity(case_dir, cfg, time)}
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
@@ -71,7 +89,9 @@ def _load_breakdown(case_dir):
     if not path.is_file():
         raise wf.WorkflowError("run the breakdown step first")
     with np.load(path) as z:
-        return {k: z[k].copy() for k in z.files}
+        data = {k: z[k].copy() for k in z.files}
+    _assert_breakdown_current(case_dir, data)
+    return data
 
 
 def interface(case_dir, time=None, allow_unsuitable=False):
@@ -88,6 +108,7 @@ def interface(case_dir, time=None, allow_unsuitable=False):
     fit = fit_ellipse(lower, upper, data["retained"], source_radius=source.radius_m,
                       clearance=float(cfg.get("interface.fit.clearance_cells", 0.25))
                       * float(cfg.require("mesh.core_cell_over_D"))*source.diameter_m)
+    _assert_breakdown_current(case_dir, data, cfg)
     doc = {"mode": "fitted-ellipse", "geometry": "planar", "time": saved_time,
            "label": cfg.get("label", cfg.profile), "fit": fit,
            "allow_unsuitable": bool(allow_unsuitable or cfg.get("interface.allow_unsuitable", False))}
@@ -305,6 +326,7 @@ def dsmc_fields(case_dir):
     ind = {k: data[k] for k in (*bd.INDICATORS, "valid")}
     assessment, arrays = _assess(mesh, faces, normals, areas, cells, all_cells, state, ind,
                                 bd.gradients(cmesh, state), geo, cfg, source)
+    _assert_breakdown_current(case_dir, data, cfg)
     doc.update(assessment)
     doc["smoke_only"] = doc["status"] != surface_tools.STATUS_SUITABLE
     fields = {"numberDensity": arrays["rho"]/source.gas.mass_kg,

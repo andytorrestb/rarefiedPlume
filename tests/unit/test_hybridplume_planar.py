@@ -131,7 +131,9 @@ def test_planar_workflow_reports_infeasible_fit_before_dsmc(tmp_path):
     setup = workflow.setup(case, STUDY, "planar-laptop-kn0p01")
     assert setup["n_ranks"] == 1
     box_mesh(case/"cfd", [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
-    np.savez(case/"results/breakdown.npz", retained=np.zeros(4, bool), time="0.001")
+    from plumetools.hybridplume.planar import breakdown_identity
+    identity = breakdown_identity(case, workflow.load_case(case), "0.001")
+    np.savez(case/"results/breakdown.npz", retained=np.zeros(4, bool), time="0.001", input_identity=identity)
     result = workflow.interface(case)
     assert result["status"] == "no_continuum_region"
     with pytest.raises(workflow.WorkflowError, match="no feasible ellipse"):
@@ -190,3 +192,32 @@ def test_planar_post_and_report_use_dsmc_geometry_without_a_cfd_map(tmp_path):
     assert (case/"results/centreline.csv").is_file()
     report = workflow.report(case)
     assert "dsmc_post" in report["stages_present"]
+
+
+def test_zero_clearance_still_separates_the_ellipse_from_outer_boundaries():
+    from plumetools.hybridplume.ellipse import fit_ellipse
+    lower, upper, retained = ellipse_grid()
+    fit = fit_ellipse(lower, upper, np.ones_like(retained), source_radius=.5, clearance=0)
+    assert fit["status"] == "fitted"
+    assert fit["xc"]+fit["a"] < 2-1e-9
+    assert fit["b"] < 1-1e-9
+
+
+def test_changed_same_time_cfd_fields_invalidate_breakdown(tmp_path):
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume import workflow
+    case = tmp_path/"planar"
+    workflow.setup(case, STUDY, "planar-laptop-kn0p01")
+    box_mesh(case/"cfd", [0, .1, .2], [-.1, 0, .1], [-.005, .005], .1)
+    # Initial fields are expanded because this fixture has four cells.
+    td=case/"cfd/0.001"
+    td.mkdir()
+    for name,kind,row in (("p","scalar","2"),("T","scalar","300"),
+                          ("rho","scalar","0.0001"),("U","vector","(150 0 0)")):
+        (td/name).write_text(f"FoamFile {{ version 2.0; format ascii; object {name}; }}\n"
+                            f"internalField nonuniform List<{kind}>\n4\n(\n"
+                            + "\n".join([row]*4)+"\n);\n")
+    workflow.breakdown(case, time="0.001")
+    (td/"rho").write_text((td/"rho").read_text().replace("0.0001","0.0002"))
+    with pytest.raises(workflow.WorkflowError, match="breakdown.*changed|rerun.*breakdown"):
+        workflow.interface(case)

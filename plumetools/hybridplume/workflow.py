@@ -268,6 +268,10 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     gas = source.gas
     cfd = case_dir / "cfd"
     time = time or _latest(cfd)
+    input_identity = None
+    if cfg.get("mesh.geometry") == "planar":
+        from . import planar
+        input_identity = planar.breakdown_identity(case_dir, cfg, time)
     mesh = read_mesh(cfd)
     graph = mesh.cell_graph()
     state = bd.read_state(cfd, time, gas)
@@ -329,10 +333,16 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     fields["lambda"] = ind["lambda"]
     fields["continuumMask"] = mask.astype(float)
     fields["retainedRegion"] = reg["retained"].astype(float)
+    identity_fields = {}
+    if cfg.get("mesh.geometry") == "planar":
+        if input_identity != planar.breakdown_identity(case_dir, cfg, time):
+            raise WorkflowError("CFD inputs changed during breakdown; rerun breakdown on a stable snapshot")
+        identity_fields["input_identity"] = input_identity
+        doc["input_identity"] = input_identity
     bd.write_fields(cfd, time, mesh, fields)
     np.savez_compressed(results_dir(case_dir) / "breakdown.npz", retained=reg["retained"],
                         mask=mask, near_lip=near_lip, time=time,
-                        valid=ind["valid"], **{k: ind[k] for k in bd.INDICATORS})
+                        valid=ind["valid"], **identity_fields, **{k: ind[k] for k in bd.INDICATORS})
     write_json(results_dir(case_dir) / "breakdown.json", doc)
     return doc
 
