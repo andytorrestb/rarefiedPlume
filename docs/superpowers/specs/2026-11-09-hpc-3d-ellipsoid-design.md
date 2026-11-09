@@ -1,6 +1,6 @@
 # HPC 3D CFD–DSMC plume with a conservative fitted ellipsoid
 
-Status: proposed for owner approval, 2026-11-09.
+Status: approved by the owner, 2026-11-09.
 
 ## Intent and agreed choices
 
