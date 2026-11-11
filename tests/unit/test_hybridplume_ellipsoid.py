@@ -63,6 +63,7 @@ def test_hpc_profile_is_3d_kn001_with_predicted_budget():
 
 
 def test_facet_enclosure_refuses_excluded_voxel():
+    from plumetools.hybridplume import shapes
     from plumetools.hybridplume.spatial import certify_facets
     from plumetools.hybridplume.workflow import WorkflowError
     lo = np.array([[.4, -.1, -.1]])
@@ -70,7 +71,7 @@ def test_facet_enclosure_refuses_excluded_voxel():
     # Vertices lie on a large enclosing surface whose interior crosses the hole.
     with pytest.raises(WorkflowError, match="excluded|continuum"):
         certify_facets(np.array([[1, 0, 0], [0, .5, 0], [0, 0, .5]]),
-                       dict(xc=0, a=1, b=.5), lo, hi, np.array([False]), .1)
+                       shapes.Spheroid(xc=0, a=1, b=.5), lo, hi, np.array([False]), .1)
 
 
 def test_peak_budget_counts_parcels_before_initialization():
@@ -164,7 +165,7 @@ def test_ellipsoid_post_uses_own_mesh_without_cfd_addressing(tmp_path, half_cell
 
 def test_geometry_refuses_excess_cfd_source_area_error(monkeypatch):
     from types import SimpleNamespace as NS
-    from plumetools.hybridplume import config, spatial, workflow
+    from plumetools.hybridplume import config, shapes, spatial, workflow
     cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
     source = config.build_source(cfg)
     area = source.area_m2
@@ -179,7 +180,7 @@ def test_geometry_refuses_excess_cfd_source_area_error(monkeypatch):
     monkeypatch.setattr(spatial, "certify_facets", lambda *args: {})
     with pytest.raises(workflow.WorkflowError, match="CFD source.*area"):
         spatial._geometry(mesh, cmesh, {"retained": np.ones(1, bool)},
-                          {"xc": 0, "a": 1, "b": .2}, cfg, source)
+                          shapes.Spheroid(xc=0, a=1, b=.2), cfg, source)
 
 
 def test_retry_refuses_a_changed_dsmc_mesh_before_reusing_cloud(tmp_path, monkeypatch):
@@ -196,7 +197,7 @@ def test_retry_refuses_a_changed_dsmc_mesh_before_reusing_cloud(tmp_path, monkey
     mesh_dir = tmp_path/"dsmc/constant/polyMesh"
     identity = {name: workflow.provenance.sha256(mesh_dir/name)
                 for name in ("points", "faces", "owner", "neighbour", "boundary")}
-    (res/"ellipsoid.json").write_text(json.dumps({"status": "fitted"}))
+    (res/"ellipsoid.json").write_text(json.dumps({"status": "fitted", "xc": 0.0, "a": 1.0, "b": 0.5}))
     (res/"interface.json").write_text(json.dumps({"fitted_identity": "same", "time": "1"}))
     (res/"dsmc_setup.json").write_text(json.dumps(
         {"fitted_identity": "same", "mesh_identity": identity}))
@@ -207,3 +208,80 @@ def test_retry_refuses_a_changed_dsmc_mesh_before_reusing_cloud(tmp_path, monkey
         stream.write("\n// changed after initialization\n")
     with pytest.raises(workflow.WorkflowError, match="mesh.*changed|mesh.*identity"):
         spatial.dsmc_setup(tmp_path)
+
+
+# Golden values captured from the pre-shape-interface code (commit 09df4e1):
+# the fitted-ellipsoid path must reproduce them after routing through
+# plumetools.hybridplume.shapes.
+GOLDEN_FIT = {"xc": 0.2519600793218552, "a": 0.33803991898794367, "b": 0.7499999999999978,
+              "volume_m3": 0.7610403671318023, "source_radius_m": 0.49999999999999717}
+GOLDEN_CERTIFY = {"max_relative_radius_deviation": 0.0004993117756306731,
+                  "enclosure_growth": 1.0004993118756806,
+                  "voxel_verification": {"feasible": True, "intersected_excluded_voxels": 0,
+                                         "excluded_voxels_checked": 4,
+                                         "min_scaled_distance_squared": 1.0589819446127664}}
+GOLDEN_IDENTITY = "6d773eb764582acd1c42eef44f358d39a64b191918d2b59a88a7e5ca5568c8f0"
+GOLDEN_MESH_FIT = {"status": "fitted", "xc": 0.05, "a": 0.30000000000000004,
+                   "b": 0.10141851056742199, "source_radius_m": 0.09998000000000001}
+GOLDEN_MESH_SHA256 = {
+    "blockMeshDict": "d23aa006e233fd25639a638048702b194ba2409e043dc14a7c1354069162c4d4",
+    "snappyHexMeshDict": "b3d0b6d6ef6d37c8928f8a1ff2b4f3df327063f774692edd3f65b7cecf4bed3c",
+    "meshQualityDict": "6e725dfa8d7a1a0ab4914adb8cac6f43ec198f1ddf3f1a7a5e2c573c61ca4d7f",
+    "topoSetDict": "90cbf262ea6583e1e4a6438684ce00f0031223549260c53da9ff90ebca9054da",
+    "createPatchDict": "46427dca2034e899ccfae430a59db0d6bdef9c09feeebf8d02986c079dbe7659",
+    "controlDict": "229e62db7498972218eaa40d744a50d60f33353b67fd94c8f8161a00a15ad055",
+    "fvSchemes": "054d5c9e8f9de242a56096ace8100f5ba161491177c71b3f968c326e42b45ac5",
+    "fvSolution": "11be3bf60036dee1711e4197e8a109df9963de7f889efc1a3f312c725abfcf12"}
+
+
+def _golden_fit():
+    from plumetools.hybridplume.ellipsoid import fit_ellipsoid
+    lo, hi = voxels()
+    allowed = np.ones(len(lo), bool)
+    pocket = (np.isclose(lo[:, 0], .6) & (lo[:, 1] <= 0) & (hi[:, 1] >= 0)
+              & (lo[:, 2] <= 0) & (hi[:, 2] >= 0))
+    allowed[pocket] = False
+    return lo, hi, allowed, fit_ellipsoid(lo, hi, allowed, source_radius=.5, clearance=.01)
+
+
+def _as_shape(fit):
+    from plumetools.hybridplume import shapes
+    return shapes.Spheroid(fit["xc"], fit["a"], fit["b"])
+
+
+def test_spheroid_path_reproduces_pre_shape_golden_values(tmp_path):
+    import hashlib
+    import math
+    from plumetools.hybridplume import config, fitted, spatial
+    from plumetools.hybridplume.ellipsoid_mesh import write_mesh_inputs
+    lo, hi, allowed, fit = _golden_fit()
+    for key, value in GOLDEN_FIT.items():
+        assert fit[key] == pytest.approx(value, rel=1e-12)
+    # Sampled snapped surface, radially 0.05% outside so the enclosure grows.
+    t = np.linspace(math.acos(-fit["xc"]/fit["a"]), 0, 7)
+    phi = np.linspace(0, 2*math.pi, 8, endpoint=False)
+    T, P = np.meshgrid(t, phi, indexing="ij")
+    vertices = np.column_stack(((fit["xc"]+fit["a"]*np.cos(T)).ravel(),
+                                (1.0005*fit["b"]*np.sin(T)*np.cos(P)).ravel(),
+                                (1.0005*fit["b"]*np.sin(T)*np.sin(P)).ravel()))
+    checks = spatial.certify_facets(vertices, _as_shape(fit), lo, hi, allowed, .02)
+    assert checks.keys() == GOLDEN_CERTIFY.keys()
+    for key in ("max_relative_radius_deviation", "enclosure_growth"):
+        assert checks[key] == pytest.approx(GOLDEN_CERTIFY[key], rel=1e-12)
+    verification = checks["voxel_verification"]
+    assert verification.keys() == GOLDEN_CERTIFY["voxel_verification"].keys()
+    for key, value in GOLDEN_CERTIFY["voxel_verification"].items():
+        assert verification[key] == pytest.approx(value, rel=1e-12)
+    # The fit identity hashes exactly the same [xc, a, b] list as before.
+    for name in ("p", "rho", "T", "U"):
+        (tmp_path/"cfd/0.001").mkdir(parents=True, exist_ok=True)
+        (tmp_path/"cfd/0.001"/name).write_text(f"field {name}\n")
+    for name in ("points", "faces", "owner", "neighbour", "boundary"):
+        (tmp_path/"cfd/constant/polyMesh").mkdir(parents=True, exist_ok=True)
+        (tmp_path/"cfd/constant/polyMesh"/name).write_text(f"mesh {name}\n")
+    golden_cfg = config.CaseConfig({"label": "golden"}, None, "golden")
+    assert fitted._identity(tmp_path, golden_cfg, _as_shape(fit), "0.001") == GOLDEN_IDENTITY
+    # Rendered mesh dictionaries for the ellipsoid profile are byte-identical.
+    cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
+    paths = write_mesh_inputs(tmp_path, cfg, config.build_source(cfg), dict(GOLDEN_MESH_FIT))
+    assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths} == GOLDEN_MESH_SHA256

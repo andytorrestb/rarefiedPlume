@@ -61,10 +61,11 @@ def _assert_breakdown_current(case_dir, data, cfg=None):
         raise wf.WorkflowError("breakdown inputs changed or lack provenance; rerun the breakdown step")
 
 
-def _identity(case_dir, cfg, fit, time):
+def _identity(case_dir, cfg, shape, time):
+    """Bind a fitted shape to its CFD state; a spheroid hashes [xc, a, b]."""
     from .provenance import sha256
     fields = {name: sha256(Path(case_dir)/"cfd"/time/name) for name in ("p", "rho", "T", "U")}
-    data = {"config": cfg.digest, "fit": [fit[k] for k in ("xc", "a", "b")],
+    data = {"config": cfg.digest, "fit": shape.params(),
             "time": time, "fields": fields, "breakdown_inputs": breakdown_identity(case_dir, cfg, time)}
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
