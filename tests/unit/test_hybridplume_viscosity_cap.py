@@ -150,6 +150,25 @@ def test_retained_stability_errors_above_limit(tmp_path, monkeypatch):
         workflow.breakdown(case, time="0.002")
 
 
+def test_failed_gate_withdraws_an_earlier_breakdown(tmp_path, monkeypatch):
+    from plumetools.hybridplume import breakdown as bd
+    from plumetools.hybridplume import fitted, workflow
+    case = _capsule_case(tmp_path, ("0.001", "0.002"))
+    workflow.breakdown(case, time="0.001")
+    fitted._load_breakdown(case)   # published and current
+    monkeypatch.setattr(bd, "retained_change", lambda *a: 0.03)
+    with pytest.raises(workflow.WorkflowError, match="retained volume fraction changed"):
+        workflow.breakdown(case, time="0.002")
+    results = case / "results"
+    assert not (results / "breakdown.npz").exists()
+    assert not (results / "breakdown.json").exists()
+    assert (results / "breakdown.failed.json").is_file()
+    with pytest.raises(workflow.WorkflowError, match="run the breakdown step first"):
+        fitted._load_breakdown(case)
+    with pytest.raises(workflow.WorkflowError):
+        workflow.interface(case)
+
+
 def test_retained_stability_skips_without_previous_write(tmp_path):
     from plumetools.hybridplume import workflow
     doc = workflow.breakdown(_capsule_case(tmp_path), time="0.001")

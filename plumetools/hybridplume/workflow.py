@@ -377,8 +377,16 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     bd.write_fields(cfd, time, mesh, fields)
     if failures:
         # Fields are written (inspect viscosityCapped / retainedRegion in
-        # ParaView); the classification is not published for interface.
+        # ParaView); the classification is not published for interface, and
+        # an earlier write's published classification is withdrawn so that
+        # interface cannot fall back to it. The rejected report is kept
+        # under a name nothing downstream reads.
+        out = results_dir(case_dir)
+        for name in ("breakdown.npz", "breakdown.json"):
+            (out / name).unlink(missing_ok=True)
+        write_json(out / "breakdown.failed.json", {**doc, "failures": failures})
         raise WorkflowError("; ".join(failures))
+    (results_dir(case_dir) / "breakdown.failed.json").unlink(missing_ok=True)
     np.savez_compressed(results_dir(case_dir) / "breakdown.npz", retained=reg["retained"],
                         mask=mask, near_lip=near_lip, time=time,
                         valid=ind["valid"], **identity_fields, **{k: ind[k] for k in bd.INDICATORS})
