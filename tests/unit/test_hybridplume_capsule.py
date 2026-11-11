@@ -341,3 +341,138 @@ def test_snappy_dict_uses_trisurface_and_features(tmp_path):
     assert "includedAngle 150;" in (tmp_path/"mesh-build/system/surfaceFeatureExtractDict").read_text()
     assert (tmp_path/"mesh-build/constant/triSurface/interface.stl").read_text().startswith("solid interface")
     assert paths[-1].name == "surfaceFeatureExtractDict" and len(paths) == 9
+
+
+# --- Task 9: capsule wired into spatial.interface and Allrun ------------------
+
+STUDY = __import__("pathlib").Path(__file__).resolve().parents[2]/"cases/cai2012-hybrid/hybrid.yaml"
+CFD_TIME = "0.001"
+
+
+def capsule_case(tmp_path, monkeypatch, *, retained=None):
+    """Synthetic fitted-capsule case: box CFD mesh, current breakdown, radial outflow."""
+    import yaml
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume import config, fitted, spatial, workflow
+    from plumetools.hybridplume.meshgeom import read_mesh
+    base = config.load(STUDY, "hpc-kn1em3-capsule")
+    doc = config.deep_merge(base.doc, {"interface": {"fit": {"screen": {
+        "radius_samples": 3, "length_samples": 4, "axial_points_per_D": 10, "azimuthal_points": 16}}}})
+    (tmp_path/workflow.RESOLVED).write_text(yaml.safe_dump({"profile": base.profile, "config": doc}))
+    cfg = workflow.load_case(tmp_path)
+    edges = np.linspace(-.3, .3, 13)
+    box_mesh(tmp_path/"cfd", np.linspace(0, .6, 13), edges, edges, .1)
+    (tmp_path/"cfd"/CFD_TIME).mkdir()
+    for name in ("p", "rho", "T", "U"):
+        (tmp_path/"cfd"/CFD_TIME/name).write_text(f"field {name}\n")
+    mesh = read_mesh(tmp_path/"cfd")
+    if retained is None:
+        retained = mesh.cell_centres[:, 0] < .4   # continuum region ends at x = 0.4
+    np.savez(workflow.results_dir(tmp_path)/"breakdown.npz", time=CFD_TIME, retained=retained,
+             Kn_GLL=np.full(mesh.n_cells, .01), input_identity=fitted.breakdown_identity(tmp_path, cfg, CFD_TIME))
+    centres = mesh.cell_centres
+    velocity = 3000*centres/np.linalg.norm(centres, axis=1)[:, None]
+    monkeypatch.setattr(spatial.bd, "read_state", lambda *args: SimpleNamespace(
+        rho=np.full(mesh.n_cells, 1e-3), T=np.full(mesh.n_cells, 300.0), U=velocity))
+    return cfg, mesh
+
+
+def source_diameter(cfg):
+    from plumetools.hybridplume import config
+    return config.build_source(cfg).diameter_m
+
+
+def test_capsule_interface_writes_fit_screen_and_mesh_inputs(tmp_path, monkeypatch):
+    import json
+    from plumetools.hybridplume import fitted, shapes, spatial
+    cfg, _ = capsule_case(tmp_path, monkeypatch)
+    doc = spatial.interface(tmp_path)
+    res = tmp_path/"results"
+    fit = json.loads((res/"capsule.json").read_text())
+    assert fit["status"] == "fitted" and fit["shape"] == "capsule"
+    assert fit["screen"]["status"] in ("passed", "no_passing_candidate")
+    assert fit["screen"]["candidates"] and fit["time"] == CFD_TIME
+    assert fit["clearance_m"] == pytest.approx(.25*.05*source_diameter(cfg))
+    # capsule.json round-trips through load_shape to the selected capsule.
+    _, shape = spatial.load_shape(tmp_path, cfg)
+    assert shape == shapes.Capsule(fit["R"], fit["L"], fit["a"])
+    assert isinstance(shape, shapes.Capsule) and shape.L + shape.a <= .4
+    on_disk = json.loads((res/"interface.json").read_text())
+    assert on_disk == json.loads(json.dumps(doc))
+    assert doc["mode"] == "fitted-capsule" and doc["status"] == "mesh_pending"
+    assert doc["fit"]["R"] == shape.R and "screen" not in doc["fit"]
+    selected = doc["screen"]["selected"]
+    assert doc["screen"]["status"] == fit["screen"]["status"]
+    assert (selected["R"], selected["L"], selected["a"]) == (shape.R, shape.L, shape.a)
+    assert selected["screen_feasible"] and selected["return_mass_fraction"] < .05
+    assert doc["fitted_identity"] == fitted._identity(tmp_path, cfg, shape, CFD_TIME)
+    build = tmp_path/"mesh-build"
+    assert (build/"system/surfaceFeatureExtractDict").is_file()
+    assert (build/"constant/triSurface/interface.stl").read_text().startswith("solid interface")
+    assert "interface.stl" in (build/"system/snappyHexMeshDict").read_text()
+
+
+def test_capsule_interface_reports_no_feasible_capsule(tmp_path, monkeypatch):
+    import json
+    from plumetools.hybridplume import interface as itf, spatial, workflow
+    capsule_case(tmp_path, monkeypatch, retained=np.zeros(12**3, bool))
+    doc = spatial.interface(tmp_path)
+    assert doc["mode"] == "fitted-capsule" and doc["status"] == itf.STATUS_NONE
+    assert doc["reasons"] and "capsule" in doc["reasons"][0]
+    assert json.loads((tmp_path/"results/capsule.json").read_text())["status"] == "no_feasible_capsule"
+    assert not (tmp_path/"mesh-build").exists()
+    with pytest.raises(workflow.WorkflowError, match="no feasible capsule"):
+        spatial.load_shape(tmp_path, workflow.load_case(tmp_path))
+
+
+def test_capsule_interface_refuses_existing_ellipsoid_mesh(tmp_path, monkeypatch):
+    import json
+    from _hybridmesh import box_mesh
+    from plumetools.hybridplume import spatial, workflow
+    capsule_case(tmp_path, monkeypatch)
+    # A DSMC mesh already built for an ellipsoid fit of this case.
+    box_mesh(tmp_path/"dsmc", [0, .1], [-.1, .1], [-.1, .1], .1)
+    (tmp_path/"results/interface.json").write_text(json.dumps(
+        {"mode": "fitted-ellipsoid", "fitted_identity": "ellipsoid-identity", "time": CFD_TIME}))
+    with pytest.raises(workflow.WorkflowError, match="existing DSMC mesh"):
+        spatial.interface(tmp_path)
+    assert not (tmp_path/"results/capsule.json").exists()
+    assert not (tmp_path/"mesh-build").exists()
+
+
+def test_dsmc_setup_rewrites_capsule_mesh_inputs(tmp_path, monkeypatch):
+    from plumetools.hybridplume import shapes, spatial
+    capsule_case(tmp_path, monkeypatch)
+    spatial.interface(tmp_path)
+    calls = []
+    monkeypatch.setattr(spatial.capsule_mesh, "write_mesh_inputs",
+                        lambda case, cfg, source, shape: calls.append(shape))
+    monkeypatch.setattr(spatial, "write_mesh_inputs",
+                        lambda *args: pytest.fail("ellipsoid mesh writer used for a capsule"))
+    monkeypatch.setattr(spatial.resources, "assess_configuration",
+                        lambda *args: {"full_dsmc": None})
+    monkeypatch.setattr(spatial.dsmc, "plan_run", lambda *args: SimpleNamespace(describe=lambda: {}))
+    monkeypatch.setattr(spatial.dsmc, "write_case", lambda *args: None)
+    (tmp_path/"dsmc").mkdir()
+    spatial.dsmc_setup(tmp_path, np_ranks=1)
+    assert len(calls) == 1 and isinstance(calls[0], shapes.Capsule)
+
+
+def test_plots_draw_capsule_section_under_capsule_name(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    from plumetools.hybridplume import spatial
+    capsule_case(tmp_path, monkeypatch)
+    spatial.interface(tmp_path)
+    out = spatial.plots(tmp_path)
+    assert [p.name for p in out] == ["breakdown_capsule.png"]
+    assert not (tmp_path/"results/breakdown_ellipsoid.png").exists()
+
+
+def test_allrun_runs_surface_feature_extract_for_stl_meshes():
+    text = (STUDY.parent/"Allrun").read_text()
+    start = text.index('cd "$CASE/mesh-build"')
+    block = text[start:text.index("run topoSet topoSet", start)]
+    extract = block.index("surfaceFeatureExtract")
+    assert block.index("run blockMesh blockMesh") < extract < block.index("decomposePar")
+    assert extract < block.index("snappyHexMesh")
+    assert "system/surfaceFeatureExtractDict" in block[block.index("run blockMesh"):extract+80]

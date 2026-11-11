@@ -200,6 +200,10 @@ stage_prepare_dsmc() {
             mesh_ranks=$(ranks)
             cd "$CASE/mesh-build" || die "no meshing workspace"
             run blockMesh blockMesh
+            # STL interfaces (fitted-capsule) need feature edges before snapping.
+            if [ -f system/surfaceFeatureExtractDict ]; then
+                run surfaceFeatureExtract surfaceFeatureExtract
+            fi
             if [ "$mesh_ranks" -gt 1 ]; then
                 cp "$CASE/dsmc/system/decomposeParDict" system/decomposeParDict
                 run decomposePar decomposePar -time none -force
