@@ -286,3 +286,55 @@ def test_sample_containing_cells_unchanged(box):
         locator.locate([[1.5, 0, 0]], np.ones(mesh.n_cells, bool))
     with pytest.raises(WorkflowError, match="finite"):
         locator.locate([[np.nan, 0, 0]], np.ones(mesh.n_cells, bool))
+
+
+def _stl_shape():
+    from plumetools.hybridplume import shapes
+    return shapes.Capsule(.5, .8, .6)
+
+
+def test_stl_is_closed_and_outward():
+    from collections import Counter
+    from plumetools.hybridplume.capsule_mesh import capsule_stl
+    shape, back = _stl_shape(), .05
+    v, t = capsule_stl(shape, .002, back)
+    edges = Counter()
+    for tri in t:
+        for i in range(3):
+            edges[tuple(sorted((tri[i], tri[(i+1) % 3])))] += 1
+    assert set(edges.values()) == {2}
+    p = v[t]
+    volume = np.einsum("ij,ij->i", p[:, 0], np.cross(p[:, 1], p[:, 2])).sum()/6
+    expected = shape.volume()+math.pi*shape.R**2*back
+    assert volume > 0 and volume == pytest.approx(expected, rel=.01)
+
+
+@pytest.mark.parametrize("length", [.8, 0.0])
+def test_stl_chord_error_within_tolerance(length):
+    from plumetools.hybridplume import shapes
+    from plumetools.hybridplume.capsule_mesh import capsule_stl
+    shape = shapes.Capsule(.5, length, .6)
+    v, t = capsule_stl(shape, .002, .05)
+    c = v[t].mean(axis=1)
+    c = c[c[:, 0] >= 0]
+    assert np.max(np.abs(np.sqrt(shape.q(c))-1)) <= .002
+
+
+def test_snappy_dict_uses_trisurface_and_features(tmp_path):
+    from plumetools.hybridplume import config
+    from plumetools.hybridplume.capsule_mesh import background, write_mesh_inputs
+    from pathlib import Path
+    study = Path(__file__).resolve().parents[2]/"cases/cai2012-hybrid/hybrid.yaml"
+    cfg = config.load(study, "hpc-kn1em3-ellipsoid")
+    source = config.build_source(cfg)
+    from plumetools.hybridplume import shapes
+    shape = shapes.Capsule(.1, .3, .15)   # R matches the source radius
+    assert shape.q(np.array([background(cfg, source)["seed"]]))[0] > 1
+    paths = write_mesh_inputs(tmp_path, cfg, source, shape)
+    snappy = (tmp_path/"mesh-build/system/snappyHexMeshDict").read_text()
+    assert "interface.stl" in snappy and "type triSurfaceMesh;" in snappy
+    assert "name interface;" in snappy and 'file "interface.eMesh";' in snappy
+    assert "level (3 3);" in snappy
+    assert "includedAngle 150;" in (tmp_path/"mesh-build/system/surfaceFeatureExtractDict").read_text()
+    assert (tmp_path/"mesh-build/constant/triSurface/interface.stl").read_text().startswith("solid interface")
+    assert paths[-1].name == "surfaceFeatureExtractDict" and len(paths) == 9
