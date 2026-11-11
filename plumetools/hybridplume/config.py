@@ -161,6 +161,14 @@ def validate(cfg: CaseConfig) -> None:
             raise ConfigError("mesh.depth_over_D must be positive and finite")
         if not math.isfinite(clearance) or clearance < 0:
             raise ConfigError("interface.fit.clearance_cells must be finite and nonnegative")
+    cap = cfg.get("cfd.viscosity_cap", {}) or {}
+    if cap.get("enabled", False):
+        try:
+            factor = float(cap.get("factor", 1.0))
+        except (TypeError, ValueError):
+            factor = float("nan")
+        if not math.isfinite(factor) or factor <= 0:
+            raise ConfigError("cfd.viscosity_cap.factor must be finite and positive")
     # Axisymmetry and radial weighting remain unsupported.
     for key in ("mesh.axisymmetric", "mesh.wedge", "dsmc.axisymmetric",
                 "dsmc.radial_weighting", "domain.symmetry"):
