@@ -212,6 +212,25 @@ def test_screen_marks_unsampleable_candidate_infeasible(box):
     assert out[1]["return_mass_fraction"] is not None
 
 
+def test_screen_raises_on_corrupt_inputs(box):
+    from plumetools.hybridplume.capsule import screen
+    from plumetools.hybridplume.physics import Gas
+    from plumetools.hybridplume.workflow import WorkflowError
+    mesh, locator = box
+    st = state(mesh, lambda c: np.tile([500.0, 0, 0], (len(c), 1)))
+    pool = [candidate(.3, .3, .3)]
+    for bad in (np.ones(mesh.n_cells-1, bool), np.ones(mesh.n_cells)):
+        with pytest.raises(WorkflowError, match="retained"):
+            screen(pool, locator, st, bad, Gas(), D, cfg())
+    retained = np.ones(mesh.n_cells, bool)
+    wall = locator.locate([[.05, .25, .05]], retained)[0]  # under the cylinder wall
+    for field, value in (("rho", 0.0), ("T", -1.0), ("U", np.nan)):
+        corrupt = SimpleNamespace(rho=st.rho.copy(), T=st.T.copy(), U=st.U.copy())
+        getattr(corrupt, field)[wall] = value
+        with pytest.raises(WorkflowError, match="invalid CFD state"):
+            screen(pool, locator, corrupt, retained, Gas(), D, cfg())
+
+
 def screened(R, L, a, ret, sub, ok=True):
     c = candidate(R, L, a)
     c.update(return_mass_fraction=ret if ok else None,

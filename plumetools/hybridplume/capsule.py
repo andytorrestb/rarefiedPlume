@@ -129,12 +129,16 @@ def screen(candidates, locator, state, retained, gas, D, cfg) -> list[dict]:
 
     Adds ``return_mass_fraction`` (reverse/forward Maxwellian mass through the
     surface), ``subsonic_area_fraction`` (area with normal Mach < 1) and
-    ``screen_feasible``. A candidate whose samples leave the CFD domain, land
-    on cells outside ``retained`` or meet an invalid CFD state is marked
-    screen-infeasible with the other two fields ``None``; the sweep goes on.
+    ``screen_feasible``. A candidate whose samples leave the CFD domain
+    or land on cells outside ``retained`` is marked screen-infeasible with the
+    other two fields ``None``; the sweep goes on. A malformed ``retained`` mask
+    or an invalid CFD state on a retained cell is corrupt input and raises.
     """
     params = {**SCREEN_DEFAULTS, **(cfg.get("interface.fit.screen", {}) or {})}
     per_d, n_theta = params["axial_points_per_D"], params["azimuthal_points"]
+    retained = np.asarray(retained)
+    if retained.dtype != bool or retained.shape != (locator.n_cells,):
+        raise wf.WorkflowError("retained CFD-cell mask must be boolean with one entry per cell")
     out = []
     for cand in candidates:
         row = {**cand, "return_mass_fraction": None, "subsonic_area_fraction": None,
@@ -149,13 +153,13 @@ def screen(candidates, locator, state, retained, gas, D, cfg) -> list[dict]:
         rho, velocity, temperature = state.rho[cells], state.U[cells], state.T[cells]
         if not ((rho > 0) & (temperature > 0) & np.isfinite(rho) & np.isfinite(temperature)
                 & np.isfinite(velocity).all(axis=1)).all():
-            continue
+            raise wf.WorkflowError("actual interface contains a non-positive or invalid CFD state")
         forward = halfrange.integrate(halfrange.incoming_flux(
             rho, velocity, temperature, normals, gas.gas_constant), areas)["mass"]
         reverse = halfrange.integrate(halfrange.incoming_flux(
             rho, velocity, temperature, -normals, gas.gas_constant), areas)["mass"]
-        if not (forward > 0 and np.isfinite(reverse)):
-            continue
+        if not (forward > 0 and np.isfinite(forward) and np.isfinite(reverse)):
+            raise wf.WorkflowError("actual interface contains a non-positive or invalid CFD state")
         mach = np.einsum("ij,ij->i", velocity, normals)/gas.sound_speed(temperature)
         row.update(return_mass_fraction=float(reverse/forward),
                    subsonic_area_fraction=float(areas[mach < 1].sum()/areas.sum()),
@@ -171,7 +175,7 @@ def select(screened, crit) -> dict:
     if not feasible:
         reason = ("no certified-feasible capsule candidate" if not screened else
                   "no capsule candidate could be screened on the CFD state "
-                  "(samples outside the domain, on excluded cells or on invalid states)")
+                  "(samples outside the CFD domain or on excluded cells)")
         return {"status": "no_feasible_capsule", "reason": reason}
     passing = [c for c in feasible if c["return_mass_fraction"] <= max_return
                and c["subsonic_area_fraction"] <= max_subsonic]
