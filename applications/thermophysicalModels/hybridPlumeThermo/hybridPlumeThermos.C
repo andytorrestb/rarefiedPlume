@@ -9,7 +9,7 @@ License
     GPL-3.0-or-later.
 
 Description
-    One extra run-time-selectable psiThermo:
+    Two extra run-time-selectable psiThermos. The first:
 
         hePsiThermo<pureMixture<tabulatedTransport<species::thermo<
             hConstThermo<perfectGas<specie>>, sensibleInternalEnergy>>>>
@@ -43,6 +43,21 @@ Description
 
     and load with  libs ("libhybridPlumeThermo.so");  in controlDict.
 
+    A second psiThermo, identical except for
+
+        transport       cappedTabulated;
+
+    wraps the same tables in cappedTabulatedTransport (this directory), which
+    caps the kinematic viscosity at  nuMax  (read from the transport
+    subdictionary next to mu and kappa):
+
+        mu_eff = min(mu_tab(T), nuMax p/(R T)),  kappa_eff = kappa_tab mu_eff/mu_tab
+
+    rhoCentralFoam treats viscous work explicitly; without the cap the viscous
+    number in the near-vacuum cells beside a plume limits the time step to
+    nothing. plumetools.hybridplume writes nuMax and checks after the run that
+    the cap never acted inside the retained continuum region.
+
 \*---------------------------------------------------------------------------*/
 
 #include "psiThermo.H"
@@ -54,6 +69,7 @@ Description
 #include "sensibleInternalEnergy.H"
 #include "thermo.H"
 #include "tabulatedTransport.H"
+#include "cappedTabulatedTransport.H"
 
 #include "hePsiThermo.H"
 #include "pureMixture.H"
@@ -69,6 +85,18 @@ makeThermos
     hePsiThermo,
     pureMixture,
     tabulatedTransport,
+    sensibleInternalEnergy,
+    hConstThermo,
+    perfectGas,
+    specie
+);
+
+makeThermos
+(
+    psiThermo,
+    hePsiThermo,
+    pureMixture,
+    cappedTabulatedTransport,
     sensibleInternalEnergy,
     hConstThermo,
     perfectGas,

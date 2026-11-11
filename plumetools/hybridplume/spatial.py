@@ -7,12 +7,16 @@ import shutil
 from pathlib import Path
 import numpy as np
 
-from . import config, breakdown as bd, dsmc, mapping, resources, fitted
+from . import config, breakdown as bd, dsmc, mapping, resources, fitted, shapes
+from . import capsule, capsule_mesh
 from . import workflow as wf
-from .ellipsoid import fit_ellipsoid, verify_ellipsoid
+from .ellipsoid import fit_ellipsoid
 from .ellipsoid_mesh import write_mesh_inputs
 from .meshgeom import read_mesh
 from . import interface as itf
+
+FIT_FILES = {"fitted-ellipsoid": "ellipsoid.json", "fitted-capsule": "capsule.json"}
+_SHAPE_NAMES = {"fitted-ellipsoid": "ellipsoid", "fitted-capsule": "capsule"}
 
 
 def _footprints(mesh):
@@ -29,22 +33,75 @@ def _mesh_identity(case_dir, expected=None):
     return actual
 
 
-def certify_facets(vertices, fit, lower, upper, retained, tolerance):
-    axes = np.array([fit["a"], fit["b"], fit["b"]])
-    q = np.sum(((vertices-np.array([fit["xc"], 0, 0]))/axes)**2, axis=1)
+def load_shape(case_dir, cfg):
+    """Read the saved fit for this mode; return (fit document, fitted shape)."""
+    mode = cfg.get("interface.mode")
+    path = wf.results_dir(case_dir)/FIT_FILES[mode]
+    name = _SHAPE_NAMES[mode]
+    if not path.is_file():
+        raise wf.WorkflowError(f"run interface first to fit the {name}")
+    fit = json.loads(path.read_text())
+    if fit.get("status") != "fitted":
+        raise wf.WorkflowError(f"no feasible {name}; DSMC cannot be initialized")
+    return fit, shapes.from_json(fit)
+
+
+def certify_facets(vertices, shape, lower, upper, retained, tolerance):
+    q = shape.q(vertices)
     deviation = float(np.max(np.abs(np.sqrt(q)-1)))
     if deviation > tolerance:
         raise wf.WorkflowError("snapped facets exceed the fitted geometry tolerance")
-    enclosure = dict(fit, clearance_m=0)
     growth = max(1.0, float(np.sqrt(q.max())))*(1+1e-10)
-    enclosure.update(a=fit["a"]*growth, b=fit["b"]*growth)
-    check = verify_ellipsoid(enclosure, lower, upper, retained)
+    check = shape.grown(growth).verify(lower, upper, retained, 0)
     if not check["feasible"]:
         raise wf.WorkflowError("snapped-facet enclosure enters an excluded continuum voxel")
     if np.any(vertices < lower.min(axis=0)-1e-9) or np.any(vertices > upper.max(axis=0)+1e-9):
         raise wf.WorkflowError("snapped interface extends outside the CFD domain")
     return {"max_relative_radius_deviation": deviation, "enclosure_growth": growth,
             "voxel_verification": check}
+
+
+def _clearance(cfg, source):
+    return (float(cfg.get("interface.fit.clearance_cells", .25))
+            * float(cfg.require("mesh.core_cell_over_D"))*source.diameter_m)
+
+
+def _write_mesh_inputs(case_dir, cfg, source, fit, shape):
+    """Mesher inputs for the fitted shape: snappy sphere or capsule STL."""
+    if isinstance(shape, shapes.Capsule):
+        return capsule_mesh.write_mesh_inputs(case_dir, cfg, source, shape)
+    return write_mesh_inputs(case_dir, cfg, source, fit)
+
+
+def _fit_capsule(case_dir, cfg, source, mesh, lower, upper, retained, time):
+    """Sweep, screen and select a capsule; the result round-trips via shapes.from_json."""
+    params = cfg.get("interface.fit.screen", {}) or {}
+    clearance = _clearance(cfg, source)
+    candidates = capsule.feasible_candidates(
+        lower, upper, retained, source_radius=source.radius_m, clearance=clearance,
+        radius_samples=int(params.get("radius_samples", 12)),
+        length_samples=int(params.get("length_samples", 24)))
+    screened = []
+    if candidates:
+        state = bd.read_state(case_dir/"cfd", time, source.gas)
+        screened = capsule.screen(candidates, fitted.RectilinearLocator(mesh, axes=(0, 1, 2)),
+                                  state, retained, source.gas, source.diameter_m, cfg)
+    chosen = capsule.select(screened, cfg.get("interface.criteria", {}) or {})
+    if chosen["status"] != "fitted":
+        return {"status": chosen["status"], "reason": chosen["reason"], "clearance_m": clearance,
+                "candidates": len(candidates)}
+    shape = shapes.from_json(chosen["shape"])
+    # Shape fields at top level ("shape": "capsule") so load_shape reads it back.
+    return {**chosen["shape"], "status": "fitted", "volume_m3": shape.volume(),
+            "source_radius_m": shape.base_radius(), "clearance_m": clearance,
+            "screen": chosen["screen"]}
+
+
+def _selected(fit):
+    key = (fit["R"], fit["L"], fit["a"])
+    row = next(c for c in fit["screen"]["candidates"] if (c["R"], c["L"], c["a"]) == key)
+    return {k: row[k] for k in ("R", "L", "a", "volume_m3", "return_mass_fraction",
+                                "subsonic_area_fraction", "screen_feasible")}
 
 
 def interface(case_dir, time=None, allow_unsuitable=False):
@@ -56,27 +113,37 @@ def interface(case_dir, time=None, allow_unsuitable=False):
     saved_time = str(data["time"])
     if time is not None and time != saved_time:
         raise wf.WorkflowError("requested time differs from breakdown; rerun breakdown")
+    mode = cfg.get("interface.mode")
+    if mode not in FIT_FILES:
+        raise wf.WorkflowError(f"interface mode {mode!r} has no 3D fitter")
     mesh = read_mesh(case_dir/"cfd")
     lower, upper = _footprints(mesh)
-    fit = fit_ellipsoid(lower, upper, data["retained"], source_radius=source.radius_m,
-                        clearance=float(cfg.get("interface.fit.clearance_cells", .25))
-                        *float(cfg.require("mesh.core_cell_over_D"))*source.diameter_m)
+    if mode == "fitted-capsule":
+        fit = _fit_capsule(case_dir, cfg, source, mesh, lower, upper, data["retained"], saved_time)
+    else:
+        fit = fit_ellipsoid(lower, upper, data["retained"], source_radius=source.radius_m,
+                            clearance=_clearance(cfg, source))
     fitted._assert_breakdown_current(case_dir, data, cfg)
-    doc = {"mode": "fitted-ellipsoid", "geometry": "cartesian", "time": saved_time,
+    doc = {"mode": mode, "geometry": "cartesian", "time": saved_time,
            "label": cfg.get("label", cfg.profile), "fit": fit,
            "allow_unsuitable": bool(allow_unsuitable or cfg.get("interface.allow_unsuitable", False))}
     if fit["status"] != "fitted":
         doc.update(status=itf.STATUS_NONE, reasons=[fit["reason"]])
     else:
-        identity = fitted._identity(case_dir, cfg, fit, saved_time)
+        shape = shapes.from_json(fit)
+        identity = fitted._identity(case_dir, cfg, shape, saved_time)
         old = json.loads((res/"interface.json").read_text()) if (res/"interface.json").is_file() else {}
         if (case_dir/"dsmc/constant/polyMesh/owner").is_file() and old.get("fitted_identity") != identity:
             raise wf.WorkflowError("existing DSMC mesh has a different fit/state; use a fresh case")
         fit["time"] = saved_time
         doc.update(status="mesh_pending", fitted_identity=identity,
                    reasons=["actual 3D mesh awaits suitability assessment"])
-        write_mesh_inputs(case_dir, cfg, source, fit)
-    wf.write_json(res/"ellipsoid.json", fit)
+        _write_mesh_inputs(case_dir, cfg, source, fit, shape)
+    if "screen" in fit:
+        doc["fit"] = {k: v for k, v in fit.items() if k != "screen"}
+        doc["screen"] = {"status": fit["screen"]["status"], "selected": _selected(fit),
+                         "candidates": len(fit["screen"]["candidates"])}
+    wf.write_json(res/FIT_FILES[mode], fit)
     wf.write_json(res/"interface.json", doc)
     return doc
 
@@ -87,13 +154,9 @@ def dsmc_setup(case_dir, np_ranks=None):
     cfg = wf.load_case(case_dir)
     source = config.build_source(cfg)
     res = wf.results_dir(case_dir)
-    if not (res/"ellipsoid.json").is_file():
-        raise wf.WorkflowError("run interface first to fit the ellipsoid")
-    fit = json.loads((res/"ellipsoid.json").read_text())
-    if fit.get("status") != "fitted":
-        raise wf.WorkflowError("no feasible ellipsoid; DSMC cannot be initialized")
+    fit, shape = load_shape(case_dir, cfg)
     doc = json.loads((res/"interface.json").read_text())
-    if doc.get("fitted_identity") != fitted._identity(case_dir, cfg, fit, doc["time"]):
+    if doc.get("fitted_identity") != fitted._identity(case_dir, cfg, shape, doc["time"]):
         raise wf.WorkflowError("CFD inputs changed since fitting; use a fresh case")
     ranks = int(np_ranks or cfg.get("resources.default_ranks", 192))
     if not 1 <= ranks <= int(cfg.get("resources.max_ranks", 192)):
@@ -118,7 +181,7 @@ def dsmc_setup(case_dir, np_ranks=None):
     estimate = resources.assess_configuration(cfg, source, plan(cfg, source))["full_dsmc"]
     run = dsmc.plan_run(cfg, source, estimate, float(cfg.require("domain.x_max_over_D"))*source.diameter_m)
     dsmc.write_case(case_dir/"dsmc", cfg, source, run, ["interface", "source"], ranks)
-    write_mesh_inputs(case_dir, cfg, source, fit)
+    _write_mesh_inputs(case_dir, cfg, source, fit, shape)
     (case_dir/"dsmc/spatial.foam").touch()
     result = {"geometry": "cartesian", "ranks": ranks, "run": run.describe(),
               "fitted_identity": doc["fitted_identity"], "pending_actual_geometry": True,
@@ -151,7 +214,7 @@ def publish_mesh(case_dir):
     pending.rename(target)
 
 
-def _geometry(mesh, cmesh, data, fit, cfg, source):
+def _geometry(mesh, cmesh, data, shape, cfg, source):
     if np.any(mesh.cell_volumes <= 0) or any(p.type in ("empty", "wedge") for p in mesh.patches.values()):
         raise wf.WorkflowError("ellipsoid DSMC mesh must have positive full-3D cells")
     sl = mesh.patch_slice("interface")
@@ -160,12 +223,12 @@ def _geometry(mesh, cmesh, data, fit, cfg, source):
         raise wf.WorkflowError("snapped mesh has no interface")
     vertices = np.unique(np.concatenate([mesh.labels[mesh.offsets[f]:mesh.offsets[f+1]] for f in faces]))
     lo, hi = _footprints(cmesh)
-    checks = certify_facets(mesh.points[vertices], fit, lo, hi, data["retained"],
+    checks = certify_facets(mesh.points[vertices], shape, lo, hi, data["retained"],
                              float(cfg.get("interface.fit.geometry_relative_tolerance", .02)))
     area_vectors = -mesh.face_areas[faces]
     areas = np.linalg.norm(area_vectors, axis=1)
     normals = area_vectors/areas[:, None]
-    gradient = (mesh.face_centres[faces]-[fit["xc"], 0, 0])/[fit["a"]**2, fit["b"]**2, fit["b"]**2]
+    gradient = shape.outward_gradient(mesh.face_centres[faces])
     if np.any(np.sum(normals*gradient, axis=1) <= 0):
         raise wf.WorkflowError("snapped interface has reversed normals")
     covered = float(area_vectors[:, 0].sum())
@@ -203,14 +266,14 @@ def dsmc_fields(case_dir):
     source = config.build_source(cfg)
     res = wf.results_dir(case_dir)
     doc = json.loads((res/"interface.json").read_text())
-    fit = json.loads((res/"ellipsoid.json").read_text())
-    if doc.get("fitted_identity") != fitted._identity(case_dir, cfg, fit, doc["time"]):
+    _, shape = load_shape(case_dir, cfg)
+    if doc.get("fitted_identity") != fitted._identity(case_dir, cfg, shape, doc["time"]):
         raise wf.WorkflowError("CFD inputs changed since fitting")
     data = fitted._load_breakdown(case_dir)
     setup = json.loads((res/"dsmc_setup.json").read_text())
     mesh_identity = _mesh_identity(case_dir, setup.get("mesh_identity"))
     cmesh, mesh = read_mesh(case_dir/"cfd"), read_mesh(case_dir/"dsmc")
-    faces, normals, areas, geo = _geometry(mesh, cmesh, data, fit, cfg, source)
+    faces, normals, areas, geo = _geometry(mesh, cmesh, data, shape, cfg, source)
     cells = fitted.sample_containing_cells(cmesh, mesh.face_centres[faces], data["retained"], axes=(0, 1, 2))
     state = bd.read_state(case_dir/"cfd", doc["time"], source.gas)
     valid = (state.rho > 0) & (state.T > 0) & np.isfinite(state.rho) & np.isfinite(state.T) & np.isfinite(state.U).all(axis=1)
@@ -282,15 +345,17 @@ def plots(case_dir):
         wf.write_json(res/"plot_status.json", {"status": "unavailable",
                       "reason": "optional matplotlib missing; inspect spatial.foam and interface.vtk"})
         return []
-    from .ellipse import ellipse_points
     from . import report
     d = source.diameter_m
     label = cfg.get("label", cfg.profile)
     doc = json.loads((res/"interface.json").read_text()) if (res/"interface.json").is_file() else {}
     if doc.get("smoke_only"):
         label += " — MACHINERY SMOKE"
-    fit = json.loads((res/"ellipsoid.json").read_text()) if (res/"ellipsoid.json").is_file() else {}
-    arc = ellipse_points(fit, 401)/d if fit.get("status") == "fitted" else None
+    path = res/FIT_FILES[cfg.get("interface.mode")]
+    fit = json.loads(path.read_text()) if path.is_file() else {}
+    shape = shapes.from_json(fit) if fit.get("status") == "fitted" else None
+    arc = shape.section(201)/d if shape is not None else None
+    kind = "capsule" if isinstance(shape, shapes.Capsule) else "spheroid"
     out = []
     if (res/"breakdown.npz").is_file():
         data = fitted._load_breakdown(case_dir)
@@ -324,12 +389,12 @@ def plots(case_dir):
             ax.add_collection(LineCollection(segments, colors="#c44e52", linewidths=1,
                                              label="raw continuum boundary at z = 0"))
         if arc is not None:
-            ax.plot(arc[:, 0], arc[:, 1], color="#202020", lw=2, label="fitted spheroid section")
+            ax.plot(arc[:, 0], arc[:, 1], color="#202020", lw=2, label=f"fitted {kind} section")
         ax.plot([0, 0], [-.5, .5], color="#2369b4", lw=3, label="circular source section")
         ax.set(xlabel="x / D", ylabel="y / D", title=label+"\nCFD cells adjacent to z = 0")
         ax.set_aspect("equal")
         ax.legend(fontsize=8)
-        path = res/"breakdown_ellipsoid.png"
+        path = res/f"breakdown_{_SHAPE_NAMES[cfg.get('interface.mode')]}.png"
         fig.savefig(path, dpi=130)
         plt.close(fig)
         out.append(path)

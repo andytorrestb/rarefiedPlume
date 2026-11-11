@@ -38,7 +38,8 @@ PAPER_VALUES = {
 }
 
 BACKENDS = ("dsmcFoam",)
-INTERFACE_MODES = ("automatic", "manual", "none", "fitted-ellipse", "fitted-ellipsoid")
+SPATIAL_FIT_MODES = ("fitted-ellipsoid", "fitted-capsule")
+INTERFACE_MODES = ("automatic", "manual", "none", "fitted-ellipse") + SPATIAL_FIT_MODES
 MANUAL_SURFACES = ("sphere", "cylinder", "box")
 
 
@@ -120,6 +121,16 @@ def from_document(raw: dict, *, profile: str | None = None,
     return cfg
 
 
+def is_spatial_fit(cfg: CaseConfig) -> bool:
+    """True for the full-3D fitted modes (ellipsoid or capsule)."""
+    return cfg.get("interface.mode") in SPATIAL_FIT_MODES
+
+
+def is_fitted(cfg: CaseConfig) -> bool:
+    """True for any fitted interface mode (planar ellipse or 3D spatial)."""
+    return cfg.get("interface.mode") == "fitted-ellipse" or is_spatial_fit(cfg)
+
+
 def validate(cfg: CaseConfig) -> None:
     """Refuse configurations that would build a case other than the one described."""
     for key in ("source.diameter_m", "source.speed_ratio", "source.temperature_K",
@@ -141,8 +152,8 @@ def validate(cfg: CaseConfig) -> None:
     fitted = cfg.get("interface.mode") == "fitted-ellipse"
     if fitted != (geometry == "planar"):
         raise ConfigError("planar geometry requires the fitted-ellipse interface mode")
-    if cfg.get("interface.mode") == "fitted-ellipsoid" and geometry != "cartesian":
-        raise ConfigError("fitted-ellipsoid requires cartesian 3D geometry")
+    if is_spatial_fit(cfg) and geometry != "cartesian":
+        raise ConfigError(f"{cfg.get('interface.mode')} requires cartesian 3D geometry")
     if geometry == "planar":
         depth = float(cfg.get("mesh.depth_over_D", 0))
         clearance = float(cfg.get("interface.fit.clearance_cells", 0.25))
@@ -150,6 +161,14 @@ def validate(cfg: CaseConfig) -> None:
             raise ConfigError("mesh.depth_over_D must be positive and finite")
         if not math.isfinite(clearance) or clearance < 0:
             raise ConfigError("interface.fit.clearance_cells must be finite and nonnegative")
+    cap = cfg.get("cfd.viscosity_cap", {}) or {}
+    if cap.get("enabled", False):
+        try:
+            factor = float(cap.get("factor", 1.0))
+        except (TypeError, ValueError):
+            factor = float("nan")
+        if not math.isfinite(factor) or factor <= 0:
+            raise ConfigError("cfd.viscosity_cap.factor must be finite and positive")
     # Axisymmetry and radial weighting remain unsupported.
     for key in ("mesh.axisymmetric", "mesh.wedge", "dsmc.axisymmetric",
                 "dsmc.radial_weighting", "domain.symmetry"):

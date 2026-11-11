@@ -182,6 +182,56 @@ source is never truncated.
 A DSMC region on an `unsuitable` surface is built only with
 `--allow-unsuitable`, and every report from it says `smoke_only: true`.
 
+### Fitted-capsule mode and the coarse stabilised CFD
+
+Design: [capsule interface and coarse CFD spec](superpowers/specs/2026-11-11-capsule-interface-and-coarse-cfd-design.md).
+
+* `interface.mode: fitted-capsule` fits a cylinder of radius `R` over
+  `0 ≤ x ≤ L` capped by a spheroidal tip (semi-axes `a, R, R`) inside the
+  retained continuum region. The sweep (`capsule.py`) is exact and
+  conservative: every `(R, L, a_max)` candidate is certified against the
+  excluded voxels with the same `clearance_cells` margin as the ellipsoid.
+  Each candidate is then screened on its analytic surface with the
+  half-range return-mass fraction and subsonic normal-Mach area fraction
+  (`interface.fit.screen: {radius_samples: 12, length_samples: 24,
+  axial_points_per_D: 40, azimuthal_points: 90}`). The largest passing volume
+  is selected, else the lowest-return feasible one with
+  `screen.status: no_passing_candidate`. The screen is advisory: the
+  actual-mesh suitability check in `dsmc-fields` stays authoritative.
+* `results/capsule.json` holds the selected shape (`"shape": "capsule"`,
+  `R, L, a`), the clearance, the fit time and every screened candidate;
+  `interface.json` summarises the selection under `screen.selected`.
+  Rerunning `interface` with another shape on a case that already has a
+  DSMC mesh is refused by the fit-identity check.
+* Meshing (`capsule_mesh.py`) writes a watertight STL
+  (`mesh-build/constant/triSurface/interface.stl`, chord error
+  ≤ 0.1 × `geometry_relative_tolerance`; the cylinder runs on to one
+  background cell behind the exit plane) and the exit-plane rim circle
+  (x = 0, radius R, same chord tolerance) as an OBJ edge mesh
+  `mesh-build/constant/triSurface/interface_rim.obj`. The capsule's
+  snappyHexMeshDict lists it under `features` and sets
+  `explicitFeatureSnap true` so the rim snaps onto the source plane; there is
+  no `surfaceFeatureExtract` step (the STL has no edge at x = 0 and the tip
+  junction is tangent). The section plot is `results/breakdown_capsule.png`.
+* Viscosity cap (`cfd.viscosity_cap: {enabled, factor}`, off by default):
+  `mu_eff = min(mu_tab(T), nu_max·p/(R T))` with
+  `nu_max = factor · viscous_dt_factor · h²/dt_visc`, and `kappa` scaled by
+  the same ratio (the Prandtl number is kept). It stops the drained low-density
+  cells beside the plume from blowing up the explicit viscous number. The
+  breakdown step reports capped cells and refuses if any lies in the retained
+  region, or if the retained volume fraction changes by more than 2 % between
+  the last two writes. The cap lives in `libhybridPlumeThermo`
+  (`cappedTabulatedTransport`). `run3DCase.sh` runs both incremental
+  `Allwmake`s (`thermophysicalModels`, `dsmcBoundaryModels`) at the start of
+  every job, so a stale library from before the cap is rebuilt on the compute
+  node and no manual rebuild is needed; unchanged sources make this a quick
+  no-op, and a build failure aborts the job before any stage runs. (Running
+  `Allrun` directly does not rebuild: it only checks that the libraries exist.)
+* Profile `hpc-kn1em3-capsule`: Kn_e 0.001 on a 30 D × 15 D domain, core cell
+  D/20, one flow transit, viscosity cap on (factor 1), `fitted-capsule`.
+  On VEGA: `msub -v PROFILE=hpc-kn1em3-capsule cases/cai2012-hybrid/run3DCase.sh`
+  (`-v` passes the variable to the job; the script has no `#PBS -V`).
+
 ## 7. Transfer and flux accounting (`mapping.py`, `halfrange.py`)
 
 Canonical interface fields (`interface_fields.npz`): `numberDensity`,

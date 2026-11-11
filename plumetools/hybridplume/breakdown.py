@@ -45,6 +45,14 @@ is below its threshold. The retained region is the connected component(s) of
 continuum cells that touch the source patch -- 3-D face adjacency,
 ``scipy.sparse.csgraph``. Disconnected continuum pockets (e.g. a recompression
 region) are reported but handed to DSMC, as in Petersen et al. (2025).
+
+Accountability (opt-in)
+-----------------------
+With ``cfd.viscosity_cap.enabled`` the CFD ran with ``mu = min(mu(T), nu_max
+rho)``; :func:`capped_cells` marks where that cap acted, and none of those
+cells may be retained. With ``breakdown.retained_stability_limit`` the
+retained volume must change by at most that fraction since the previous
+write (:func:`retained_change`).
 """
 
 from __future__ import annotations
@@ -209,6 +217,30 @@ def write_fields(case_dir: Path, time: str, mesh: MeshGeometry, fields: dict) ->
         path.write_text("\n".join(lines))
         out.append(path)
     return out
+
+
+def capped_cells(state: CfdState, gas: Gas, nu_max: float, rtol: float = 1e-9) -> np.ndarray:
+    """Cells where the CFD's kinematic-viscosity cap acted: ``mu(T) > nu_max rho``.
+
+    Mirrors ``cappedTabulatedTransport`` (``mu_eff = min(mu_tab, nu_max rho)``).
+    ``rtol`` keeps a cell sitting exactly at the cap (the background, for
+    ``factor = 1``) from being flagged by rounding: there the cap changes
+    nothing. Invalid cells (non-finite or non-positive ``T``) are never flagged.
+    """
+    t = np.where(np.isfinite(state.T) & (state.T > 0), state.T, np.nan)
+    with np.errstate(invalid="ignore"):
+        mu = gas.viscosity(t)
+        return np.asarray(mu > float(nu_max) * state.rho * (1.0 + rtol), dtype=bool)
+
+
+def retained_change(previous: np.ndarray, current: np.ndarray, volumes: np.ndarray) -> float:
+    """``|V_previous - V_current| / V_current`` of the retained regions' volumes."""
+    v = np.asarray(volumes, float)
+    v_prev = float(v[np.asarray(previous, bool)].sum())
+    v_cur = float(v[np.asarray(current, bool)].sum())
+    if v_cur <= 0.0:
+        return 0.0 if v_prev <= 0.0 else float("inf")
+    return abs(v_prev - v_cur) / v_cur
 
 
 def threshold_sensitivity(mesh: MeshGeometry, ind: dict, thresholds: dict, criterion,

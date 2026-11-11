@@ -129,7 +129,7 @@ def setup(case_dir: Path, config_path: Path, profile: str | None, *,
     written = cfd_mod.write_case(target, cfg, source, plan, n_ranks=ranks)
     if cfg.get("mesh.geometry") == "planar":
         (target / "planar.foam").touch()
-    elif cfg.get("interface.mode") == "fitted-ellipsoid":
+    elif config_mod.is_spatial_fit(cfg):
         (target / "spatial.foam").touch()
     assessment = resources.assess_configuration(cfg, source, plan)
     doc = {
@@ -271,7 +271,7 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     cfd = case_dir / "cfd"
     time = time or _latest(cfd)
     input_identity = None
-    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+    if config_mod.is_fitted(cfg):
         from . import fitted
         input_identity = fitted.breakdown_identity(case_dir, cfg, time)
     mesh = read_mesh(cfd)
@@ -335,13 +335,58 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     fields["lambda"] = ind["lambda"]
     fields["continuumMask"] = mask.astype(float)
     fields["retainedRegion"] = reg["retained"].astype(float)
+    failures = []
+    # The CFD capped mu at nu_max rho (cappedTabulatedTransport); that is only
+    # acceptable where the cells go to DSMC, never in the retained region.
+    if cfg.get("cfd.viscosity_cap.enabled", False):
+        nu_max = cfd_mod.timing(cfg, source, mesh_mod.plan(cfg, source))["nu_max_m2_s"]
+        capped = bd.capped_cells(state, gas, nu_max)
+        in_retained = int((capped & reg["retained"]).sum())
+        doc["viscosity_cap"] = {"nu_max_m2_s": nu_max, "capped_cells": int(capped.sum()),
+                                "capped_in_retained": in_retained}
+        fields["viscosityCapped"] = capped.astype(float)
+        if in_retained:
+            failures.append(f"viscosity cap active in retained continuum: {in_retained} retained "
+                            f"cell(s) have mu(T) > nu_max rho (nu_max = {nu_max:.6g} m^2/s)")
+    # The retained region must have settled: compare with the previous write,
+    # classified with the same thresholds and criterion.
+    limit = cfg.get("breakdown.retained_stability_limit")
+    if limit is not None:
+        limit = float(limit)
+        earlier = [t for t in _time_dirs(cfd) if float(t) < float(time)]
+        previous = earlier[-1] if earlier else None
+        change = None
+        if previous is not None:
+            st_prev = bd.read_state(cfd, previous, gas)
+            ind_prev = bd.indicators(st_prev, bd.gradients(mesh, st_prev, graph), gas, conv)
+            reg_prev = bd.source_connected(mesh, bd.continuum_mask(ind_prev, thresholds, criterion),
+                                           mesh_mod.PATCHES["source"])
+            change = float(bd.retained_change(reg_prev["retained"], reg["retained"],
+                                              mesh.cell_volumes))
+            if not change <= limit:
+                failures.append(f"retained volume fraction changed by {change:.4g} between writes "
+                                f"{previous} and {time} (limit {limit:g}); the CFD has not settled")
+        doc["retained_stability"] = {"previous_write": previous,
+                                     "volume_fraction_change": change, "limit": limit}
     identity_fields = {}
-    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+    if config_mod.is_fitted(cfg):
         if input_identity != fitted.breakdown_identity(case_dir, cfg, time):
             raise WorkflowError("CFD inputs changed during breakdown; rerun breakdown on a stable snapshot")
         identity_fields["input_identity"] = input_identity
         doc["input_identity"] = input_identity
     bd.write_fields(cfd, time, mesh, fields)
+    if failures:
+        # Fields are written (inspect viscosityCapped / retainedRegion in
+        # ParaView); the classification is not published for interface, and
+        # an earlier write's published classification is withdrawn so that
+        # interface cannot fall back to it. The rejected report is kept
+        # under a name nothing downstream reads.
+        out = results_dir(case_dir)
+        for name in ("breakdown.npz", "breakdown.json"):
+            (out / name).unlink(missing_ok=True)
+        write_json(out / "breakdown.failed.json", {**doc, "failures": failures})
+        raise WorkflowError("; ".join(failures))
+    (results_dir(case_dir) / "breakdown.failed.json").unlink(missing_ok=True)
     np.savez_compressed(results_dir(case_dir) / "breakdown.npz", retained=reg["retained"],
                         mask=mask, near_lip=near_lip, time=time,
                         valid=ind["valid"], **identity_fields, **{k: ind[k] for k in bd.INDICATORS})
@@ -361,7 +406,7 @@ def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = 
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.interface(case_dir, time=time, allow_unsuitable=allow_unsuitable)
     if cfg.get("mesh.geometry") == "planar":
@@ -465,7 +510,7 @@ def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
     np_ranks = kwargs.get("np", np_ranks)
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_setup(case_dir, np_ranks=np_ranks)
     if cfg.get("mesh.geometry") == "planar":
@@ -550,7 +595,7 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.dsmc_post(case_dir, time=time)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_post(case_dir, time=time)
     return _dsmc_post_3d(case_dir, time=time)
@@ -561,7 +606,7 @@ def _dsmc_post_3d(case_dir: Path, time: str | None = None) -> dict:
     from . import collisionless, halfrange, mapping, particles, post, resources
     from .meshgeom import read_mesh
     cfg = load_case(case_dir)
-    own_mesh = cfg.get("interface.mode") == "fitted-ellipsoid"
+    own_mesh = config_mod.is_spatial_fit(cfg)
     source = config_mod.build_source(cfg)
     gas = source.gas
     res = results_dir(case_dir)
@@ -1074,7 +1119,7 @@ def dsmc_fields(case_dir: Path) -> dict:
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_fields(case_dir)
     if cfg.get("mesh.geometry") == "planar":

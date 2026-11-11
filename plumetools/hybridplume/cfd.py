@@ -97,7 +97,8 @@ def transport_table(source: SourceState, t_lo: float = 0.5, t_hi: float = 5000.0
     return t, mu, kappa, err
 
 
-def render_thermophysical_properties(source: SourceState, table=None) -> str:
+def render_thermophysical_properties(source: SourceState, table=None,
+                                     nu_max: float | None = None) -> str:
     gas = source.gas
     t, mu, kappa, err = table or transport_table(source)
     lines = _header("dictionary", "thermophysicalProperties",
@@ -107,7 +108,8 @@ def render_thermophysical_properties(source: SourceState, table=None) -> str:
         "// Needs libhybridPlumeThermo.so (controlDict libs): OpenFOAM v2512 has no",
         "// psiThermo instantiation of tabulated transport.",
         "thermoType", "{", "    type            hePsiThermo;", "    mixture         pureMixture;",
-        "    transport       tabulated;", "    thermo          hConst;",
+        f"    transport       {'cappedTabulated' if nu_max is not None else 'tabulated'};",
+        "    thermo          hConst;",
         "    equationOfState perfectGas;", "    specie          specie;",
         "    energy          sensibleInternalEnergy;", "}", "",
         "mixture", "{", "    specie", "    {",
@@ -121,7 +123,11 @@ def render_thermophysical_properties(source: SourceState, table=None) -> str:
     lines += [f"            ({_f(ti)} {mi:.10e})" for ti, mi in zip(t, mu)]
     lines += ["        );", "        kappa", "        ("]
     lines += [f"            ({_f(ti)} {ki:.10e})" for ti, ki in zip(t, kappa)]
-    lines += ["        );", "    }", "}", ""]
+    lines += ["        );"]
+    if nu_max is not None:
+        lines += ["        // mu is capped at nuMax rho (kinematic viscosity, m^2/s); kappa follows.",
+                  f"        nuMax       {nu_max:.10e};"]
+    lines += ["    }", "}", ""]
     return "\n".join(lines) + "\n"
 
 
@@ -190,11 +196,15 @@ def timing(cfg: CaseConfig, source: SourceState, plan: MeshPlan) -> dict:
     factor = float(cfg.get("cfd.viscous_dt_factor", 0.25))
     dt_visc = factor * plan.core_cell_m ** 2 * bg["density_kg_m3"] / mu_bg
     max_dt = min(write_interval / 10.0, dt_visc)
+    cap = cfg.get("cfd.viscosity_cap", {}) or {}
+    nu_max = None
+    if cap.get("enabled", False):
+        nu_max = float(cap.get("factor", 1.0)) * factor * plan.core_cell_m ** 2 / dt_visc
     return {"transit_s": transit, "write_interval_s": write_interval,
             "end_time_s": n_writes * write_interval, "n_writes": n_writes,
             "initial_dt_s": min(dt0, max_dt), "max_courant": courant,
             "viscous_dt_limit_s": dt_visc, "viscous_dt_factor": factor,
-            "max_delta_t_s": max_dt,
+            "max_delta_t_s": max_dt, "nu_max_m2_s": nu_max,
             "convective_dt_estimate_s": courant * plan.core_cell_m / signal}
 
 
@@ -309,7 +319,8 @@ def write_case(case_dir: Path, cfg: CaseConfig, source: SourceState, plan: MeshP
         path.write_text(text)
         written.append(path)
 
-    put("constant/thermophysicalProperties", render_thermophysical_properties(source, table))
+    put("constant/thermophysicalProperties", render_thermophysical_properties(
+        source, table, timing(cfg, source, plan)["nu_max_m2_s"]))
     put("constant/turbulenceProperties", render_turbulence_properties())
     for name, text in render_fields(cfg, source).items():
         put(f"0/{name}", text)
