@@ -8,39 +8,56 @@ from . import workflow as wf, breakdown as bd, halfrange
 from . import interface as surface_tools
 from .fluxes import continuum_flux
 
-def sample_containing_cells(mesh, positions, allowed, axes=(0, 1)):
-    """Locate points in the rectilinear CFD mesh; never use nearest-cell guesses."""
+def _checked_inputs(n_cells, positions, allowed, axes):
     points = np.asarray(positions, float)
     if points.ndim != 2 or points.shape[1] <= max(axes) or not np.isfinite(points).all():
         raise wf.WorkflowError("sample positions must be finite x/y points")
     allowed = np.asarray(allowed, bool)
-    if allowed.shape != (mesh.n_cells,):
+    if allowed.shape != (n_cells,):
         raise wf.WorkflowError("allowed CFD-cell mask has the wrong length")
-    spacing = float(np.min(mesh.cell_size()[:, axes]))
-    edges = []
-    for k in axes:
-        values = np.unique(mesh.points[:, k])
-        groups = np.cumsum(np.r_[0, np.diff(values) > 1e-8*spacing])
-        edges.append(np.bincount(groups, weights=values)/np.bincount(groups))
-    shape = tuple(len(e)-1 for e in edges)
-    if np.prod(shape) != mesh.n_cells:
-        raise wf.WorkflowError("sampling requires a rectilinear CFD mesh with the stated active axes")
-    p = points[:, axes].copy()
-    indices = []
-    for k, e in enumerate(edges):
-        tol = 1e-10*max(1.0, e[-1]-e[0])
-        if np.any(p[:, k] < e[0]-tol) or np.any(p[:, k] > e[-1]+tol):
-            raise wf.WorkflowError("interface or DSMC sample lies outside the CFD domain")
-        p[:, k] = np.clip(p[:, k], e[0], e[-1])
-        indices.append(np.clip(np.searchsorted(e, p[:, k], side="right")-1, 0, len(e)-2))
-    grid = np.full(shape, -1, dtype=int)
-    cell_indices = tuple(np.searchsorted(e, mesh.cell_centres[:, axis], side="right")-1
-                         for axis, e in zip(axes, edges))
-    grid[cell_indices] = np.arange(mesh.n_cells)
-    cells = grid[tuple(indices)]
-    if np.any(cells < 0) or np.any(~allowed[cells]):
-        raise wf.WorkflowError("sample has no containing accepted/allowed CFD cell")
-    return cells
+    return points, allowed
+
+
+class RectilinearLocator:
+    """Containing-cell lookup in a rectilinear CFD mesh, grid built once."""
+
+    def __init__(self, mesh, axes=(0, 1, 2)):
+        self.axes, self.n_cells = tuple(axes), mesh.n_cells
+        spacing = float(np.min(mesh.cell_size()[:, self.axes]))
+        self.edges = []
+        for k in self.axes:
+            values = np.unique(mesh.points[:, k])
+            groups = np.cumsum(np.r_[0, np.diff(values) > 1e-8*spacing])
+            self.edges.append(np.bincount(groups, weights=values)/np.bincount(groups))
+        shape = tuple(len(e)-1 for e in self.edges)
+        if np.prod(shape) != mesh.n_cells:
+            raise wf.WorkflowError("sampling requires a rectilinear CFD mesh with the stated active axes")
+        self.grid = np.full(shape, -1, dtype=int)
+        cell_indices = tuple(np.searchsorted(e, mesh.cell_centres[:, axis], side="right")-1
+                             for axis, e in zip(self.axes, self.edges))
+        self.grid[cell_indices] = np.arange(mesh.n_cells)
+
+    def locate(self, positions, allowed):
+        """Containing cells of ``positions``; never use nearest-cell guesses."""
+        points, allowed = _checked_inputs(self.n_cells, positions, allowed, self.axes)
+        p = points[:, self.axes].copy()
+        indices = []
+        for k, e in enumerate(self.edges):
+            tol = 1e-10*max(1.0, e[-1]-e[0])
+            if np.any(p[:, k] < e[0]-tol) or np.any(p[:, k] > e[-1]+tol):
+                raise wf.WorkflowError("interface or DSMC sample lies outside the CFD domain")
+            p[:, k] = np.clip(p[:, k], e[0], e[-1])
+            indices.append(np.clip(np.searchsorted(e, p[:, k], side="right")-1, 0, len(e)-2))
+        cells = self.grid[tuple(indices)]
+        if np.any(cells < 0) or np.any(~allowed[cells]):
+            raise wf.WorkflowError("sample has no containing accepted/allowed CFD cell")
+        return cells
+
+
+def sample_containing_cells(mesh, positions, allowed, axes=(0, 1)):
+    """Locate points in the rectilinear CFD mesh; never use nearest-cell guesses."""
+    _checked_inputs(mesh.n_cells, positions, allowed, axes)  # same error order as before
+    return RectilinearLocator(mesh, axes).locate(positions, allowed)
 
 
 def breakdown_identity(case_dir, cfg, time):
