@@ -309,15 +309,18 @@ def test_stl_is_closed_and_outward():
     assert volume > 0 and volume == pytest.approx(expected, rel=.01)
 
 
+@pytest.mark.parametrize("tol", [.002, .01])
 @pytest.mark.parametrize("length", [.8, 0.0])
-def test_stl_chord_error_within_tolerance(length):
+def test_stl_chord_error_within_tolerance(length, tol):
     from plumetools.hybridplume import shapes
     from plumetools.hybridplume.capsule_mesh import capsule_stl
     shape = shapes.Capsule(.5, length, .6)
-    v, t = capsule_stl(shape, .002, .05)
-    c = v[t].mean(axis=1)
-    c = c[c[:, 0] >= 0]
-    assert np.max(np.abs(np.sqrt(shape.q(c))-1)) <= .002
+    v, t = capsule_stl(shape, tol, .05)
+    n = 12   # independent, finer grid than the generator's, includes edge midpoints
+    w = np.array([(i/n, j/n, (n-i-j)/n) for i in range(n+1) for j in range(n+1-i)])
+    pts = np.einsum("sk,tkd->tsd", w, v[t]).reshape(-1, 3)
+    pts = pts[pts[:, 0] >= 0]
+    assert np.max(np.abs(np.sqrt(shape.q(pts))-1)) <= tol
 
 
 def test_snappy_dict_uses_trisurface_and_features(tmp_path):

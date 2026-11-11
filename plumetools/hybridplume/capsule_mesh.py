@@ -34,17 +34,29 @@ def _mesh(shape, n_phi, n_tip, back):
     return np.array(verts, float), np.array(tris, int)
 
 
+def _bary(n=6):
+    """Barycentric sample weights over a triangle, including vertices and edge midpoints."""
+    w = [(i/n, j/n, (n-i-j)/n) for i in range(n+1) for j in range(n+1-i)]
+    return np.array(w)
+
+
 def _deviation(shape, vertices, triangles):
-    centroids = vertices[triangles].mean(axis=1)
-    centroids = centroids[centroids[:, 0] >= 0]
-    return float(np.max(np.abs(np.sqrt(shape.q(centroids))-1))) if len(centroids) else 0.0
+    """Max |sqrt(q) - 1| over barycentric samples of every triangle with x >= 0."""
+    worst = 0.0
+    weights = _bary()
+    for start in range(0, len(triangles), 4096):
+        pts = np.einsum("sk,tkd->tsd", weights, vertices[triangles[start:start+4096]]).reshape(-1, 3)
+        pts = pts[pts[:, 0] >= 0]
+        if len(pts):
+            worst = max(worst, float(np.max(np.abs(np.sqrt(shape.q(pts))-1))))
+    return worst
 
 
 def capsule_stl(shape, chord_tol: float, back: float):
     """Closed outward triangulation: cylinder from x = -back to L, spheroidal tip, back disc.
 
     The ring counts are refined until the sagitta relative to the local radius
-    (max |sqrt(q) - 1| over triangle centroids, x >= 0) is at most ``chord_tol``.
+    (max |sqrt(q) - 1| over a barycentric sample grid of each triangle, x >= 0) is at most ``chord_tol``.
     """
     if not chord_tol > 0:
         raise ValueError("chord_tol must be positive")
