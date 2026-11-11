@@ -205,9 +205,14 @@ Design: [capsule interface and coarse CFD spec](superpowers/specs/2026-11-11-cap
   DSMC mesh is refused by the fit-identity check.
 * Meshing (`capsule_mesh.py`) writes a watertight STL
   (`mesh-build/constant/triSurface/interface.stl`, chord error
-  ≤ 0.1 × `geometry_relative_tolerance`) and a `surfaceFeatureExtractDict`.
-  `Allrun` runs `surfaceFeatureExtract` after `blockMesh` whenever that
-  dictionary exists. The section plot is `results/breakdown_capsule.png`.
+  ≤ 0.1 × `geometry_relative_tolerance`; the cylinder runs on to one
+  background cell behind the exit plane) and the exit-plane rim circle
+  (x = 0, radius R, same chord tolerance) as an OBJ edge mesh
+  `mesh-build/constant/triSurface/interface_rim.obj`. The capsule's
+  snappyHexMeshDict lists it under `features` and sets
+  `explicitFeatureSnap true` so the rim snaps onto the source plane; there is
+  no `surfaceFeatureExtract` step (the STL has no edge at x = 0 and the tip
+  junction is tangent). The section plot is `results/breakdown_capsule.png`.
 * Viscosity cap (`cfd.viscosity_cap: {enabled, factor}`, off by default):
   `mu_eff = min(mu_tab(T), nu_max·p/(R T))` with
   `nu_max = factor · viscous_dt_factor · h²/dt_visc`, and `kappa` scaled by
@@ -215,13 +220,17 @@ Design: [capsule interface and coarse CFD spec](superpowers/specs/2026-11-11-cap
   cells beside the plume from blowing up the explicit viscous number. The
   breakdown step reports capped cells and refuses if any lies in the retained
   region, or if the retained volume fraction changes by more than 2 % between
-  the last two writes. **The cap lives in `libhybridPlumeThermo`
-  (`cappedTabulatedTransport`), so rebuild it with
-  `applications/thermophysicalModels/Allwmake` in the HPC environment before
-  submitting a capped run.**
+  the last two writes. The cap lives in `libhybridPlumeThermo`
+  (`cappedTabulatedTransport`). `run3DCase.sh` runs both incremental
+  `Allwmake`s (`thermophysicalModels`, `dsmcBoundaryModels`) at the start of
+  every job, so a stale library from before the cap is rebuilt on the compute
+  node and no manual rebuild is needed; unchanged sources make this a quick
+  no-op, and a build failure aborts the job before any stage runs. (Running
+  `Allrun` directly does not rebuild: it only checks that the libraries exist.)
 * Profile `hpc-kn1em3-capsule`: Kn_e 0.001 on a 30 D × 15 D domain, core cell
   D/20, one flow transit, viscosity cap on (factor 1), `fitted-capsule`.
-  On VEGA: `PROFILE=hpc-kn1em3-capsule msub cases/cai2012-hybrid/run3DCase.sh`.
+  On VEGA: `msub -v PROFILE=hpc-kn1em3-capsule cases/cai2012-hybrid/run3DCase.sh`
+  (`-v` passes the variable to the job; the script has no `#PBS -V`).
 
 ## 7. Transfer and flux accounting (`mapping.py`, `halfrange.py`)
 

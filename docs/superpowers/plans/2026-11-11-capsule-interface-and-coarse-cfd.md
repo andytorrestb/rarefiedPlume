@@ -294,4 +294,4 @@ Follow the monkeypatch pattern in `test_retry_refuses_a_changed_dsmc_mesh_before
 - [ ] **Step 4: Run** the full hybridplume unit set: `.venv/bin/python -m pytest tests/unit -q -k hybridplume` and `bash -n cases/cai2012-hybrid/Allrun` — PASS.
 - [ ] **Step 5: Commit** — `feat: fit, screen and mesh the capsule interface in the 3D pipeline`.
 
-**Owner checkpoint after Task 9:** `PROFILE=hpc-kn1em3-capsule msub cases/cai2012-hybrid/run3DCase.sh` (VEGA uses `msub`). Expected: CFD stable per spec §1c; `capsule.json` screen status; actual-mesh `interface.json` return fraction ≈ 0.05 (borderline); resource guard verdict for the 30 D DSMC box.
+**Owner checkpoint after Task 9:** `msub -v PROFILE=hpc-kn1em3-capsule cases/cai2012-hybrid/run3DCase.sh` (VEGA uses `msub`). Expected: CFD stable per spec §1c; `capsule.json` screen status; actual-mesh `interface.json` return fraction ≈ 0.05 (borderline); resource guard verdict for the 30 D DSMC box.

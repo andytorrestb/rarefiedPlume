@@ -1,4 +1,4 @@
-"""Capsule interface: watertight STL, feature extraction and snappyHexMesh inputs."""
+"""Capsule interface: watertight STL, exit-plane rim edge mesh and snappyHexMesh inputs."""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +9,13 @@ import numpy as np
 from plumetools.foamio.primitives import SearchableSphere, render_snappy_dict
 from .ellipsoid_mesh import background, source_regions, finish_dicts
 
-_FEATURES_PLACEHOLDER = "    features ();"
+_FEATURES_PLACEHOLDER = (
+    "    // No feature edges: an analytic sphere, cylinder or box exposes none\n"
+    "    // that snappyHexMesh can extract without a surfaceFeatures pass.\n"
+    "    features ();")
+_GEOMETRY_KEY = "    interface\n    {\n        type triSurfaceMesh;"
+_EXPLICIT_SNAP = "    explicitFeatureSnap     false;"
+RIM_FILE = "interface_rim.obj"
 
 
 def _mesh(shape, n_phi, n_tip, back):
@@ -87,6 +93,29 @@ def write_stl(path, vertices, triangles):
     Path(path).write_text("\n".join(lines)+"\n", encoding="utf-8", newline="\n")
 
 
+def rim_segments(chord_tol: float) -> int:
+    """Segments of a closed polygon on a circle whose sagitta/R is at most ``chord_tol``."""
+    if not chord_tol > 0:
+        raise ValueError("chord_tol must be positive")
+    return max(8, math.ceil(math.pi/math.acos(1-min(chord_tol, .5))))
+
+
+def write_rim_obj(path, R: float, chord_tol: float):
+    """Closed exit-plane rim circle (x = 0, radius R) as an OBJ edge mesh."""
+    n = rim_segments(chord_tol)
+    phi = np.arange(n)*2*math.pi/n
+    lines = [f"# capsule exit-plane rim: x = 0, radius {R:.12g}, {n} segments"]
+    lines += [f"v 0 {R*math.cos(p):.12g} {R*math.sin(p):.12g}" for p in phi]
+    lines += [f"l {i+1} {(i+1) % n+1}" for i in range(n)]
+    Path(path).write_text("\n".join(lines)+"\n", encoding="utf-8", newline="\n")
+
+
+def _replace_once(text, old, new, what):
+    if old not in text:
+        raise RuntimeError(f"snappyHexMeshDict {what} not found")
+    return text.replace(old, new, 1)
+
+
 @dataclass(frozen=True)
 class _TriSurface(SearchableSphere):
     def geometry_lines(self):
@@ -115,17 +144,16 @@ def write_mesh_inputs(case_dir, cfg, source, shape):
                                 max_global_cells=int(cfg.get("dsmc.mesh.max_global_cells", 12000000)),
                                 refinement_regions=regions)
     # The geometry entry is keyed by the STL file; refinement is keyed by `name`.
-    snappy = snappy.replace("    interface\n    {\n        type triSurfaceMesh;",
-                            "    interface.stl\n    {\n        type triSurfaceMesh;", 1)
-    if _FEATURES_PLACEHOLDER not in snappy:
-        raise RuntimeError("snappyHexMeshDict features placeholder not found")
-    snappy = snappy.replace(_FEATURES_PLACEHOLDER, "    features\n    (\n        {\n"
-                            f'            file "interface.eMesh";\n            level {level};\n'
-                            "        }\n    );", 1)
-    paths = finish_dicts(system, cfg, source, box["block"], snappy)
-    extract = system/"surfaceFeatureExtractDict"
-    extract.write_text("FoamFile { version 2.0; format ascii; class dictionary; "
-                       "object surfaceFeatureExtractDict; }\n"
-                       "interface.stl\n{\n    extractionMethod extractFromSurface;\n"
-                       "    includedAngle 150;\n    writeObj no;\n}\n", encoding="utf-8", newline="\n")
-    return paths+[extract]
+    snappy = _replace_once(snappy, _GEOMETRY_KEY,
+                           "    interface.stl\n    {\n        type triSurfaceMesh;", "geometry key")
+    # The STL cylinder runs on to x = -back, so the exit-plane rim is not an
+    # STL edge; supply it as an explicit edge mesh and snap to it.
+    write_rim_obj(tri/RIM_FILE, shape.R, tol)
+    snappy = _replace_once(snappy, _FEATURES_PLACEHOLDER,
+                           "    // Exit-plane rim circle (x = 0, radius R) for explicit feature snapping.\n"
+                           "    features\n    (\n        {\n"
+                           f'            file "{RIM_FILE}";\n            level {level};\n'
+                           "        }\n    );", "features placeholder")
+    snappy = _replace_once(snappy, _EXPLICIT_SNAP, "    explicitFeatureSnap     true;",
+                           "explicitFeatureSnap entry")
+    return finish_dicts(system, cfg, source, box["block"], snappy)

@@ -69,7 +69,11 @@ def test_pbs_launch_runs_full_chain_and_preserves_coupling_gate(tmp_path, from_r
     bin_dir.mkdir()
     lib.mkdir()
     for name in ("libhybridPlumeThermo.so", "libplumeDsmcBoundaryModels.so"):
-        (lib/name).touch()
+        (lib/name).touch()   # present but possibly stale: the build must still run
+    for app in ("thermophysicalModels", "dsmcBoundaryModels"):
+        (repo/"applications"/app).mkdir(parents=True)
+        (repo/"applications"/app/"Allwmake").write_text(
+            f'#!/bin/sh\nprintf "%s\\n" "Allwmake {app}" >> "$CALLS"\n')
     stub = tmp_path/"python-stub.py"
     stub.write_text(PYTHON_STUB)
     for name in ("python", "python3"):
@@ -101,6 +105,7 @@ def test_pbs_launch_runs_full_chain_and_preserves_coupling_gate(tmp_path, from_r
         assert events.index("dsmcInitialise ") < events.index("mpirun -np 192 dsmcFoam -parallel")
         assert next(i for i, event in enumerate(events) if event.startswith("HP dsmc-post")) > events.index("mpirun -np 192 dsmcFoam -parallel")
         assert any(event.startswith("HP report") for event in events)
+    assert events[:2] == ["Allwmake thermophysicalModels", "Allwmake dsmcBoundaryModels"]
     setup = next(event for event in events if event.startswith("HP setup"))
     assert "--profile hpc-kn1em3-ellipsoid" in setup and "--np 192" in setup
     if allow:

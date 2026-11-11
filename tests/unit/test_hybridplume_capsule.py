@@ -335,12 +335,48 @@ def test_snappy_dict_uses_trisurface_and_features(tmp_path):
     assert shape.q(np.array([background(cfg, source)["seed"]]))[0] > 1
     paths = write_mesh_inputs(tmp_path, cfg, source, shape)
     snappy = (tmp_path/"mesh-build/system/snappyHexMeshDict").read_text()
-    assert "interface.stl" in snappy and "type triSurfaceMesh;" in snappy
-    assert "name interface;" in snappy and 'file "interface.eMesh";' in snappy
-    assert "level (3 3);" in snappy
-    assert "includedAngle 150;" in (tmp_path/"mesh-build/system/surfaceFeatureExtractDict").read_text()
+    assert "interface.stl\n    {\n        type triSurfaceMesh;" in snappy
+    assert "name interface;" in snappy and 'file "interface_rim.obj";' in snappy
+    assert "level (3 3);" in snappy and "            level 3;" in snappy
+    assert "explicitFeatureSnap     true;" in snappy and "implicitFeatureSnap     false;" in snappy
+    assert "No feature edges" not in snappy and ".eMesh" not in snappy
     assert (tmp_path/"mesh-build/constant/triSurface/interface.stl").read_text().startswith("solid interface")
-    assert paths[-1].name == "surfaceFeatureExtractDict" and len(paths) == 9
+    assert not (tmp_path/"mesh-build/system/surfaceFeatureExtractDict").exists()
+    assert len(paths) == 8 and all(p.is_file() for p in paths)
+    # The exit-plane rim: a closed loop at x = 0, radius R, within the STL chord tolerance.
+    tol = .1*float(cfg.get("interface.fit.geometry_relative_tolerance", .02))
+    lines = (tmp_path/"mesh-build/constant/triSurface/interface_rim.obj").read_text().splitlines()
+    v = np.array([[float(t) for t in ln.split()[1:]] for ln in lines if ln.startswith("v ")])
+    segs = [tuple(int(t)-1 for t in ln.split()[1:]) for ln in lines if ln.startswith("l ")]
+    n = len(v)
+    assert n >= 8 and len(segs) == n
+    assert sorted(segs) == sorted((i, (i+1) % n) for i in range(n))   # one closed loop
+    assert np.all(v[:, 0] == 0) and np.allclose(np.hypot(v[:, 1], v[:, 2]), shape.R, rtol=1e-11)
+    assert 1-math.cos(math.pi/n) <= tol                                  # sagitta / R
+    assert 1-math.cos(math.pi/(n-1)) > tol                               # and not over-refined
+
+
+def test_capsule_snappy_edits_refuse_a_changed_renderer(tmp_path, monkeypatch):
+    from plumetools.hybridplume import capsule_mesh, config, shapes
+    cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
+    source = config.build_source(cfg)
+    real = capsule_mesh.render_snappy_dict
+    for marker in ("    interface\n    {", "features ();", "explicitFeatureSnap     false;"):
+        monkeypatch.setattr(capsule_mesh, "render_snappy_dict",
+                            lambda *a, m=marker, **k: real(*a, **k).replace(m, "", 1))
+        with pytest.raises(RuntimeError, match="not found"):
+            capsule_mesh.write_mesh_inputs(tmp_path, cfg, source, shapes.Capsule(.1, .3, .15))
+
+
+def test_ellipsoid_snappy_dict_keeps_feature_snapping_off(tmp_path):
+    from plumetools.hybridplume import config
+    from plumetools.hybridplume.ellipsoid_mesh import write_mesh_inputs
+    cfg = config.load(STUDY, "hpc-kn1em3-ellipsoid")
+    source = config.build_source(cfg)
+    write_mesh_inputs(tmp_path, cfg, source, {"xc": 0.0, "a": .3, "b": .12, "source_radius_m": .1})
+    snappy = (tmp_path/"mesh-build/system/snappyHexMeshDict").read_text()
+    assert "explicitFeatureSnap     false;" in snappy and "    features ();" in snappy
+    assert "interface_rim.obj" not in snappy
 
 
 # --- Task 9: capsule wired into spatial.interface and Allrun ------------------
@@ -407,7 +443,8 @@ def test_capsule_interface_writes_fit_screen_and_mesh_inputs(tmp_path, monkeypat
     assert selected["screen_feasible"] and selected["return_mass_fraction"] < .05
     assert doc["fitted_identity"] == fitted._identity(tmp_path, cfg, shape, CFD_TIME)
     build = tmp_path/"mesh-build"
-    assert (build/"system/surfaceFeatureExtractDict").is_file()
+    assert (build/"constant/triSurface/interface_rim.obj").is_file()
+    assert not (build/"system/surfaceFeatureExtractDict").exists()
     assert (build/"constant/triSurface/interface.stl").read_text().startswith("solid interface")
     assert "interface.stl" in (build/"system/snappyHexMeshDict").read_text()
 
@@ -468,11 +505,58 @@ def test_plots_draw_capsule_section_under_capsule_name(tmp_path, monkeypatch):
     assert not (tmp_path/"results/breakdown_ellipsoid.png").exists()
 
 
-def test_allrun_runs_surface_feature_extract_for_stl_meshes():
+def test_allrun_snaps_without_surface_feature_extract():
+    # The rim edge mesh is written by capsule_mesh; there is no extraction step.
     text = (STUDY.parent/"Allrun").read_text()
     start = text.index('cd "$CASE/mesh-build"')
     block = text[start:text.index("run topoSet topoSet", start)]
-    extract = block.index("surfaceFeatureExtract")
-    assert block.index("run blockMesh blockMesh") < extract < block.index("decomposePar")
-    assert extract < block.index("snappyHexMesh")
-    assert "system/surfaceFeatureExtractDict" in block[block.index("run blockMesh"):extract+80]
+    assert "surfaceFeatureExtract" not in text
+    assert block.index("run blockMesh blockMesh") < block.index("snappyHexMesh")
+
+
+def test_allrun_spatial_fit_modes_match_config():
+    import re
+    from plumetools.hybridplume import config
+    text = (STUDY.parent/"Allrun").read_text()
+    body = text[text.index("spatial_fit() {"):]
+    body = body[:body.index("\n}\n")]
+    pattern = re.search(r"^\s*([\w|-]+)\)\s*return 0", body, re.M).group(1)
+    assert set(pattern.split("|")) == set(config.SPATIAL_FIT_MODES)
+
+
+def test_certify_facets_accepts_capsule_surface_and_refuses_outward_vertex():
+    from plumetools.hybridplume import shapes, spatial, workflow
+    shape = shapes.Capsule(.1, .3, .15)
+    lo, hi = voxels()
+    retained = np.ones(len(lo), bool)
+    phi = np.linspace(0, 2*math.pi, 12, endpoint=False)
+    t = np.linspace(0, math.pi/2, 5)
+    x = np.concatenate((np.zeros(12), np.full(12, .15), .3+.15*np.cos(np.repeat(t, 12))))
+    r = np.concatenate((np.full(24, .1), .1*np.sin(np.repeat(t, 12))))
+    p = np.tile(phi, 7)
+    vertices = np.column_stack((x, r*np.cos(p), r*np.sin(p)))
+    checks = spatial.certify_facets(vertices, shape, lo, hi, retained, .02)
+    assert checks["max_relative_radius_deviation"] < 1e-12
+    pushed = vertices.copy()
+    pushed[3, 1:] *= 1.03                       # 3 % outward on the exit-plane rim
+    with pytest.raises(workflow.WorkflowError, match="tolerance"):
+        spatial.certify_facets(pushed, shape, lo, hi, retained, .02)
+
+
+@pytest.mark.parametrize("sign,match", [(1, "reversed normals"), (-1, "source coverage")])
+def test_geometry_checks_capsule_normals_with_outward_gradient(monkeypatch, sign, match):
+    # One cylinder-side face at y = R: the interface area vector points into
+    # the DSMC region (-y), so the outward normal -face_area must be +y.
+    from types import SimpleNamespace as NS
+    from plumetools.hybridplume import config, shapes, spatial, workflow
+    cfg = config.load(STUDY, "hpc-kn1em3-capsule")
+    source = config.build_source(cfg)
+    mesh = NS(cell_volumes=np.ones(1), patches={"interface": NS(type="patch")},
+              patch_slice=lambda name: slice(0, 1), offsets=np.array([0, 3]),
+              labels=np.arange(3), points=np.zeros((3, 3)),
+              face_areas=np.array([[0, sign*1e-4, 0]]), face_centres=np.array([[.15, .1, 0]]))
+    cmesh = NS(cell_centres=np.array([[.5, 0, 0]]), cell_size=lambda: np.ones((1, 3)))
+    monkeypatch.setattr(spatial, "certify_facets", lambda *args: {})
+    with pytest.raises(workflow.WorkflowError, match=match):
+        spatial._geometry(mesh, cmesh, {"retained": np.ones(1, bool)},
+                          shapes.Capsule(.1, .3, .15), cfg, source)

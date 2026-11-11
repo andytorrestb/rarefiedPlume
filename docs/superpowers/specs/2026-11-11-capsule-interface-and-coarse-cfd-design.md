@@ -197,10 +197,12 @@ Existing `clearance_cells`, `geometry_relative_tolerance` and
   `dsmc.mesh.surface_level`; source refinement annuli, background block, seed
   logic (seed check via `shape.q`) and the `maxLocalCells` handling are reused
   from `ellipsoid_mesh.py` (factored into shared helpers, not copied).
-- Feature edges: a `surfaceFeatureExtract` step for the rim circle where the
-  cylinder meets the exit plane and the cylinder–tip junction, referenced in
-  snappy's `features`. Allrun runs it before snappyHexMesh for spatial fitted
-  modes that provide an STL.
+- Feature edges: the exit-plane rim circle (x = 0, radius R) is written
+  directly as an OBJ edge mesh `constant/triSurface/interface_rim.obj` (same
+  chord tolerance as the STL), referenced in snappy's `features`, with
+  `explicitFeatureSnap true` for the capsule only. (The STL has no edge at
+  x = 0 and the tangent tip junction is smooth, so `surfaceFeatureExtract`
+  would find nothing useful; there is no extraction step.)
 - If snapped facets exceed the tolerance, the existing certification refuses
   loudly. No silent degradation.
 
@@ -218,7 +220,7 @@ Existing `clearance_cells`, `geometry_relative_tolerance` and
 `fitted._assess` (all suitability criteria), source-coverage and closure checks,
 `mapping`, `interface_fields.npz`, `interface.vtk`, DSMC setup and fields,
 resource estimate and memory guard, `dsmc_post`, crossings, report, and the
-192-rank PBS path (`PROFILE=hpc-kn1em3-capsule ./run3DCase.sh`).
+192-rank PBS path (`msub -v PROFILE=hpc-kn1em3-capsule cases/cai2012-hybrid/run3DCase.sh`).
 
 ## Testing
 

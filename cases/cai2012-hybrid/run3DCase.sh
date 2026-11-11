@@ -32,10 +32,12 @@ cd "$REPO"
 source "$HPC_ENV"
 : "${FOAM_USER_LIBBIN:?HPC environment did not define FOAM_USER_LIBBIN}"
 : "${FOAM_APPBIN:?HPC environment did not define FOAM_APPBIN}"
-for item in thermophysicalModels:libhybridPlumeThermo.so dsmcBoundaryModels:libplumeDsmcBoundaryModels.so; do
-    if [ ! -f "$FOAM_USER_LIBBIN/${item#*:}" ]; then
-        bash "$REPO/applications/${item%%:*}/Allwmake"
-    fi
+# Always run the incremental build: an existing but stale library (e.g. a
+# libhybridPlumeThermo.so without cappedTabulated) would otherwise only fail
+# at thermo selection after the job has queued. Allwmake is a no-op when the
+# sources are unchanged; a build failure aborts the job (errexit).
+for app in thermophysicalModels dsmcBoundaryModels; do
+    bash "$REPO/applications/$app/Allwmake"
 done
 export PATH="$FOAM_APPBIN:$PATH"
 args=("$CASE_DIR" "$STAGE" --config "$SCRIPT_DIR/hybrid.yaml" --profile "$PROFILE" -np 192)
