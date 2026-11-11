@@ -129,7 +129,7 @@ def setup(case_dir: Path, config_path: Path, profile: str | None, *,
     written = cfd_mod.write_case(target, cfg, source, plan, n_ranks=ranks)
     if cfg.get("mesh.geometry") == "planar":
         (target / "planar.foam").touch()
-    elif cfg.get("interface.mode") == "fitted-ellipsoid":
+    elif config_mod.is_spatial_fit(cfg):
         (target / "spatial.foam").touch()
     assessment = resources.assess_configuration(cfg, source, plan)
     doc = {
@@ -271,7 +271,7 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     cfd = case_dir / "cfd"
     time = time or _latest(cfd)
     input_identity = None
-    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+    if config_mod.is_fitted(cfg):
         from . import fitted
         input_identity = fitted.breakdown_identity(case_dir, cfg, time)
     mesh = read_mesh(cfd)
@@ -336,7 +336,7 @@ def breakdown(case_dir: Path, time: str | None = None) -> dict:
     fields["continuumMask"] = mask.astype(float)
     fields["retainedRegion"] = reg["retained"].astype(float)
     identity_fields = {}
-    if cfg.get("interface.mode") in ("fitted-ellipse", "fitted-ellipsoid"):
+    if config_mod.is_fitted(cfg):
         if input_identity != fitted.breakdown_identity(case_dir, cfg, time):
             raise WorkflowError("CFD inputs changed during breakdown; rerun breakdown on a stable snapshot")
         identity_fields["input_identity"] = input_identity
@@ -361,7 +361,7 @@ def interface(case_dir: Path, time: str | None = None, allow_unsuitable: bool = 
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.interface(case_dir, time=time, allow_unsuitable=allow_unsuitable)
     if cfg.get("mesh.geometry") == "planar":
@@ -465,7 +465,7 @@ def dsmc_setup(case_dir: Path, np_ranks: int | None = None, **kwargs) -> dict:
     np_ranks = kwargs.get("np", np_ranks)
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_setup(case_dir, np_ranks=np_ranks)
     if cfg.get("mesh.geometry") == "planar":
@@ -550,7 +550,7 @@ def dsmc_post(case_dir: Path, time: str | None = None) -> dict:
     if cfg.get("mesh.geometry") == "planar":
         from . import planar
         return planar.dsmc_post(case_dir, time=time)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_post(case_dir, time=time)
     return _dsmc_post_3d(case_dir, time=time)
@@ -561,7 +561,7 @@ def _dsmc_post_3d(case_dir: Path, time: str | None = None) -> dict:
     from . import collisionless, halfrange, mapping, particles, post, resources
     from .meshgeom import read_mesh
     cfg = load_case(case_dir)
-    own_mesh = cfg.get("interface.mode") == "fitted-ellipsoid"
+    own_mesh = config_mod.is_spatial_fit(cfg)
     source = config_mod.build_source(cfg)
     gas = source.gas
     res = results_dir(case_dir)
@@ -1074,7 +1074,7 @@ def dsmc_fields(case_dir: Path) -> dict:
     from .meshgeom import read_mesh
     case_dir = Path(case_dir)
     cfg = load_case(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    if config_mod.is_spatial_fit(cfg):
         from . import spatial
         return spatial.dsmc_fields(case_dir)
     if cfg.get("mesh.geometry") == "planar":

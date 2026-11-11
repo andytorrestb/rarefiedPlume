@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import CaseConfig
+from .config import CaseConfig, is_spatial_fit
 from .mesh import MeshPlan
 from .physics import SourceState
 
@@ -176,7 +176,7 @@ def assess_configuration(cfg: CaseConfig, source: SourceState, plan: MeshPlan) -
     if cfg.get("mesh.geometry") == "planar":
         n = np.full(len(centres), source.number_density)
         basis = "planar pre-CFD sizing bound: exit density and temperature throughout; not a disk reference"
-    elif cfg.get("interface.mode") == "fitted-ellipsoid":
+    elif is_spatial_fit(cfg):
         n = np.full(len(centres), source.number_density)
         basis = "3D fitted pre-CFD sizing bound: exit density and temperature throughout; actual-cell estimate follows transfer"
     else:

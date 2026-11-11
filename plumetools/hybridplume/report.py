@@ -89,7 +89,8 @@ def plots(case_dir: Path) -> list:
     if cfg.get("mesh.geometry") == "planar":
         from .planar import plot_interface
         return plot_interface(case_dir)
-    if cfg.get("interface.mode") == "fitted-ellipsoid":
+    from .config import is_spatial_fit
+    if is_spatial_fit(cfg):
         from .spatial import plots as spatial_plots
         return spatial_plots(case_dir)
     import matplotlib
