@@ -131,6 +131,7 @@ profiles:
     domain: {x_max_over_D: 30.0, half_width_over_D: 15.0}
     mesh: {geometry: cartesian, core_cell_over_D: 0.05, core_x_over_D: 3.0, core_half_over_D: 1.5, outer_cells: 40, max_outer_expansion: 60.0}
     cfd: {end_time_transits: 1.0, viscosity_cap: {enabled: true, factor: 1.0}}
+    breakdown: {retained_stability_limit: 0.02}   # [NUMERICAL] retained-volume change between the last two writes
     interface:
       mode: fitted-capsule
       fit: {clearance_cells: 0.25, geometry_relative_tolerance: 0.02, max_source_area_error: 0.01}
