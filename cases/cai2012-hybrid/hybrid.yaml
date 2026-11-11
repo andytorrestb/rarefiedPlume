@@ -119,6 +119,10 @@ profiles:
     interface:
       mode: fitted-ellipsoid
       fit: {clearance_cells: 0.25, geometry_relative_tolerance: 0.02, max_source_area_error: 0.01}
+    # 3.0 transits crashed at t = 6.52 ms (job 79485): the lateral far field empties
+    # to rho ~5e-9 (85x below rho_bg), so the explicit viscous number reaches ~44 and
+    # e goes negative. Stop at the complete 11th write (2.75 transits, 6.224 ms).
+    cfd: {end_time_transits: 2.75}
     dsmc:
       mesh: {background_cell_over_D: 0.2, surface_level: 3, source_cell_over_mfp: 0.8, max_global_cells: 12000000, max_local_cells: 1000000}
     # 1100 GiB < 1200 decimal GB, so the guard fits either interpretation of PBS gb.

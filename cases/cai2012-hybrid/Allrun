@@ -104,7 +104,13 @@ solve() {   # solve <app> [logname] -- in a case directory with a mesh; resumes
     eval "$($PYTHON -m plumetools.foamio.checkpoints plan . --np "$n")" \
         || die "the saved state of $PWD cannot be continued as it is"
     if $PYTHON -m plumetools.foamio.checkpoints finished . >/dev/null 2>&1; then
-        echo "==> $PWD has reached endTime; not re-running"; return 0
+        echo "==> $PWD has reached endTime; not re-running"
+        # A run that crashed after its last write, then had endTime lowered to
+        # that write, was never reconstructed; -newTimes is a no-op otherwise.
+        if [ "$n" -gt 1 ] && [ -d processor0 ]; then
+            run "reconstructPar.$logname" reconstructPar -newTimes
+        fi
+        return 0
     fi
     if [ "$n" -gt 1 ]; then
         have mpirun || die "mpirun not on PATH"

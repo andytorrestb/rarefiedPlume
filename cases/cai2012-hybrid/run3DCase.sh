@@ -3,7 +3,8 @@
 #PBS -q longq
 #PBS -l walltime=120:00:00
 #PBS -l nodes=1:ppn=192
-#PBS -l mem=1200gb
+#PBS -M torresfa@my.erau.edu
+## PBS -l mem=1200gb
 #PBS -N hybrid-3d-ellipsoid
 
 # Submit from the repository root or cases/cai2012-hybrid. PBS copies this
