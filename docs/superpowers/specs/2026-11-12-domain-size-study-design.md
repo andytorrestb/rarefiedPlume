@@ -28,7 +28,7 @@ surface is domain-independent and fully resolved in uniform cells, and (b) a
 that is stable across domain sizes. The chosen rung then proceeds to
 `prepare-dsmc` for the check on the actual mesh.
 
-Out of scope: DSMC runs, resolution convergence (D/16 is accepted for
+Out of scope: DSMC runs, resolution convergence (D/18 is accepted for
 sizing), symmetry/quarter geometry, changes to breakdown thresholds or
 suitability criteria.
 
@@ -38,7 +38,7 @@ suitability criteria.
 |---|---|
 | Mesh scaling | Fixed cell size; the breakdown surface must lie in uniform cells |
 | Cell budget | ≤ 3 M cells per case, full 3D (no symmetry planes) |
-| Core | D/16 (0.0625 D), uniform core x ∈ [0, 9 D], \|y\|,\|z\| ≤ 3 D, identical in every rung |
+| Core | D/18 (0.0556 D), uniform core x ∈ [0, 8.5 D], \|y\|,\|z\| ≤ 2.75 D (snapped to 2.78 D), identical in every rung. D/16 was rejected at pre-flight: its staircase source disk is +3.45 % in area (D/18: +0.60 %), and the CFD source is not rescaled. |
 | Sweep | One proportional ladder, half-width = x_max / 2 |
 | Convergence | Successive-rung change < 5 % of every 1×-threshold metric |
 | Interface | `fitted-capsule` in every rung, CFD-only through `post-cfd` |
@@ -46,26 +46,26 @@ suitability criteria.
 ## Case matrix
 
 Common to every rung: `source.knudsen: 1.0e-3`, `mesh.geometry: cartesian`,
-`core_cell_over_D: 0.0625`, `core_x_over_D: 9.0`, `core_half_over_D: 3.0`,
-`outer_cells: 18`. This gives divisions 162 × 132 × 132 = **2,822,688 cells**
+`core_cell_over_D: 0.0556`, `core_x_over_D: 8.5`, `core_half_over_D: 2.75`,
+`outer_cells: 16`, `max_outer_expansion: 250.0` (the x48 axial segment needs
+214.6; with the default 8 the planner puts an adjacent-cell jump of up to 10×
+at the core edge). This gives divisions 169 × 132 × 132 = **2,944,656 cells**
 in every rung. The numerics copy `hpc-kn1em3-capsule` (Minmod,
 `viscosity_cap {enabled: true, factor: 1.0}`,
 `breakdown.retained_stability_limit: 0.02`, capsule fit
-`clearance_cells: 0.25`), and `cfd.end_time_transits: 1.0`.
-`mesh.max_outer_expansion` is set per rung to at least the value the planner
-needs; growth figures below are estimates that pre-flight replaces with the
-planner's values.
+`clearance_cells: 0.25`), and `cfd.end_time_transits: 1.0`
+(transit = x_max / U_e).
 
-| Profile | x_max / D | half-width / D | Est. adjacent growth (axial / lateral) | End time | Est. steps |
+| Profile | x_max / D | half-width / D | Max adjacent growth (planner) | End time | Est. steps (Δt ≈ 6.0e-7 s) |
 |---|---|---|---|---|---|
-| `domstudy-kn1em3-x10` | 10 | 5 | ~1.05 / 1.03 | ~2.8 ms | ~3.7 k |
-| `domstudy-kn1em3-x16` | 16 | 8 | ~1.17 / 1.13 | ~4.5 ms | ~6.0 k |
-| `domstudy-kn1em3-x24` | 24 | 12 | ~1.24 / 1.20 | ~6.8 ms | ~9.0 k |
-| `domstudy-kn1em3-x32` | 32 | 16 | ~1.29 / 1.24 | ~9.0 ms | ~12 k |
-| `domstudy-kn1em3-x48` | 48 | 24 | ~1.35 / 1.29 | ~13.6 ms | ~18 k |
+| `domstudy-kn1em3-x10` | 10 | 5 | 1.112 | ~2.8 ms | ~4.7 k |
+| `domstudy-kn1em3-x16` | 16 | 8 | 1.248 | ~4.5 ms | ~7.6 k |
+| `domstudy-kn1em3-x24` | 24 | 12 | 1.327 | ~6.8 ms | ~11 k |
+| `domstudy-kn1em3-x32` | 32 | 16 | 1.373 | ~9.0 ms | ~15 k |
+| `domstudy-kn1em3-x48` | 48 | 24 | 1.430 | ~13.6 ms | ~23 k |
 
-Wall-time estimates span 0.3–1.8 h (ellipsoid-run rate, 1.25e-7 s per cell
-per step) to 6–27 h (capsule-run rate, 2e-6 s per cell per step) on 192
+Wall-time estimates span 0.5–2.3 h (ellipsoid-run rate, 1.25e-7 s per cell
+per step) to 8–37 h (capsule-run rate, 2e-6 s per cell per step) on 192
 ranks, within the 120 h `longq` walltime. The 16× gap between the two
 measured rates is noted, not investigated, in this study.
 
@@ -81,18 +81,18 @@ rung.
 
 1. **Profiles:** five entries in `cases/cai2012-hybrid/hybrid.yaml`, each
    written out in full (no YAML merge keys), labelled
-   `"DOMAIN STUDY: Kn_e 0.001, x_max N D (D/16 core 9 x ±3 D, sizing only)"`.
+   `"DOMAIN STUDY: Kn_e 0.001, x_max N D (D/18 core 8.5 x ±2.75 D, sizing only)"`.
 2. **Wrapper:** `cases/cai2012-hybrid/run3DCase.sh` gains an optional
-   `STAGES` variable: a space-separated list run in order, stopping at the
+   `STAGES` variable: a list (space- or colon-separated) run in order, stopping at the
    first failure. When `STAGES` is unset, the existing `STAGE` behaviour is
-   unchanged. The study uses `STAGES="setup cfd post-cfd"`.
+   unchanged. The study uses `STAGES=setup:cfd:post-cfd`.
 3. **Pre-flight (login node, Python only):** `Allrun <case> setup --profile
    <p>` for all five rungs. Each must report n_cells ≤ 3,000,000, an
    expansion within its `max_outer_expansion`, and a memory estimate under
    the guard. The real planner values replace the estimates in this spec's
    table and in the profile comments.
 4. **Submission:** all five at once, with `msub`, never `qsub`:
-   `msub -v PROFILE=domstudy-kn1em3-xNN,STAGES="setup cfd post-cfd" run3DCase.sh`.
+   `msub -v PROFILE=domstudy-kn1em3-xNN,STAGES=setup:cfd:post-cfd run3DCase.sh`.
    Case directories default to `runs/<profile>`.
 
 ## Analysis: `plumetools/hybridplume/domainstudy.py`
