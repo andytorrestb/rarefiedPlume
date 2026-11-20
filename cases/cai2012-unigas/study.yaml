@@ -1,0 +1,193 @@
+# The Cai seven-decade Knudsen suite on uniGasFoam's hybrid USP-DSMC solver.
+#
+# Generate:  python generate_cases.py        (python generate_cases.py --dry-run first)
+# Validate:  python validate_cases.py
+# Neither meshes, runs a solver or submits a job.
+#
+# EVERYTHING BELOW kn_cases IS THE KN-EXTENSION'S. The case matrix, the mesh
+# overrides, the particle level and the multipliers are copied verbatim from
+# cases/cai2012-kn-extension/study.yaml and checked against it by
+# validate_cases.py (plumetools.cai2012ugf.policy.study_differences): this
+# family changes the solver, never the cases. Only cases_dir, manifest_name and
+# meta differ. Design: docs/superpowers/specs/2026-11-19-cai-kn-sweep-unigasfoam-design.md
+#
+# The kn-extension's comments are kept as they were written; where they speak
+# of dsmcFoam's pre-run verdicts, this family's verdict is made after the run
+# (spec §7, plumetools/cai2012ugf/verdict.py).
+#
+base_case: baseCase
+cases_dir: Cases
+manifest_name: manifest-unigas.yaml
+
+# --- the particle level: the baseline only -----------------------------------
+#
+# ONE level. There is no parcel-population sweep in this study: every case runs
+# at the baseline weight
+#
+#     nEquivalentParticles = n0 * V_exit / 40
+#
+# derived per case from its own n0 and exit cell volume -- 40 parcels in the
+# exit cell, cases/cai2012-health's ppc040 row, its highest-resolution weight
+# (not the parent study's 20). How well that weight samples each case is
+# measured from the run itself: Allaudit.py (parcels per cell by region),
+# Alldiagnose.py (parcelsPerStep, diagValid) and Allconverge.py.
+#
+# The entry is kept, rather than left out, because cases/cai2012's loader names
+# a case by its level: the directories are <KnCase>_np1x, as in that family.
+# generate_cases.py refuses a second level.
+particle_levels:
+  - name: np1x
+    multiplier: 1.0
+    enabled: true
+    note: >-
+      THE BASELINE, and the only level: 40 parcels in the exit cell, the
+      cai2012-health ppc040 occupancy.
+
+# --- run length and write frequency ------------------------------------------
+#
+# BOTH 1. The averaging window is dsmc.sampling_domain_transits = 4.5 transits
+# after the startup, and the write cadence is the health family's 3.536e-4 s;
+# neither is scaled. (cases/cai2012/study.yaml uses 3.0 and 4.0 -- do not copy.)
+run_time_multiplier: 1.0
+output_frequency_multiplier: 1.0
+
+# --- the physical matrix -----------------------------------------------------
+#
+# [EXTENSION] seven decades on the nozzle DIAMETER, each generated locally.
+# Generated most rarefied first, as in the parent study.
+#
+# Startup is Cai's 10^4 reference collision times (baseCase/case.yaml,
+# dsmc.transient_basis: cai), the reference being the Kn = 0.01 exit state for
+# every case: 0.0501 s, 17.7 domain transits. No override below changes it.
+kn_cases:
+  - name: Kn100
+    Kn: 100.0
+    enabled: true
+    note: >-
+      Collisionless-end benchmark. Uses the same uniform 20 mm mesh and
+      2000-parcel exit-cell target as Kn10/Kn1; no external-study results
+      are imported. Ten cells span the nozzle diameter.
+    overrides:
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80
+        outer_lateral_cells: 85
+        max_cells: 4100000
+      resolution:
+        target_particles_per_cell: 2000.0
+
+  - name: Kn10
+    Kn: 10.0
+    enabled: true
+    note: >-
+      lambda0 = 2 m, ten domain lengths: near-collisionless, between Cai's
+      Kn = 100 and 0.1. Uniform 20 mm mesh (below), cell/lambda0 = 0.01:
+      lambda/3 cannot be reached without cells larger than the nozzle, so the
+      mesh is set by geometry and the parcel count. The 2026-10-25 run on the
+      graded health mesh (10 mm core) is kept in ../Cases_run1_graded.
+    overrides:
+      # One refinement level: a uniform 20 mm lattice. The core keeps its
+      # 2 D x 1.5 D extent (the loader refuses a core that fills the domain);
+      # outer_expansion 1 and these counts make the outer cells 20 mm too.
+      # 100 x 200 x 200 = 4.0M cells; 10 cells across the nozzle.
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80           # (10 - 2) D / 20 mm
+        outer_lateral_cells: 85     # (10 - 1.5) D / 20 mm
+        max_cells: 4100000
+      # The weight is set by the far field, not the exit: 2000 parcels in the
+      # 20 mm exit cell gives ppc = 2000 n/n0, so >= 20 down to n/n0 = 1e-2.
+      # The 2026-10-25 graded run had a median of ~3 parcels per cell in the plume.
+      resolution:
+        target_particles_per_cell: 2000.0
+
+  - name: Kn1
+    Kn: 1.0
+    enabled: true
+    note: >-
+      lambda0 = 0.2 m = D. Same uniform 20 mm mesh and weight as Kn10,
+      cell/lambda0 = 0.1. The first case where collisions in the near plume
+      should be visible against the collisionless solution.
+    overrides:
+      # One refinement level: a uniform 20 mm lattice. The core keeps its
+      # 2 D x 1.5 D extent (the loader refuses a core that fills the domain);
+      # outer_expansion 1 and these counts make the outer cells 20 mm too.
+      # 100 x 200 x 200 = 4.0M cells; 10 cells across the nozzle.
+      mesh:
+        core_cell_size_m: 0.02
+        max_core_cell_over_D: 0.1
+        outer_expansion: 1.0
+        outer_x_cells: 80           # (10 - 2) D / 20 mm
+        outer_lateral_cells: 85     # (10 - 1.5) D / 20 mm
+        max_cells: 4100000
+      # The weight is set by the far field, not the exit: 2000 parcels in the
+      # 20 mm exit cell gives ppc = 2000 n/n0, so >= 20 down to n/n0 = 1e-2.
+      # The 2026-10-25 graded run had a median of ~3 parcels per cell in the plume.
+      resolution:
+        target_particles_per_cell: 2000.0
+
+  - name: Kn0p1
+    Kn: 0.1
+    enabled: true
+    note: >-
+      Additional decade registered in this study. Uses the inherited graded
+      mesh planner and 40-parcel exit-cell target; actual feasibility and
+      measured quality are reported separately, never inferred from Kn.
+
+  - name: Kn0p01
+    Kn: 0.01
+    enabled: true
+    note: >-
+      Additional decade registered in this study. The inherited mesh budget
+      cannot meet the requested exit mean-free-path resolution. Generate and
+      retain its non-production verdict; do not relax the mesh/time-step
+      criteria to make it appear resolved.
+
+  - name: Kn0p001
+    Kn: 0.001
+    enabled: true
+    note: >-
+      lambda0 = 0.2 mm. Resolving it needs ~2e10 cells; within mesh.max_cells
+      the core is coarsened to ~5.2 mm, cell/lambda0 ~ 26, and the time step is
+      ~1.4 exit collision times. UNSUITABLE FOR PRODUCTION as configured: the
+      manifest says so, and its runCase.sh runs it marked NON-PRODUCTION. Its
+      configuration is kept as the record of what was asked for. The
+      direct-exit inflow surface is also a known limitation, deferred.
+
+  - name: Kn0p0001
+    Kn: 0.0001
+    enabled: true
+    note: >-
+      lambda0 = 20 um, essentially continuum at the exit. Resolving it needs
+      ~2e13 cells; within mesh.max_cells the core is ~5.4 mm, cell/lambda0 ~ 270
+      and deltaT ~ 15 exit collision times. UNSUITABLE FOR PRODUCTION as
+      configured, for the same reasons, by a wider margin. The direct-exit
+      inflow surface is a known limitation to be addressed in a future effort.
+
+meta:
+  knudsen_suite: full_decades
+  reference: Cai and Wang 2012
+  study: Seven-decade Cai Knudsen suite on uniGasFoam hybrid USP-DSMC
+  gas: Ar
+  nozzle_diameter_m: 0.2
+  speed_ratio: 2.0
+  exit_temperature_K: 300.0
+  collision_model: VHS
+  collision_selection: NTC
+  solver: uniGasFoam hybrid USP-DSMC
+  unigas_branch: dsmc-time-step-limit
+  unigas_commit: pending-task-1   # the fork commit every case is built from (runBuild.sh)
+  numerical_settings_from: >-
+    cases/cai2012-health, highest-resolution combination ppc040/s4p5
+    (40 parcels per exit cell, 4.5 transits of averaging, 3.536e-4 s writes,
+    Courant 0.2, the same mesh planning and checks), with Cai's 10^4 t0
+    startup in place of health's 2 transits.
+  note: >-
+    All seven cases are generated in this study; external-study results are
+    provenance only. Comparison is against Cai's collisionless analytical
+    solution. Published error values are not acceptance tolerances. Very-low
+    Kn direct-exit source geometry and numerical resolution remain limitations.

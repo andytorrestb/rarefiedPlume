@@ -1,0 +1,47 @@
+# uniGasFoam settings for every cai2012-unigas case.
+#
+# Read by plumetools.cai2012ugf.settings; every value below is the default the
+# approved design fixes (docs/superpowers/specs/2026-11-19-cai-kn-sweep-unigasfoam-design.md),
+# written out so a reader sees the whole configuration. A change here makes
+# every generated case conflict until it is regenerated -- solver settings are
+# inputs, like case.yaml's physics -- and a case with results is never changed.
+
+# Decision 5: one particle weight, as in the dsmcFoam suite. true is refused.
+cell_weighted: false
+
+collision:                        # spec §4 -- the hybrid USP-DSMC scheme
+  model: hybrid
+  bgk_model: unifiedStochasticParticleSBGK
+  dsmc_partner_model: noTimeCounter
+  dsmc_model: variableHardSphere
+  macro_interpolation: true
+  theta: 1.0e-3                   # USP time-averaging of stress and heat flux
+
+adaptive:                         # spec §4 and §1
+  adaptation_interval: 20         # steps between sub-cell / time-step updates
+  max_sub_cell_size_mfp_ratio: 0.5
+  max_time_step_mct_ratio: 0.2
+  max_courant_number: 0.5
+  dsmc_cells_time_step_limited: true   # decision 4: the fork patch; false is refused
+  max_sub_cell_levels: 10         # the fork patch; 10 is the published cap
+
+decomposition:                    # spec §4 -- the paper's text, not the tutorial's
+  breakdown_max: 0.05             # Kn_GLL above this is DSMC
+  theta: 0.2
+  smoothing_passes: 5
+  decomposition_interval: 100
+
+writes:                           # spec §6
+  startup_interval_transits: 1.0  # startup leg: one write per domain transit
+  keep_lagrangian: false          # false: uniGasFoam keeps only the newest cloud
+
+fields:                           # spec §4-5
+  mean_field: Ar                  # running mean from average_start_s
+  window_field: ArWindow          # per-write-interval average (Allconverge.py)
+
+verdict:                          # spec §7
+  max_effective_spacing_over_mfp: null   # null: case.yaml checks.max_cell_over_mfp
+  max_time_step_mct_ratio: 0.2
+  min_particles_per_dsmc_cell: null      # null: case.yaml checks.min_particles_per_cell
+  min_particles_per_sub_cell: 2.0
+  occupancy_floor_n_over_n0: 1.0e-3
