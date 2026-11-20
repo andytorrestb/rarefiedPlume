@@ -130,6 +130,18 @@ def test_no_mean_fields_before_average_start(synthetic_case):   # Review Focus 3
     assert (early / "rhoN").is_file() and not (early / "rhoNMean").exists()
 
 
+def test_the_leg_boundary_write_gets_no_mean_fields(synthetic_case):
+    # The startup leg ends on a write at average_start_s (0.0501435 s here),
+    # named to timePrecision 8 and rounded either way. It holds the last startup
+    # interval's average, not a sampled mean.
+    for name in ("0.050143501", "0.050143499"):
+        shutil.copytree(synthetic_case.dir / synthetic_case.startup_time, synthetic_case.dir / name)
+    convert_case(synthetic_case.dir)
+    for name in ("0.050143501", "0.050143499"):
+        assert not (synthetic_case.dir / name / "rhoNMean").exists(), name
+        assert (synthetic_case.dir / name / "rhoN").is_file(), name
+
+
 def test_second_run_is_noop(synthetic_case):            # Review Focus 3
     convert_case(synthetic_case.dir)
     results = convert_case(synthetic_case.dir)

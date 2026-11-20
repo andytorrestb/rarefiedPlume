@@ -31,6 +31,7 @@ without OpenFOAM.
 | [`cases/cai2012-kn-extension`](cases/cai2012-kn-extension/README.md) | the same plume at seven decades of Kn (100 … 1e-4); interface track; field scaling | [direct](docs/tutorials/cai2012-kn-extension.md) · [interface](docs/tutorials/cai2012-interfaces.md) · [scaling](docs/tutorials/cai2012-scaling.md) |
 | [`cases/cai2012-virtual-collision`](cases/cai2012-virtual-collision/README.md) | a reduced virtual-collision model against Cai and DSMC | [docs/tutorials/cai2012-virtual-collision.md](docs/tutorials/cai2012-virtual-collision.md) |
 | [`cases/cai2012-hybrid`](cases/cai2012-hybrid/README.md) | one-way 3-D CFD → DSMC hybrid of Cai's source | [docs/tutorials/cai2012-hybrid.md](docs/tutorials/cai2012-hybrid.md) |
+| [`cases/cai2012-unigas`](cases/cai2012-unigas/README.md) | the Kn extension's seven cases on a patched uniGasFoam (hybrid USP-DSMC) | [docs/tutorials/cai2012-unigas.md](docs/tutorials/cai2012-unigas.md) |
 | [`cases/markelov1999`](cases/markelov1999/README.md) | AIAA 99-3455: N₂ plume past a cylinder onto a plate, four reservoir pressures | [docs/tutorials/markelov1999.md](docs/tutorials/markelov1999.md) |
 | [`cases/r-4d`](cases/r-4d/README.md) | an R-4D exit-plane plume onto a plate, or free | [docs/tutorials/r-4d.md](docs/tutorials/r-4d.md) |
 | [`cases/3d-inflow`](cases/3d-inflow/README.md) | the legacy source-flow reference case (frozen model; no mesh in a fresh clone) | [docs/tutorials/3d-inflow.md](docs/tutorials/3d-inflow.md) |

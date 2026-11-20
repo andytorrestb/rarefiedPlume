@@ -52,12 +52,12 @@ def make_case(tmp_path: Path, *, with_dictionaries: bool = False, commit: str = 
     return case
 
 
-def write_time(base: Path, time: str, state: str) -> None:
+def write_time(base: Path, time: str, state: str, delta_t: str = "1e-09") -> None:
     """``state``: ``cloud`` (gas, cloud), ``none`` (no gas, no cloud),
     ``deleted`` (gas, cloud gone), ``partial`` (gas, cut off mid-write)."""
     t = base / time
     (t / "uniform").mkdir(parents=True, exist_ok=True)
-    (t / "uniform" / "time").write_text("value " + time + ";\n" + DIVIDER)
+    (t / "uniform" / "time").write_text(f"value {time};\ndeltaT {delta_t};\n" + DIVIDER)
     density = "0" if state == "none" else "1e18"
     (t / "rhoN_Ar").write_text(f"internalField uniform {density};\n"
                                + ("" if state == "partial" else DIVIDER))
@@ -67,12 +67,12 @@ def write_time(base: Path, time: str, state: str) -> None:
         (c / "positions").write_text("0()\n" + DIVIDER)
 
 
-def make_ranks(tmp_path: Path, *, n: int, times: dict) -> Path:
+def make_ranks(tmp_path: Path, *, n: int, times: dict, delta_t: str = "1e-09") -> Path:
     """``times``: {time: {rank: state}}; see :func:`write_time`."""
     case = make_case(tmp_path)
     for time, ranks in times.items():
         for rank in range(n):
-            write_time(case / f"processor{rank}", time, ranks.get(rank, "none"))
+            write_time(case / f"processor{rank}", time, ranks.get(rank, "none"), delta_t)
     return case
 
 
@@ -81,6 +81,31 @@ def test_legs():
     assert leg_for(0.049, 0.05, 0.063) == "startup"
     assert leg_for(0.05 * (1 - 1e-12), 0.05, 0.063) == "sampling"
     assert leg_for(0.063, 0.05, 0.063) == "done"
+
+
+def test_legs_read_rounded_time_directory_names():
+    # timePrecision 8 names the leg-end write 5.6580853e-05 for an endTime of
+    # 5.65808533701079e-05: that write IS the end of the startup leg.
+    assert leg_for(5.6580853e-05, 5.65808533701079e-05, 1.4e-4) == "sampling"
+    assert leg_for(1.4145213e-04, 5.7e-05, 1.41452133425e-04) == "done"
+    assert leg_for(5.65e-05, 5.65808533701079e-05, 1.4e-4) == "startup"
+
+
+def test_legs_allow_half_a_step_short():
+    # OpenFOAM writes within half a step of a write time and stops within half a
+    # step of endTime, so a leg's last write can fall up to dt/2 short of its end.
+    # 1e-7 short: beyond the 1e-6 relative tolerance (5e-8 here), within half a 2e-7 step.
+    assert leg_for(0.0501435 - 1e-7, 0.0501435, 0.063, slack_s=1.02e-7) == "sampling"
+    assert leg_for(0.0501435 - 1e-7, 0.0501435, 0.063) == "startup"
+    assert leg_for(0.063 - 1e-7, 0.0501435, 0.063, slack_s=1.02e-7) == "done"
+
+
+def test_resume_reads_the_step_from_uniform_time(tmp_path):
+    # 1e-7 short of average_start_s = 0.0501435 (beyond the 1e-6 relative
+    # tolerance), with a step of 2e-7: within half a step, so the leg is over.
+    case = make_ranks(tmp_path, n=2, times={"0.0501434": {0: "cloud", 1: "cloud"}},
+                      delta_t="2e-07")
+    assert resume_plan(case, 2).leg == "sampling"
 
 
 def test_resume_refuses_time_without_cloud_on_every_rank(tmp_path):    # Review Focus 1

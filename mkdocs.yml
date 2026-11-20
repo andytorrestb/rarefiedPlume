@@ -154,6 +154,7 @@ nav:
       - Kn extension, field scaling: tutorials/cai2012-scaling.md
       - Virtual-collision assessment: tutorials/cai2012-virtual-collision.md
       - Hybrid CFD to DSMC: tutorials/cai2012-hybrid.md
+      - Kn sweep on uniGasFoam: tutorials/cai2012-unigas.md
       - markelov1999 plate in a wake: tutorials/markelov1999.md
       - r-4d nozzle plume: tutorials/r-4d.md
       - ISS solar panels: tutorials/iss-solar-panels.md
@@ -208,4 +209,6 @@ nav:
       - Adaptive radial sizing implementation: superpowers/plans/2026-11-08-radial-checkpoint-controller.md
       - Fixed-count local sizing design: superpowers/specs/2026-11-08-fixed-count-local-sizing-design.md
       - Fixed-count local sizing implementation: superpowers/plans/2026-11-08-fixed-count-local-sizing.md
+      - Kn sweep on uniGasFoam design: superpowers/specs/2026-11-19-cai-kn-sweep-unigasfoam-design.md
+      - Kn sweep on uniGasFoam implementation: superpowers/plans/2026-11-19-cai-kn-sweep-unigasfoam.md
   - Archive: archive/index.md

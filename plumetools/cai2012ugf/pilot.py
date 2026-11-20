@@ -71,6 +71,24 @@ def projected_hours(t_now: float, end: float, recent_clock_per_sim_s: float,
     return (float(elapsed_s) + remaining * float(recent_clock_per_sim_s)) / 3600.0
 
 
+def time_step_setter(max_dt_over_tau: float | None, limit: float) -> str:
+    """What the measured time step answers to, from the largest DSMC dt/tau.
+
+    Near the limit, DSMC collision times set the step. Well below it, Courant
+    does. ABOVE it, neither is in control: the limit is not being met -- e.g.
+    the solver has not yet adapted (it adapts every ``adaptation_interval``
+    steps, and only after DSMC cells exist).
+    """
+    if max_dt_over_tau is None:
+        return "Courant (no DSMC cells)"
+    if max_dt_over_tau > 1.05 * limit:
+        return (f"NEITHER: DSMC dt/tau reaches {max_dt_over_tau:.3g}, above the "
+                f"{limit:g} limit -- the time step has not been adapted to it")
+    if max_dt_over_tau >= 0.9 * limit:
+        return "DSMC collision time"
+    return "Courant"
+
+
 def _recent_rate(log: dict) -> tuple:
     """Wall seconds per simulated second over the last 10 % of records, and elapsed."""
     time, clock = log["time"], log["clock"]
@@ -86,8 +104,8 @@ def _recent_rate(log: dict) -> tuple:
     if time.size < 2:
         return None, elapsed
     k = max(0, int(0.9 * (time.size - 1)))
-    span = time[-1] - time[k]
-    return ((clock[-1] - clock[k]) / span if span > 0 else None), elapsed
+    span = float(time[-1] - time[k])
+    return (float(clock[-1] - clock[k]) / span if span > 0 else None), elapsed
 
 
 def _bytes(path: Path) -> int:
@@ -169,9 +187,9 @@ def report(case_dir: Path) -> dict:
                  "fraction_over_1": float(np.mean(finite > 1.0))} if finite.size else None),
             "cells_at_sub_cell_cap": int(np.sum(levels.max(axis=1) >= settings.adaptive.max_sub_cell_levels)),
             "max_dt_over_tau_dsmc": float(mct[mct_ok].max()) if mct_ok.any() else None,
-            "time_step_set_by": ("DSMC collision time" if mct_ok.any()
-                                 and mct[mct_ok].max() >= 0.9 * settings.adaptive.max_time_step_mct_ratio
-                                 else "Courant"),
+            "time_step_set_by": time_step_setter(
+                float(mct[mct_ok].max()) if mct_ok.any() else None,
+                settings.adaptive.max_time_step_mct_ratio),
         }
         newest = [t] + [p / t.name for p in sorted(case_dir.glob("processor*")) if (p / t.name).is_dir()]
         doc["disk_bytes_newest_write"] = int(sum(_bytes(d) for d in newest))

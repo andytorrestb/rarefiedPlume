@@ -93,6 +93,18 @@ foam_entry() {
 
 ge() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 >= b+0)}'; }
 
+# The OpenFOAM distribution's own decomposePar/reconstructPar, not whatever is
+# first on PATH: a $FOAM_USER_APPBIN left over from another build (dsmcFoam+,
+# hyStrath) can shadow them with a binary that fails on this mesh. uniGasFoam's
+# clouds are standard lagrangian clouds, which the standard tools handle.
+foam_tool() {
+    if [ -n "${FOAM_APPBIN:-}" ] && [ -x "$FOAM_APPBIN/$1" ]; then
+        echo "$FOAM_APPBIN/$1"
+    else
+        command -v "$1"
+    fi
+}
+
 # --------------------------------------------------------------------------- #
 # environment
 # --------------------------------------------------------------------------- #
@@ -157,7 +169,9 @@ $PYTHON -m plumetools.cai2012ugf.hpc provenance . >/dev/null \
 # the legs
 # --------------------------------------------------------------------------- #
 
-PREVIOUS=""
+# Progress guard: the time each leg started from ("0" for a fresh start). A leg
+# that leaves the newest complete time where it was is a solver that ran no step.
+PREVIOUS="none"
 while true; do
     RESUME="" PROC_TIME="" PROC_COUNT=0 DECOMPOSE=all RECONSTRUCT_FIRST=0 LEG="" REFUSAL=0
     PLAN=$($PYTHON -m plumetools.cai2012ugf.hpc resume-plan . --np "$NP") \
@@ -171,44 +185,66 @@ while true; do
         echo "    t = $RESUME has reached the --stop-at-transits cap"
         break
     fi
-    if [ -n "$PREVIOUS" ] && [ "$RESUME" = "$PREVIOUS" ]; then
-        die "the $LEG leg made no progress from t = $RESUME (see log.uniGasFoam)"
+    if [ "${RESUME:-0}" = "$PREVIOUS" ]; then
+        die "the $LEG leg made no progress from t = ${RESUME:-0} (see log.uniGasFoam)"
     fi
-    PREVIOUS=$RESUME
+    PREVIOUS=${RESUME:-0}
     echo "    leg $LEG from t = ${RESUME:-0}"
 
     cp "system/controlDict.$LEG" system/controlDict
+    CAPPED=0
     if [ -n "$STOP_AT" ]; then
         END=$(foam_entry endTime system/controlDict)
         if ge "$END" "$STOP_AT"; then
+            CAPPED=1
+            # The capped leg must still END ON A WRITE (adjustableRunTime writes
+            # only at startTime + k writeInterval): re-fit the interval to it.
             have foamDictionary || die "foamDictionary is not on PATH; --stop-at-transits needs it"
+            INTERVAL=$($PYTHON -c "from plumetools.cai2012ugf.dictionaries import aligned_interval
+print('%.12g' % aligned_interval($STOP_AT - ${RESUME:-0}, $(foam_entry writeInterval system/controlDict)))") \
+                || die "could not fit a write interval to the cap"
             foamDictionary system/controlDict -entry endTime -set "$STOP_AT" >/dev/null 2>&1 \
                 || die "could not cap endTime in system/controlDict"
+            foamDictionary system/controlDict -entry writeInterval -set "$INTERVAL" >/dev/null 2>&1 \
+                || die "could not set writeInterval in system/controlDict"
         fi
     fi
 
     if [ "$NP" -gt 1 ]; then
-        have decomposePar || die "'decomposePar' is not on PATH"
+        DECOMPOSE_PAR=$(foam_tool decomposePar) || die "'decomposePar' is not on PATH"
+        RECONSTRUCT_PAR=$(foam_tool reconstructPar) || die "'reconstructPar' is not on PATH"
         have mpirun || die "'mpirun' is not on PATH (use --serial for one process)"
         if [ "$DECOMPOSE" = none ]; then
             echo "    processor0..$((NP - 1)) already hold t = $PROC_TIME"
         elif [ "$DECOMPOSE" = latest ]; then
             if [ "$RECONSTRUCT_FIRST" -eq 1 ]; then
-                run reconstructPar.resume reconstructPar -newTimes
+                run reconstructPar.resume "$RECONSTRUCT_PAR" -newTimes
             fi
-            run decomposePar decomposePar -force -latestTime $DECOMP_ARGS
+            run decomposePar "$DECOMPOSE_PAR" -force -latestTime $DECOMP_ARGS
         else
-            run decomposePar decomposePar -force $DECOMP_ARGS
+            run decomposePar "$DECOMPOSE_PAR" -force $DECOMP_ARGS
+            # 0/ holds no field (uniGasFoam fills the mesh itself), so
+            # decomposePar writes no processor*/0 -- and uniGasFoam, starting
+            # from latestTime with no time directory, ends without a step.
+            for ((rank = 0; rank < NP; rank++)); do
+                mkdir -p "processor$rank/0"
+            done
         fi
         solve mpirun -np "$NP" uniGasFoam -parallel $KEEP $DECOMP_ARGS
     else
         solve uniGasFoam $KEEP
     fi
+    if [ "$CAPPED" -eq 1 ]; then
+        # The capped leg ran to its endTime; its last write may sit up to half a
+        # step short of the cap, so the cap is not re-tested against the time.
+        echo "    the $LEG leg ran to the --stop-at-transits cap"
+        break
+    fi
 done
 
 if [ "$NP" -gt 1 ]; then
-    have reconstructPar || die "'reconstructPar' is not on PATH"
-    run reconstructPar reconstructPar -newTimes
+    RECONSTRUCT_PAR=$(foam_tool reconstructPar) || die "'reconstructPar' is not on PATH"
+    run reconstructPar "$RECONSTRUCT_PAR" -newTimes
 fi
 echo "==> converting fields to the dsmcFoam names"
 $PYTHON -m plumetools.cai2012ugf.convert . || die "field conversion failed (above)"

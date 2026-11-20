@@ -350,20 +350,36 @@ def render_hybrid_decomposition_dict(run, settings) -> str:
 # system/controlDict.<leg>
 # --------------------------------------------------------------------------- #
 
+def aligned_interval(span_s: float, target_s: float) -> float:
+    """The write interval nearest ``target_s`` that divides ``span_s`` exactly.
+
+    ``writeControl adjustableRunTime`` writes at ``startTime + k writeInterval``
+    and nowhere else -- not at ``endTime``. A leg whose length is not a whole
+    number of intervals therefore ends without writing, and the next leg cannot
+    resume from its end. Resuming mid-leg from a write keeps the alignment,
+    since every write is itself on the leg's grid.
+    """
+    if not (span_s > 0 and target_s > 0):
+        raise ValueError(f"span ({span_s}) and target ({target_s}) must be positive")
+    return span_s / max(1, round(span_s / target_s))
+
+
 def render_control_dict(cfg, run, settings, leg: str) -> str:
     """``system/controlDict`` for one run leg, ``startup`` or ``sampling``."""
     if leg not in LEGS:
         raise ValueError(f"unknown leg '{leg}'; expected one of {LEGS}")
     if leg == "startup":
         end = run.average_start_s
-        interval = settings.writes.startup_interval_transits * run.domain_transit_s
+        interval = aligned_interval(
+            end, settings.writes.startup_interval_transits * run.domain_transit_s)
         note = (f"Startup leg: to average_start_s = {_num(end)} s, writing every "
-                f"{_num(settings.writes.startup_interval_transits)} domain transit(s).")
+                f"~{_num(settings.writes.startup_interval_transits)} domain transit(s), "
+                f"aligned so the leg ends on a write.")
     else:
         end = run.end_time_s
-        interval = run.write_interval_s
-        note = (f"Sampling leg: to end_time_s = {_num(end)} s at the health "
-                f"cadence, {_num(interval)} s.")
+        interval = aligned_interval(end - run.average_start_s, run.write_interval_s)
+        note = (f"Sampling leg: to end_time_s = {_num(end)} s at ~the health cadence "
+                f"({_num(run.write_interval_s)} s), aligned so the leg ends on a write.")
     lines = _header("controlDict", note, "system")
     lines += [
         "application     uniGasFoam;",

@@ -139,16 +139,40 @@ def test_averaging_window(case):
     assert entry(field_block(t, "Ar"), "averagingAcrossManyRuns") == "true"
 
 
+def whole_number_of(span: float, interval: float) -> bool:
+    n = span / interval
+    return n >= 1 and abs(n - round(n)) < 1e-9
+
+
 def test_two_legs(case):
     s = render_control_dict(case.cfg, case.run, SETTINGS, "startup")
     p = render_control_dict(case.cfg, case.run, SETTINGS, "sampling")
     assert entry(s, "application") == entry(p, "application") == "uniGasFoam"
     assert float(entry(s, "endTime")) == pytest.approx(case.run.average_start_s, rel=1e-12)
-    assert float(entry(s, "writeInterval")) == pytest.approx(case.run.domain_transit_s, rel=1e-12)
     assert float(entry(p, "endTime")) == pytest.approx(case.run.end_time_s, rel=1e-12)
-    assert float(entry(p, "writeInterval")) == pytest.approx(case.run.write_interval_s, rel=1e-12)
     assert entry(p, "writeControl") == "adjustableRunTime" and entry(p, "purgeWrite") == "0"
     assert entry(p, "startFrom") == "latestTime" and entry(p, "writeFormat") == "ascii"
+
+
+def test_every_leg_ends_on_a_write(case):
+    # adjustableRunTime writes at startTime + k writeInterval only: a leg whose
+    # end is not one of those ends without writing, and cannot be resumed.
+    s = render_control_dict(case.cfg, case.run, SETTINGS, "startup")
+    p = render_control_dict(case.cfg, case.run, SETTINGS, "sampling")
+    startup, sampling = float(entry(s, "writeInterval")), float(entry(p, "writeInterval"))
+    assert whole_number_of(case.run.average_start_s, startup)
+    assert whole_number_of(case.run.end_time_s - case.run.average_start_s, sampling)
+    # ... at the cadences the design asks for: one transit, and the health cadence.
+    assert startup == pytest.approx(case.run.domain_transit_s, rel=0.05)
+    assert sampling == pytest.approx(case.run.write_interval_s, rel=0.05)
+
+
+def test_aligned_interval():
+    from plumetools.cai2012ugf.dictionaries import aligned_interval
+    assert aligned_interval(1.0, 0.3) == pytest.approx(1.0 / 3)
+    assert aligned_interval(0.1, 0.3) == pytest.approx(0.1)        # never longer than the span
+    with pytest.raises(ValueError):
+        aligned_interval(0.0, 0.3)
 
 
 def test_unknown_leg_is_refused(case):

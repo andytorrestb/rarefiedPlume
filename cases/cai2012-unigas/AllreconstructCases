@@ -28,6 +28,10 @@ have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no pyth
 [ -f manifest-unigas.yaml ] || die "no manifest-unigas.yaml"
 mapfile -t CASES < <($PYTHON -m plumetools.cai2012ugf.generation cases .)
 
+# The distribution's reconstructPar, not a shadowing one in $FOAM_USER_APPBIN.
+RECONSTRUCT_PAR=reconstructPar
+[ -n "${FOAM_APPBIN:-}" ] && [ -x "$FOAM_APPBIN/reconstructPar" ] && RECONSTRUCT_PAR=$FOAM_APPBIN/reconstructPar
+
 newest() {   # the newest numeric time directory under $1, or nothing
     local dir best=""
     for dir in "$1"/*/; do
@@ -48,7 +52,7 @@ for case_path in "${CASES[@]}"; do
     if [ -z "$here" ] || awk -v a="$proc" -v b="$here" 'BEGIN{exit !(a+0 > b+0)}'; then
         echo "$case_path: processors at $proc, case directory at ${here:-nothing}"
         [ "$CHECK" -eq 1 ] && continue
-        (cd "$case_path" && reconstructPar -newTimes > log.reconstructPar 2>&1) \
+        (cd "$case_path" && "$RECONSTRUCT_PAR" -newTimes > log.reconstructPar 2>&1) \
             || die "$case_path: reconstructPar failed (log.reconstructPar)"
         $PYTHON -m plumetools.cai2012ugf.convert "$case_path" || die "$case_path: convert failed"
     fi

@@ -61,6 +61,23 @@ def test_parse_log_spans_appended_legs(tmp_path):
     assert list(out["time"]) == [1e-7, 3e-7] and list(out["particles"]) == [1000, 1200]
 
 
+def test_recent_rate_is_plain_yaml_data(tmp_path):
+    from plumetools.cai2012ugf.pilot import _recent_rate
+    log = write_log(tmp_path, steps=[(1e-7, 1e-7, 1000, 3.0, 10.0), (2e-7, 1e-7, 1100, 4.0, 20.0),
+                                     (3e-7, 1e-7, 1200, 4.0, 31.0)])
+    rate, elapsed = _recent_rate(parse_log(log))
+    yaml.safe_dump({"rate": rate, "elapsed": elapsed})    # numpy scalars would raise
+    assert rate == pytest.approx(11.0 / 1e-7) and elapsed == 31.0
+
+
+def test_time_step_setter_names_a_violated_limit():
+    from plumetools.cai2012ugf.pilot import time_step_setter
+    assert time_step_setter(0.199, 0.2) == "DSMC collision time"
+    assert time_step_setter(0.05, 0.2) == "Courant"
+    assert time_step_setter(5.9, 0.2).startswith("NEITHER")      # the limit is not being met
+    assert time_step_setter(None, 0.2) == "Courant (no DSMC cells)"
+
+
 def test_projection_uses_recent_rate():
     assert projected_hours(t_now=0.01, end=0.02, recent_clock_per_sim_s=3.6e6,
                            elapsed_s=0) == pytest.approx(10.0)

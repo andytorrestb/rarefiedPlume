@@ -20,9 +20,9 @@ written            from uniGasFoam (``<f>`` mean field, ``<w>`` window field)
 T = (2 KE / rhoM - |U|^2) / 3R, so the round trip returns uniGasFoam's own
 mass-weighted velocity and translational temperature exactly.
 
-The ``*Mean`` fields are written only from ``average_start_s`` on: before it
-uniGasFoam's fields are per-interval averages, and dsmcFoam had no ``*Mean``
-there either. ``rhoN`` is written wherever the window field exists.
+The ``*Mean`` fields are written only for writes after ``average_start_s``:
+up to and including the write that ends the startup leg there, uniGasFoam's
+fields are per-interval averages, and dsmcFoam had no ``*Mean`` either. ``rhoN`` is written wherever the window field exists.
 
 Nothing is overwritten: a target that already exists is kept when it holds the
 same values and refused otherwise.
@@ -44,7 +44,10 @@ from plumetools.foamio.volfield import read_internal
 
 GENERATOR = "plumetools.cai2012ugf.convert"
 K_BOLTZMANN = 1.380649e-23
-TIME_TOLERANCE = 1.0e-9
+#: Relative. The startup leg ends on a write at average_start_s, named to
+#: timePrecision 8 and so rounded either way; that write holds the last startup
+#: interval's average, not a sampled mean. Only writes clearly after it are sampled.
+TIME_TOLERANCE = 1.0e-6
 
 #: target -> (class, dimensions, needs the averaging window to have started)
 MAPPING = {
@@ -189,7 +192,7 @@ def convert_time(time_dir: Path, *, species_mass_kg: float, average_start_s: flo
     if n_cells is None:
         n_cells = _n_cells(time_dir.parent)
     result = ConversionResult(time=time_dir.name)
-    sampled = float(time_dir.name) >= average_start_s * (1.0 - TIME_TOLERANCE)
+    sampled = float(time_dir.name) > average_start_s * (1.0 + TIME_TOLERANCE)
     cache: dict = {}
 
     def read(name: str) -> np.ndarray:

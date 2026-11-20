@@ -41,7 +41,10 @@ import yaml
 from plumetools.foamio.checkpoints import RestartPlan, plan_restart, rank_directories, scan
 
 CLOUD = "uniGas"
-TOLERANCE = 1.0e-9
+#: Relative. Time directories are named to timePrecision 8 significant digits,
+#: so the write that ends a leg can be named up to ~5e-9 relative either side of
+#: its endTime; 1e-6 is far above that and far below one time step.
+TOLERANCE = 1.0e-6
 COST_MODEL = Path("results") / "cost-model.yaml"
 PROVENANCE = Path("results") / "provenance-unigas.yaml"
 COMMIT_FILE = "uniGasFoam.commit"
@@ -49,15 +52,43 @@ SOLVER = "uniGasFoam hybrid USP-DSMC"
 HEADER_KEYS = {"version", "format", "class", "location", "object", "note"}
 
 
-def leg_for(time_s: float | None, average_start_s: float, end_time_s: float) -> str:
-    """``startup``, ``sampling`` or ``done`` for a case whose newest time is ``time_s``."""
+def leg_for(time_s: float | None, average_start_s: float, end_time_s: float,
+            slack_s: float = 0.0) -> str:
+    """``startup``, ``sampling`` or ``done`` for a case whose newest time is ``time_s``.
+
+    ``slack_s`` is how far short of a leg's end its last write may fall: OpenFOAM
+    writes within half a step of a write time and stops within half a step of
+    ``endTime``, so pass about half the step that write was taken with.
+    """
     if time_s is None:
         return "startup"
-    if time_s >= end_time_s * (1.0 - TOLERANCE):
+    if time_s >= end_time_s * (1.0 - TOLERANCE) - slack_s:
         return "done"
-    if time_s >= average_start_s * (1.0 - TOLERANCE):
+    if time_s >= average_start_s * (1.0 - TOLERANCE) - slack_s:
         return "sampling"
     return "startup"
+
+
+_DELTA_T = re.compile(r"^\s*deltaT\s+([^;\s]+)\s*;", re.MULTILINE)
+
+
+def step_at(case_dir: Path, time: str) -> float:
+    """The time step recorded in ``<time>/uniform/time`` (a rank's or the case's), or 0."""
+    case_dir = Path(case_dir)
+    for base in [*rank_directories(case_dir)[:1], case_dir]:
+        path = base / time / "uniform" / "time"
+        if path.is_file():
+            match = _DELTA_T.search(path.read_text(encoding="utf-8", errors="replace"))
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    return 0.0
+    return 0.0
+
+
+def _slack(case_dir: Path, time: str | None) -> float:
+    return 0.51 * step_at(case_dir, time) if time else 0.0
 
 
 @dataclass
@@ -114,7 +145,7 @@ def resume_plan(case_dir: Path, n_subdomains: int) -> UgfRestartPlan:
     base = plan_restart(case_dir, n_subdomains)
     run = _derive(case_dir).run
     resume = float(base.resume) if base.resume else None
-    leg = leg_for(resume, run.average_start_s, run.end_time_s)
+    leg = leg_for(resume, run.average_start_s, run.end_time_s, _slack(case_dir, base.resume))
     reasons = [base.refusal] if base.refusal else []
     if base.resume:
         decomposed = n_subdomains > 1 and base.proc_time == base.resume
@@ -137,8 +168,8 @@ def finished(case_dir: Path) -> bool:
     state = scan(case_dir)
     latest = state.latest
     run = _derive(case_dir).run
-    return leg_for(latest[0] if latest else None, run.average_start_s,
-                   run.end_time_s) == "done"
+    return leg_for(latest[0] if latest else None, run.average_start_s, run.end_time_s,
+                   _slack(case_dir, latest[1] if latest else None)) == "done"
 
 
 # --------------------------------------------------------------------------- #
