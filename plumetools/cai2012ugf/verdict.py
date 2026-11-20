@@ -7,9 +7,9 @@ run, from uniGasFoam's own per-cell output, over the DSMC cells
 
 * the **effective** collision spacing over the mean free path is at most
   ``checks.max_cell_over_mfp`` (Cai's dx/lambda0 = 1). Not the nominal sub-cell
-  size: a sub-cell with one particle draws its partner from the whole cell
-  (uniGasFoam ``noTimeCounter.C``), so a cell with N particles gains nothing
-  from more than about N/2 sub-cells -- see :func:`effective_spacing_over_mfp`;
+  size: a particle alone in its sub-cell draws its partner from the whole cell
+  (uniGasFoam ``noTimeCounter.C``), so sparse sub-cells leave the spacing near
+  the cell size -- see :func:`effective_spacing_over_mfp`;
 * the time step over the mean collision time is at most 0.2;
 * a DSMC cell above the occupancy floor (n/n0 >= 1e-3, Cai's lowest contour)
   holds at least ``checks.min_particles_per_cell`` particles;
@@ -44,24 +44,29 @@ MCT_SLACK = 1.0e-6
 SENTINEL = 1.0e10
 
 
-def effective_spacing_over_mfp(extents, sub_cell_levels, particles, mfp, *,
-                               min_particles_per_sub_cell: float = 2.0) -> np.ndarray:
-    """Effective collision-partner spacing over the mean free path, per cell.
+def effective_spacing_over_mfp(extents, sub_cell_levels, particles, mfp) -> np.ndarray:
+    """Expected collision-partner spacing over the mean free path, per cell.
 
-    ``S = sx sy sz``; ``f = min(1, N / (p S))^(1/3)`` with ``p`` the particles a
-    sub-cell needs to supply its own partners; the usable divisions per
-    direction are ``max(1, s_d f)``; the spacing is the largest
-    ``extent_d / divisions_d``. NaN where the mean free path is not a finite
-    positive number.
+    uniGasFoam's ``noTimeCounter.C`` bins a cell's N particles into all
+    ``S = sx sy sz`` sub-cells. A candidate that shares its sub-cell takes a
+    partner there; one alone in it takes a partner from the WHOLE cell. With the
+    particles spread uniformly, a candidate is alone with probability
+    ``P = (1 - 1/S)^(N-1)`` (``P = 1`` for N <= 1), so the expected spacing is::
+
+        P * max_d(extent_d) + (1 - P) * max_d(extent_d / s_d)
+
+    -- the cell size where sub-cells are sparse, the sub-cell size where they
+    are well filled (spec §7). NaN where the mean free path is not a finite,
+    positive, non-sentinel number.
     """
     extents = np.asarray(extents, dtype=float).reshape(-1, 3)
     levels = np.maximum(np.asarray(sub_cell_levels, dtype=float).reshape(-1, 3), 1.0)
     particles = np.maximum(np.asarray(particles, dtype=float).reshape(-1), 0.0)
     mfp = np.asarray(mfp, dtype=float).reshape(-1)
     n_sub = levels.prod(axis=1)
-    fill = np.minimum(1.0, particles / (float(min_particles_per_sub_cell) * n_sub))
-    divisions = np.maximum(1.0, levels * np.cbrt(fill)[:, None])
-    spacing = (extents / divisions).max(axis=1)
+    alone = np.where(particles > 1.0,
+                     np.power(1.0 - 1.0 / n_sub, np.maximum(particles - 1.0, 0.0)), 1.0)
+    spacing = alone * extents.max(axis=1) + (1.0 - alone) * (extents / levels).max(axis=1)
     out = np.full(spacing.shape, np.nan)
     good = np.isfinite(mfp) & (mfp > 0.0) & (mfp < SENTINEL)
     out[good] = spacing[good] / mfp[good]
@@ -100,8 +105,7 @@ def assess_fields(fields: dict, *, n0: float, settings, limits: dict,
     mct_limit = float(settings.max_time_step_mct_ratio)
 
     effective = effective_spacing_over_mfp(
-        fields["extents"], fields["sub_cell_levels"], particles, fields["mfp"],
-        min_particles_per_sub_cell=settings.min_particles_per_sub_cell)
+        fields["extents"], fields["sub_cell_levels"], particles, fields["mfp"])
     mct = np.asarray(fields["time_step_mct_ratio"], dtype=float)
     mct_defined = np.isfinite(mct) & (mct < SENTINEL)
     floor = density / float(n0) >= float(settings.occupancy_floor_n_over_n0)

@@ -66,16 +66,31 @@ def common(**changes):
 # the effective collision spacing
 # --------------------------------------------------------------------------- #
 
+# noTimeCounter.C bins a cell's N particles into all S sub-cells; a particle
+# alone in its sub-cell (probability P = (1 - 1/S)^(N-1)) draws its partner from
+# the WHOLE cell. The expected partner spacing is P * cell + (1 - P) * sub-cell.
+
 def test_dense_sub_cells_resolve():
     r = effective_spacing_over_mfp(np.array([[1.0, 1, 1]]), np.array([[5, 5, 5]]),
                                    np.array([1000.0]), np.array([1.0]))
-    assert r[0] == pytest.approx(0.2)
+    p = (1 - 1 / 125) ** 999
+    assert r[0] == pytest.approx(p * 1.0 + (1 - p) * 0.2, rel=1e-12)
+    assert r[0] == pytest.approx(0.2, rel=1e-2)
 
 
 def test_sparse_sub_cells_fall_back_toward_cell_size():
     r = effective_spacing_over_mfp(np.array([[1.0, 1, 1]]), np.array([[10, 10, 10]]),
                                    np.array([40.0]), np.array([0.1]))
-    assert r[0] == pytest.approx(1 / (10 * 0.02 ** (1 / 3)) / 0.1, rel=1e-12)   # 3.684
+    p = (1 - 1 / 1000) ** 39                                       # 0.962
+    assert r[0] == pytest.approx((p * 1.0 + (1 - p) * 0.1) / 0.1, rel=1e-12)   # 9.66
+
+
+def test_kn0p01_lip_cell_fails_the_gate():
+    # cell/lambda 2.7 -> 6 sub-cells per direction (lambda/2), 40 particles:
+    # 83 % of partners come from the whole cell, so the spacing is ~2.3 lambda.
+    r = effective_spacing_over_mfp(np.array([[2.7, 2.7, 2.7]]), np.array([[6, 6, 6]]),
+                                   np.array([40.0]), np.array([1.0]))
+    assert 2.2 < r[0] < 2.4
 
 
 def test_one_particle_means_cell_size():

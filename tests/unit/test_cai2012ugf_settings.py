@@ -31,7 +31,7 @@ def test_defaults_are_the_spec_values():
     assert (s.fields.mean_field, s.fields.window_field) == ("Ar", "ArWindow")
     v = s.verdict
     assert v.max_effective_spacing_over_mfp is None and v.min_particles_per_dsmc_cell is None
-    assert (v.max_time_step_mct_ratio, v.min_particles_per_sub_cell, v.occupancy_floor_n_over_n0) == (0.2, 2.0, 1e-3)
+    assert (v.max_time_step_mct_ratio, v.occupancy_floor_n_over_n0) == (0.2, 1e-3)
 
 
 def test_cell_weighting_is_refused():           # decision 5

@@ -166,8 +166,7 @@ def report(case_dir: Path) -> dict:
         x = _read(t, "C", n)[:, 0] if (t / "C").is_file() else None
         dsmc, usp = ids == 1, ids == 0
         occupied = dsmc & (counts > 0)
-        eff = effective_spacing_over_mfp(extents, levels, counts, mfp,
-                                         min_particles_per_sub_cell=settings.verdict.min_particles_per_sub_cell)
+        eff = effective_spacing_over_mfp(extents, levels, counts, mfp)
         mct_ok = occupied & np.isfinite(mct) & (mct < SENTINEL)
         diameter = float(case.cfg.nozzle.diameter_m)
 

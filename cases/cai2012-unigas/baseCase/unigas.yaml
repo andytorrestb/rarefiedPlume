@@ -43,5 +43,4 @@ verdict:                          # spec §7
   max_effective_spacing_over_mfp: null   # null: case.yaml checks.max_cell_over_mfp
   max_time_step_mct_ratio: 0.2
   min_particles_per_dsmc_cell: null      # null: case.yaml checks.min_particles_per_cell
-  min_particles_per_sub_cell: 2.0
   occupancy_floor_n_over_n0: 1.0e-3

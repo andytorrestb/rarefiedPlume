@@ -74,7 +74,6 @@ class VerdictSettings:
     max_effective_spacing_over_mfp: float | None = None   # None: checks.max_cell_over_mfp
     max_time_step_mct_ratio: float = 0.2
     min_particles_per_dsmc_cell: float | None = None       # None: checks.min_particles_per_cell
-    min_particles_per_sub_cell: float = 2.0
     occupancy_floor_n_over_n0: float = 1.0e-3
 
 
@@ -173,7 +172,7 @@ def _validate(s: UniGasSettings, where: str) -> None:
     _positive(s.collision.theta, "collision.theta", where)
     _positive(s.writes.startup_interval_transits, "writes.startup_interval_transits", where)
     for name in ("max_effective_spacing_over_mfp", "max_time_step_mct_ratio",
-                 "min_particles_per_dsmc_cell", "min_particles_per_sub_cell",
+                 "min_particles_per_dsmc_cell",
                  "occupancy_floor_n_over_n0"):
         _positive(getattr(s.verdict, name), f"verdict.{name}", where)
     if s.fields.mean_field == s.fields.window_field:
