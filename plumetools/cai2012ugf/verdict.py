@@ -38,6 +38,10 @@ PENDING = {
     "unresolved": ["post-run verdict not computed: run Allverdict.py"],
 }
 MCT_SLACK = 1.0e-6
+#: uniGasFoam writes OpenFOAM's GREAT (1e15) where the mean free path or the
+#: collision time is undefined -- no gas, or a collision rate of zero
+#: (uniGasVolFields.C). Anything at or above this is "undefined", never a value.
+SENTINEL = 1.0e10
 
 
 def effective_spacing_over_mfp(extents, sub_cell_levels, particles, mfp, *,
@@ -59,7 +63,7 @@ def effective_spacing_over_mfp(extents, sub_cell_levels, particles, mfp, *,
     divisions = np.maximum(1.0, levels * np.cbrt(fill)[:, None])
     spacing = (extents / divisions).max(axis=1)
     out = np.full(spacing.shape, np.nan)
-    good = np.isfinite(mfp) & (mfp > 0.0)
+    good = np.isfinite(mfp) & (mfp > 0.0) & (mfp < SENTINEL)
     out[good] = spacing[good] / mfp[good]
     return out
 
@@ -99,11 +103,12 @@ def assess_fields(fields: dict, *, n0: float, settings, limits: dict,
         fields["extents"], fields["sub_cell_levels"], particles, fields["mfp"],
         min_particles_per_sub_cell=settings.min_particles_per_sub_cell)
     mct = np.asarray(fields["time_step_mct_ratio"], dtype=float)
+    mct_defined = np.isfinite(mct) & (mct < SENTINEL)
     floor = density / float(n0) >= float(settings.occupancy_floor_n_over_n0)
     counted = dsmc & floor
 
     spacing_stats = _stats(effective[judged], spacing_limit)
-    mct_stats = _stats(mct[judged], mct_limit)
+    mct_stats = _stats(mct[judged & mct_defined], mct_limit)
     occupancy_stats = _stats(particles[counted])
     below = int(np.sum(particles[counted] < occupancy_min))
 
@@ -139,6 +144,7 @@ def assess_fields(fields: dict, *, n0: float, settings, limits: dict,
             "fraction": float(dsmc.mean()) if n_cells else 0.0,
             "excluded_unoccupied": int(np.sum(dsmc & ~occupied)),
             "undefined_mean_free_path": int(np.sum(judged & ~np.isfinite(effective))),
+            "undefined_time_step_ratio": int(np.sum(judged & ~mct_defined)),
             "effective_spacing_over_mfp": spacing_stats,
             "time_step_mct_ratio": mct_stats,
             "particles_above_floor": occupancy_stats,

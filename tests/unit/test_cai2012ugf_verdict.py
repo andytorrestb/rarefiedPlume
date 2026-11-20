@@ -85,9 +85,20 @@ def test_one_particle_means_cell_size():
 
 
 def test_undefined_mean_free_path_is_nan():
-    r = effective_spacing_over_mfp(np.ones((3, 3)), np.ones((3, 3)), np.full(3, 10.0),
-                                   np.array([0.0, np.inf, np.nan]))
+    # uniGasFoam writes GREAT (1e15) where the mean free path is undefined.
+    r = effective_spacing_over_mfp(np.ones((4, 3)), np.ones((4, 3)), np.full(4, 10.0),
+                                   np.array([0.0, np.inf, np.nan, 1.0e15]))
     assert np.isnan(r).all()
+
+
+def test_time_step_sentinel_is_undefined_not_a_failure():
+    # uniGasFoam writes GREAT (1e15) for dt/tau where the collision rate is zero.
+    f = fields_with()
+    f["time_step_mct_ratio"][1] = 1.0e15
+    v = assess_fields(f, **COMMON)
+    assert v["production_ready"] is True
+    assert v["dsmc"]["undefined_time_step_ratio"] == 1
+    assert v["dsmc"]["time_step_mct_ratio"]["max"] == pytest.approx(0.1)
 
 
 # --------------------------------------------------------------------------- #
