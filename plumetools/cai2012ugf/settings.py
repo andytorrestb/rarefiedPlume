@@ -23,6 +23,8 @@ import yaml
 FILENAME = "unigas.yaml"
 
 USP_MODEL = "unifiedStochasticParticleSBGK"
+SPEC_MAX_TIME_STEP_MCT_RATIO = 0.2   # spec §7
+SPEC_OCCUPANCY_FLOOR = 1.0e-3        # spec §7, Cai's lowest contour
 
 
 class UniGasConfigError(ValueError):
@@ -175,6 +177,17 @@ def _validate(s: UniGasSettings, where: str) -> None:
                  "min_particles_per_dsmc_cell",
                  "occupancy_floor_n_over_n0"):
         _positive(getattr(s.verdict, name), f"verdict.{name}", where)
+    # The gates may be tightened, never loosened (anti-goal: relaxing a
+    # criterion so that a case looks suitable). The spacing and occupancy gates
+    # are checked against case.yaml when the verdict is made (verdict.resolve_limits).
+    if s.verdict.max_time_step_mct_ratio > SPEC_MAX_TIME_STEP_MCT_RATIO:
+        raise UniGasConfigError(
+            f"{where}: verdict.max_time_step_mct_ratio {s.verdict.max_time_step_mct_ratio:g} "
+            f"is looser than the spec's {SPEC_MAX_TIME_STEP_MCT_RATIO:g}")
+    if s.verdict.occupancy_floor_n_over_n0 > SPEC_OCCUPANCY_FLOOR:
+        raise UniGasConfigError(
+            f"{where}: verdict.occupancy_floor_n_over_n0 {s.verdict.occupancy_floor_n_over_n0:g} "
+            f"is looser than the spec's {SPEC_OCCUPANCY_FLOOR:g} (a higher floor judges fewer cells)")
     if s.fields.mean_field == s.fields.window_field:
         raise UniGasConfigError(
             f"{where}: fields.mean_field and fields.window_field must differ "

@@ -12,7 +12,7 @@ import yaml
 
 from plumetools.cai2012ugf.context import post_context
 from plumetools.cai2012ugf.settings import VerdictSettings
-from plumetools.cai2012ugf.verdict import assess_fields, effective_spacing_over_mfp
+from plumetools.cai2012ugf.verdict import assess_fields, effective_spacing_over_mfp, resolve_limits
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATE = REPO / "cases" / "cai2012-kn-extension" / "baseCase" / "case.yaml"
@@ -24,6 +24,7 @@ COMMON = dict(
     limits={"max_effective_spacing_over_mfp": 1.0, "min_particles_per_dsmc_cell": 5.0},
     stationarity_verdict="stable-window-demonstrated",
     known_limitations=[],
+    window_complete=True,
 )
 
 
@@ -153,6 +154,32 @@ def test_occupancy_counts_only_cells_above_the_floor():
 def test_usp_cells_are_not_gated():
     v = assess_fields(fields_with(), **COMMON)      # the USP cell has mct 3.0, mfp 0.01
     assert v["usp"]["n_cells"] == 1 and v["production_ready"] is True
+
+
+def test_incomplete_sampling_window_blocks_production():
+    # A walltime-killed, reconstructed case must not be judged on part of its window.
+    v = assess_fields(fields_with(), **common(window_complete=False))
+    assert v["production_ready"] is False
+    assert any("sampling window incomplete" in u for u in v["unresolved"])
+
+
+class Checks:
+    max_cell_over_mfp = 1.0
+    min_particles_per_cell = 5.0
+
+
+def test_limits_default_to_case_checks():
+    assert resolve_limits(VerdictSettings(), Checks()) == {
+        "max_effective_spacing_over_mfp": 1.0, "min_particles_per_dsmc_cell": 5.0}
+
+
+def test_limits_may_tighten_but_never_loosen():
+    tight = VerdictSettings(max_effective_spacing_over_mfp=0.5, min_particles_per_dsmc_cell=10.0)
+    assert resolve_limits(tight, Checks())["max_effective_spacing_over_mfp"] == 0.5
+    for loose in (VerdictSettings(max_effective_spacing_over_mfp=2.0),
+                  VerdictSettings(min_particles_per_dsmc_cell=1.0)):
+        with pytest.raises(ValueError, match="looser"):
+            resolve_limits(loose, Checks())
 
 
 def test_known_limitation_blocks_production():

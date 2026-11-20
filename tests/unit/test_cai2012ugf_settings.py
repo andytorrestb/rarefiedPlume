@@ -60,6 +60,14 @@ def test_same_mean_and_window_field_is_refused():
         settings_from_dict({"fields": {"window_field": "Ar"}}, "x")
 
 
+def test_verdict_thresholds_may_tighten_but_never_loosen():   # anti-goal 2
+    settings_from_dict({"verdict": {"max_time_step_mct_ratio": 0.1,
+                                    "occupancy_floor_n_over_n0": 1.0e-4}}, "x")
+    for bad in ({"max_time_step_mct_ratio": 0.3}, {"occupancy_floor_n_over_n0": 1.0e-2}):
+        with pytest.raises(UniGasConfigError, match="looser"):
+            settings_from_dict({"verdict": bad}, "x")
+
+
 def test_missing_file_names_its_path(tmp_path):
     with pytest.raises(UniGasConfigError, match="unigas.yaml"):
         load_settings(tmp_path)

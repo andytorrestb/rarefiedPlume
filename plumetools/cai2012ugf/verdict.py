@@ -88,8 +88,29 @@ def _stats(values: np.ndarray, limit: float | None = None) -> dict:
     return doc
 
 
+def resolve_limits(verdict_settings, checks) -> dict:
+    """The spacing and occupancy gates: ``case.yaml``'s checks, or tighter.
+
+    ``unigas.yaml`` may tighten them; a looser value is refused (anti-goal:
+    relaxing a criterion so that a case looks suitable).
+    """
+    spacing_floor = float(checks.max_cell_over_mfp)
+    occupancy_floor = float(checks.min_particles_per_cell)
+    spacing = verdict_settings.max_effective_spacing_over_mfp
+    occupancy = verdict_settings.min_particles_per_dsmc_cell
+    if spacing is not None and float(spacing) > spacing_floor:
+        raise ValueError(f"verdict.max_effective_spacing_over_mfp {spacing:g} is looser than "
+                         f"case.yaml checks.max_cell_over_mfp {spacing_floor:g}")
+    if occupancy is not None and float(occupancy) < occupancy_floor:
+        raise ValueError(f"verdict.min_particles_per_dsmc_cell {occupancy:g} is looser than "
+                         f"case.yaml checks.min_particles_per_cell {occupancy_floor:g}")
+    return {"max_effective_spacing_over_mfp": spacing_floor if spacing is None else float(spacing),
+            "min_particles_per_dsmc_cell": occupancy_floor if occupancy is None else float(occupancy)}
+
+
 def assess_fields(fields: dict, *, n0: float, settings, limits: dict,
-                  stationarity_verdict: str | None, known_limitations: list) -> dict:
+                  stationarity_verdict: str | None, known_limitations: list,
+                  window_complete: bool = True) -> dict:
     """The verdict from per-cell arrays. Pure: no files are read."""
     ids = np.rint(np.asarray(fields["collision_model_id"], dtype=float))
     particles = np.asarray(fields["particles"], dtype=float)
@@ -132,6 +153,9 @@ def assess_fields(fields: dict, *, n0: float, settings, limits: dict,
             f"{settings.occupancy_floor_n_over_n0:g} hold fewer than {occupancy_min:g} particles")
     if stationarity_verdict != STABLE:
         unresolved.append(f"stationarity not demonstrated ({stationarity_verdict or 'unknown'})")
+    if not window_complete:
+        unresolved.append("sampling window incomplete: the judged time is before end_time_s "
+                          "(resubmit the case to finish the run)")
     unresolved.extend(str(item) for item in known_limitations)
 
     centres = np.asarray(fields["centres"], dtype=float).reshape(-1, 3)
@@ -236,19 +260,17 @@ def assess_run(case_dir: Path, *, time: str | None = None) -> dict:
         "number_density": _read(time_dir, f"rhoN_{f}", n),
         "centres": _read(time_dir, "C", n),
     }
+    from plumetools.cai2012ugf.hpc import _slack, leg_for
+
     v = settings.verdict
-    limits = {
-        "max_effective_spacing_over_mfp": (v.max_effective_spacing_over_mfp
-                                           if v.max_effective_spacing_over_mfp is not None
-                                           else case.cfg.checks.max_cell_over_mfp),
-        "min_particles_per_dsmc_cell": (v.min_particles_per_dsmc_cell
-                                        if v.min_particles_per_dsmc_cell is not None
-                                        else case.cfg.checks.min_particles_per_cell),
-    }
+    window_complete = leg_for(float(time), case.run.average_start_s, case.run.end_time_s,
+                              _slack(case_dir, time)) == "done"
     verdict = assess_fields(
-        fields, n0=case.exit_state.number_density_per_m3, settings=v, limits=limits,
+        fields, n0=case.exit_state.number_density_per_m3, settings=v,
+        limits=resolve_limits(v, case.cfg.checks),
         stationarity_verdict=_stationarity(case_dir),
-        known_limitations=policy.source_limitations(case.cfg))
+        known_limitations=policy.source_limitations(case.cfg),
+        window_complete=window_complete)
     verdict["time"] = time
     verdict["diameter_m"] = float(case.cfg.nozzle.diameter_m)
     path = case_dir / VERDICT_FILE
