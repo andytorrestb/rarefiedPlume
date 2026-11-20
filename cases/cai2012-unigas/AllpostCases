@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+# Post-process the cases of manifest-unigas.yaml that have output.
+#
+#   ./AllpostCases                    every case: Allpostugf, then the imagery
+#   ./AllpostCases --case Kn1_np1x    one case (repeatable)
+#   ./AllpostCases --no-viz           skip the ParaView imagery
+#   ./AllpostCases --viz-only         only the imagery
+#   ./AllpostCases --keep-going       continue past a failing case
+#   ./AllpostCases --no-analyse       accepted for the kn-extension's runPost.sh;
+#                                     this family has no study-level analyse.py
+#                                     (the cross-check and scaling replace it)
+#   ./AllpostCases --help
+#
+# The per-case chain is each case's ./Allpostugf. Cases with no time directory
+# are skipped and listed.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+
+KEEP_GOING=0
+VIZ=1
+VIZ_ONLY=0
+SELECT=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep-going)   KEEP_GOING=1 ;;
+        --no-viz)       VIZ=0 ;;
+        --viz-only)     VIZ_ONLY=1 ;;
+        --no-analyse)   ;;
+        --case)         shift; SELECT+=("${1:?"--case needs a case name"}") ;;
+        -h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)              echo "AllpostCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "AllpostCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+[ -f manifest-unigas.yaml ] || die "no manifest-unigas.yaml: run ./generate_cases.py first"
+mapfile -t CASES < <($PYTHON -m plumetools.cai2012ugf.generation cases .)
+[ ${#CASES[@]} -gt 0 ] || die "the manifest lists no cases"
+
+if [ ${#SELECT[@]} -gt 0 ]; then
+    PICKED=()
+    for want in "${SELECT[@]}"; do
+        FOUND=""
+        for case_path in "${CASES[@]}"; do
+            if [ "$case_path" = "$want" ] || [ "${case_path##*/}" = "$want" ]; then
+                FOUND=$case_path
+            fi
+        done
+        [ -n "$FOUND" ] || die "no case '$want' in manifest-unigas.yaml"
+        PICKED+=("$FOUND")
+    done
+    CASES=("${PICKED[@]}")
+fi
+
+has_output() {
+    local dir
+    for dir in "$1"/*/; do
+        dir=${dir%/}; dir=${dir##*/}
+        case "$dir" in 0|constant|system|results|processor*) continue ;; esac
+        [ -n "$dir" ] && [ -z "${dir//[0-9.eE+-]/}" ] && return 0
+    done
+    return 1
+}
+
+# The kn-extension's imagery, on this family's manifest and viz specs.
+render() {
+    local renderer=../../plumetools/viz/render_slices.py pvpython=${PVPYTHON_PATH:-pvpython}
+    echo "### mid-plane imagery"
+    if [ -n "${PVPYTHON_PATH:-}" ]; then
+        have "$pvpython" || { echo "AllpostCases: PVPYTHON_PATH is not an executable: $pvpython" >&2; return 1; }
+    elif ! have pvpython; then
+        echo "    skipped: 'pvpython' is not on PATH. Every physical result is unaffected."
+        return 0
+    fi
+    local listing status=0
+    listing=$($PYTHON -m plumetools.cai2012ugf.generation viz-groups . "${CASES[@]}") || return 1
+    while IFS=$'\t' read -r spec rest; do
+        [ -n "$spec" ] || continue
+        read -r -a group <<< "$rest"
+        local ready=()
+        for case_path in "${group[@]}"; do
+            has_output "$case_path" && ready+=("$case_path")
+        done
+        [ ${#ready[@]} -gt 0 ] || continue
+        echo "    spec $spec: ${ready[*]}"
+        "$pvpython" --force-offscreen-rendering "$renderer" "${ready[@]}" --spec "$spec" || status=1
+    done <<< "$listing"
+    local diagnosed=()
+    for case_path in "${CASES[@]}"; do
+        [ -f "$case_path/results/diagnostics_summary.yaml" ] && diagnosed+=("$case_path")
+    done
+    if [ ${#diagnosed[@]} -gt 0 ]; then
+        "$pvpython" --force-offscreen-rendering "$renderer" "${diagnosed[@]}" \
+            --spec viz-diagnostics.yaml || status=1
+    fi
+    return $status
+}
+
+if [ "$VIZ_ONLY" -eq 1 ]; then
+    render || die "rendering failed"
+    exit 0
+fi
+
+FAILED=()
+SKIPPED=()
+for case_path in "${CASES[@]}"; do
+    if ! has_output "$case_path"; then
+        SKIPPED+=("$case_path")
+        continue
+    fi
+    echo "=============================================================="
+    echo "### $case_path"
+    if ! bash "$case_path/Allpostugf"; then
+        FAILED+=("$case_path")
+        [ "$KEEP_GOING" -eq 1 ] || die "$case_path failed; --keep-going continues past it"
+    fi
+done
+
+if [ "$VIZ" -eq 1 ]; then
+    render || FAILED+=("imagery")
+fi
+
+echo ""
+[ ${#SKIPPED[@]} -eq 0 ] || echo "skipped (no output yet): ${SKIPPED[*]}"
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "FAILED: ${FAILED[*]}" >&2
+    exit 1
+fi
+echo "### done"

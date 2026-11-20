@@ -20,6 +20,7 @@ those the kn-extension generates for the same Kn.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -274,6 +275,73 @@ def stage_pilot(family_root: Path, kn_name: str) -> Path:
 
 
 # --------------------------------------------------------------------------- #
+# the copied analysis scripts
+# --------------------------------------------------------------------------- #
+
+#: Family-relative files that are the kn-extension's, byte for byte, or with
+#: the one allowed edit below.
+COPIED_FROM_KN_EXTENSION = (
+    "baseCase/Allpost",
+    "baseCase/Alldiagnose.py",
+    "baseCase/Allaudit.py",
+    "baseCase/postProcess.py",
+    "baseCase/runPost.sh",
+    "baseCase/runViz.sh",
+    "baseCase/diagnostics.yaml",
+    "baseCase/Allcompare.py",
+    "baseCase/Allconverge.py",
+    "viz.yaml",
+    "viz-diagnostics.yaml",
+)
+
+#: The only edit allowed in a copy: the post context, so the scripts show the
+#: post-run verdict (spec §7) instead of the kn-extension's pre-run label. The
+#: kn-extension line ``from plumetools.cai2012ext import <names>, interface_case``
+#: loses ``interface_case``, and this family's context is imported under that name.
+CONTEXT_EDITED = ("baseCase/Allcompare.py", "baseCase/Allconverge.py")
+_CONTEXT_LINE = re.compile(
+    r"^(?P<indent>[ \t]*)from plumetools\.cai2012ext import (?P<names>[\w, ]+?), interface_case\n",
+    re.MULTILINE)
+CONTEXT_IMPORT = "from plumetools.cai2012ugf import context as interface_case"
+
+
+def context_edit(text: str) -> str | None:
+    """The kn-extension script with the one allowed edit, or ``None`` if it has no
+    single context import to edit."""
+    matches = list(_CONTEXT_LINE.finditer(text))
+    if len(matches) != 1:
+        return None
+    m = matches[0]
+    replacement = (f"{m['indent']}from plumetools.cai2012ext import {m['names']}\n"
+                   f"{m['indent']}{CONTEXT_IMPORT}\n")
+    return text[:m.start()] + replacement + text[m.end():]
+
+
+def copy_differences(family_root: Path) -> list[str]:
+    """Copied scripts that differ from their kn-extension originals; empty passes."""
+    root = Path(family_root)
+    ext = policy.kn_extension_root()
+    problems = []
+    for relative in COPIED_FROM_KN_EXTENSION:
+        mine, theirs = root / relative, ext / relative
+        if not mine.is_file():
+            problems.append(f"{relative}: missing (copy it from {policy.KN_EXTENSION})")
+            continue
+        expected = theirs.read_bytes()
+        if relative in CONTEXT_EDITED:
+            edited = context_edit(expected.decode("utf-8"))
+            if edited is None:
+                problems.append(f"{relative}: the kn-extension original no longer has the "
+                                f"one context import this family replaces")
+                continue
+            expected = edited.encode("utf-8")
+        if mine.read_bytes() != expected:
+            problems.append(f"{relative}: differs from {policy.KN_EXTENSION / relative}"
+                            + (" beyond the context import" if relative in CONTEXT_EDITED else ""))
+    return problems
+
+
+# --------------------------------------------------------------------------- #
 # validate
 # --------------------------------------------------------------------------- #
 
@@ -290,7 +358,7 @@ def validate(family_root: Path) -> list[str]:
     """Every way the generated family departs from the kn-extension; empty passes."""
     root = Path(family_root).resolve()
     study = load_study(root / "study.yaml")
-    problems = inheritance_problems(root, study)
+    problems = inheritance_problems(root, study) + copy_differences(root)
     ext_root = policy.kn_extension_root()
     ext_study = load_study(ext_root / "study.yaml")
     ext_cases = {c.name: c for c in ext_study.expand()}
@@ -320,3 +388,57 @@ def validate(family_root: Path) -> list[str]:
                 problems.append(f"{case.name}: nEquivalentParticles {my_weight:.17g} vs "
                                 f"kn-extension {their_weight:.17g}")
     return problems
+
+
+# --------------------------------------------------------------------------- #
+# the command line the family's shell drivers use
+# --------------------------------------------------------------------------- #
+
+def manifest_cases(family_root: Path) -> list[str]:
+    """The case paths ``manifest-unigas.yaml`` lists, relative to the family."""
+    path = Path(family_root) / "manifest-unigas.yaml"
+    if not path.is_file():
+        raise GenerationError(f"no {path}: run ./generate_cases.py first")
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return [str(entry["path"]) for entry in document.get("cases") or []]
+
+
+def viz_groups(family_root: Path, wanted: list) -> list[str]:
+    """``spec<TAB>case ...`` lines for the imagery, from the kn-extension's spec writer."""
+    from plumetools.cai2012ext.vizspec import write_group_specs
+
+    root = Path(family_root)
+    manifest = yaml.safe_load((root / "manifest-unigas.yaml").read_text(encoding="utf-8"))
+    lines = []
+    for _, (path, cases) in write_group_specs(
+            manifest, root / "viz.yaml", root / "results" / "viz-specs").items():
+        chosen = [c for c in cases if c in set(wanted)]
+        if chosen:
+            lines.append("\t".join([str(path), *chosen]))
+    return lines
+
+
+def main(argv=None) -> int:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="python -m plumetools.cai2012ugf.generation")
+    steps = parser.add_subparsers(dest="step", required=True)
+    steps.add_parser("cases").add_argument("family_root", type=Path)
+    viz = steps.add_parser("viz-groups")
+    viz.add_argument("family_root", type=Path)
+    viz.add_argument("cases", nargs="*")
+    args = parser.parse_args(argv)
+    try:
+        lines = (manifest_cases(args.family_root) if args.step == "cases"
+                 else viz_groups(args.family_root, args.cases))
+    except (GenerationError, OSError) as exc:
+        print(f"generation: {exc}", file=sys.stderr)
+        return 1
+    for line in lines:
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

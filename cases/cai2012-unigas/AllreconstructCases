@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+# Finish reconstruction for cases whose job ran out of walltime in it.
+#
+#   ./AllreconstructCases            reconstructPar -newTimes, then convert, where needed
+#   ./AllreconstructCases --check    list the cases whose processors are ahead; change nothing
+#   ./AllreconstructCases --help
+#
+# A runCase.sh killed during reconstructPar leaves the processors ahead of the
+# case directory. Resubmitting would resume the solver, not finish the
+# reconstruction; this does only that, then converts the new times.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+
+CHECK=0
+case "${1:-}" in
+    --check) CHECK=1 ;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    "") ;;
+    *) echo "AllreconstructCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+
+die() { echo "AllreconstructCases: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+[ -f manifest-unigas.yaml ] || die "no manifest-unigas.yaml"
+mapfile -t CASES < <($PYTHON -m plumetools.cai2012ugf.generation cases .)
+
+newest() {   # the newest numeric time directory under $1, or nothing
+    local dir best=""
+    for dir in "$1"/*/; do
+        dir=${dir%/}; dir=${dir##*/}
+        [ -n "$dir" ] && [ -z "${dir//[0-9.eE+-]/}" ] || continue
+        if [ -z "$best" ] || awk -v a="$dir" -v b="$best" 'BEGIN{exit !(a+0 > b+0)}'; then
+            best=$dir
+        fi
+    done
+    echo "$best"
+}
+
+for case_path in "${CASES[@]}"; do
+    [ -d "$case_path/processor0" ] || continue
+    proc=$(newest "$case_path/processor0")
+    here=$(newest "$case_path")
+    [ -n "$proc" ] || continue
+    if [ -z "$here" ] || awk -v a="$proc" -v b="$here" 'BEGIN{exit !(a+0 > b+0)}'; then
+        echo "$case_path: processors at $proc, case directory at ${here:-nothing}"
+        [ "$CHECK" -eq 1 ] && continue
+        (cd "$case_path" && reconstructPar -newTimes > log.reconstructPar 2>&1) \
+            || die "$case_path: reconstructPar failed (log.reconstructPar)"
+        $PYTHON -m plumetools.cai2012ugf.convert "$case_path" || die "$case_path: convert failed"
+    fi
+done

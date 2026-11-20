@@ -1,0 +1,22 @@
+#!/bin/bash
+#
+# Run ./Allclean in every case of manifest-unigas.yaml.
+#
+#   ./AllcleanCases [--dry-run] [--mesh]     options are passed to each Allclean
+#   ./AllcleanCases --help
+#
+# Allclean removes solver output and results: this DESTROYS every case's run.
+# Try --dry-run first.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+case "${1:-}" in
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+esac
+[ -f manifest-unigas.yaml ] || { echo "AllcleanCases: no manifest-unigas.yaml" >&2; exit 1; }
+PYTHON=$(command -v python || command -v python3)
+mapfile -t CASES < <($PYTHON -m plumetools.cai2012ugf.generation cases .)
+for case_path in "${CASES[@]}"; do
+    bash "$case_path/Allclean" "$@" || exit 1
+done

@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Post-process this case: convert, analyse, judge, compare.
+#
+#   ./Allpostugf            the whole chain on the latest reconstructed time
+#   ./Allpostugf --help
+#
+# In order (each step stops the chain if it fails):
+#
+#   convert          uniGasFoam fields -> the dsmcFoam names (plumetools.cai2012ugf.convert);
+#                    a no-op when Allrun already converted
+#   Allpost          cell centres/volumes, centreline and plane (the kn-extension's)
+#   Alldiagnose.py   rarefaction and mesh-resolution diagnostics
+#   Allaudit.py      parcel occupancy and the particle-weight identity
+#   Allconverge.py   stationarity of the averaging window (shows the verdict
+#                    as pending: the verdict needs this step's result)
+#   Allverdict.py    the post-run suitability verdict (spec §7)
+#   Allcompare.py    every comparison with Cai, under that verdict
+#
+# Every analysis script except Allverdict.py is the kn-extension's; see
+# ../../validate_cases.py for the equivalence check.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+
+case "${1:-}" in
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    "") ;;
+    *) echo "Allpostugf: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+
+die() { echo "" >&2; echo "Allpostugf: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+[ -f case.yaml ] && [ -f unigas.yaml ] || die "not a cai2012-unigas case"
+
+step() {
+    echo ""
+    echo "==> $*"
+    "$@" || die "'$*' failed (above)"
+}
+
+step $PYTHON -m plumetools.cai2012ugf.convert .
+step bash ./Allpost
+step $PYTHON Alldiagnose.py
+step $PYTHON Allaudit.py
+step $PYTHON Allconverge.py
+step $PYTHON Allverdict.py
+step $PYTHON Allcompare.py
+
+echo ""
+echo "### ${PWD##*/}: post-processing done; verdict in results/unigas_verdict.yaml"
