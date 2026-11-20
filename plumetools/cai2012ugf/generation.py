@@ -378,6 +378,9 @@ def validate(family_root: Path) -> list[str]:
                 continue
             ext_dir = ext_generation.stage(ext_root / ext_study.base_case,
                                            scratch / "ext", ext_cases[case.name], ext_study)
+            problems += [f"{case.name}: case.yaml {key} differs from the kn-extension's case"
+                         for key in policy.template_differences(load_case_config(case_dir),
+                                                                load_case_config(ext_dir))]
             mine, my_weight = _mesh_files(load_case_config(case_dir), scratch / "mine" / case.name)
             theirs, their_weight = _mesh_files(load_case_config(ext_dir),
                                                scratch / "theirs" / case.name)

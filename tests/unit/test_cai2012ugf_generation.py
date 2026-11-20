@@ -112,6 +112,14 @@ def test_mesh_dictionaries_byte_identical_and_weight_equal(generated):
     assert validate(generated) == []          # includes both comparisons, all seven Kn
 
 
+def test_hand_edited_case_yaml_is_named(generated):          # Review I3
+    case_yaml = generated / "Cases" / "Kn1_np1x" / "case.yaml"
+    data = yaml.safe_load(case_yaml.read_text(encoding="utf-8"))
+    data["dsmc"]["sampling_domain_transits"] = 2.0
+    case_yaml.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    assert any("Kn1_np1x" in p and "dsmc.sampling_domain_transits" in p for p in validate(generated))
+
+
 def test_second_generation_keeps_everything(generated):
     states = generate(generated)
     assert {s.status for s in states} == {"identical"}
