@@ -1,0 +1,219 @@
+#!/bin/bash
+#
+# Run this case on uniGasFoam, in two legs, resuming safely.
+#
+#   ./Allrun                        parallel, ranks from system/decomposeParDict
+#   ./Allrun --serial               one process (local smoke runs)
+#   ./Allrun -np N                  N ranks, overriding decomposeParDict
+#   ./Allrun --stop-at-transits X   cap every leg's endTime at X domain transits
+#                                   (the pilot and the smoke test; never production)
+#   ./Allrun --skip-build-check     do not compare the built uniGasFoam with the
+#                                   case's meta.unigas_commit (local runs only)
+#   ./Allrun --help
+#
+# Legs (spec §6). system/controlDict.startup runs to average_start_s writing once
+# per domain transit; system/controlDict.sampling runs on to end_time_s at the
+# health cadence. Before each leg the plan below decides which comes next, and
+# the leg's controlDict is copied over system/controlDict.
+#
+# Restarts. `python -m plumetools.cai2012ugf.hpc resume-plan` combines the
+# frozen checkpoint plan (complete on every rank) with uniGasFoam's own hazard:
+# it keeps only the newest particle cloud, and resuming from a time where a rank
+# that held gas has no lagrangian/uniGas silently re-fills that subdomain. Such a
+# case is refused with the manual-restart instructions, and nothing is changed.
+#
+# There is no initialiser step: uniGasFoam fills the mesh from
+# system/uniGasInitialisationDict when it starts without a cloud.
+#
+# After the last leg the processors are reconstructed and the fields converted
+# to the dsmcFoam names the analysis reads (plumetools.cai2012ugf.convert).
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+CASE_NAME=${PWD##*/}
+
+NP=""
+NP_EXPLICIT=0
+STOP_TRANSITS=""
+BUILD_CHECK=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s|--serial)          NP=1; NP_EXPLICIT=1 ;;
+        -np)                  shift; NP=${1:?"-np needs a subdomain count"}; NP_EXPLICIT=1 ;;
+        --stop-at-transits)   shift; STOP_TRANSITS=${1:?"--stop-at-transits needs a number"} ;;
+        --skip-build-check)   BUILD_CHECK=0 ;;
+        -h|--help)            awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)                    echo "Allrun: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allrun: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Run a command into its own log and surface the FOAM error on failure.
+run() {
+    local log="log.$1"; shift
+    echo "==> $* (-> $log)"
+    if ! "$@" > "$log" 2>&1; then
+        echo "" >&2
+        if grep -q "FOAM FATAL" "$log"; then
+            sed "s/^\[[0-9]*\] //" "$log" \
+                | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" \
+                | head -20 >&2
+        else
+            tail -25 "$log" >&2
+        fi
+        die "'$1' failed; full output in $PWD/$log"
+    fi
+}
+
+# Run the solver, APPENDING to log.uniGasFoam (one log across legs and
+# resubmissions, which the pilot report reads), and surface only this run's error.
+solve() {
+    local log=log.uniGasFoam start
+    start=$(( $( [ -f "$log" ] && wc -l < "$log" || echo 0 ) + 1 ))
+    echo "==> $* (>> $log, leg $LEG)"
+    printf '\n// ===== Allrun: leg %s, %s =====\n' "$LEG" "$(date -u +%FT%TZ)" >> "$log"
+    if ! "$@" >> "$log" 2>&1; then
+        echo "" >&2
+        tail -n +"$start" "$log" | sed "s/^\[[0-9]*\] //" \
+            | awk "/FOAM FATAL/{f=1} f{print} f&&/^\s*\$/{n++; if(n>=3) exit}" | head -20 >&2
+        tail -n +"$start" "$log" | grep -q "FOAM FATAL" || tail -25 "$log" >&2
+        die "uniGasFoam failed; full output in $PWD/$log"
+    fi
+}
+
+foam_entry() {
+    local key=$1 file=$2 value
+    value=$(sed -n "s/^[[:space:]]*$key[[:space:]]\+\([^;]*\);.*/\1/p" "$file" 2>/dev/null | head -1)
+    echo "${value//[[:space:]]/}"
+}
+
+ge() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 >= b+0)}'; }
+
+# --------------------------------------------------------------------------- #
+# environment
+# --------------------------------------------------------------------------- #
+
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+$PYTHON -c "import plumetools.cai2012ugf" 2>/dev/null \
+    || die "plumetools is not importable. From the repository root:
+       pip install -e \".[test]\""
+have uniGasFoam || die "'uniGasFoam' is not on PATH. Source OpenFOAM v2512 and build the
+       fork (cases/cai2012-unigas/runBuild.sh on the cluster; ./Allwmake locally)."
+for f in system/controlDict.startup system/controlDict.sampling constant/uniGasProperties; do
+    [ -f "$f" ] || die "no $f: run ./Allmesh first"
+done
+
+if [ "$BUILD_CHECK" -eq 1 ]; then
+    $PYTHON -m plumetools.cai2012ugf.hpc check-build . \
+        || die "the built uniGasFoam is not the one this case expects (above)."
+else
+    echo "    WARNING: --skip-build-check: the uniGasFoam commit is not verified"
+fi
+
+if [ -z "$NP" ]; then
+    NP=$(foam_entry numberOfSubdomains system/decomposeParDict)
+    NP=${NP:-1}
+fi
+case "$NP" in
+    ''|*[!0-9]*) die "subdomain count must be a positive integer, got '$NP'" ;;
+esac
+
+KEEP=""
+$PYTHON -c "from plumetools.cai2012ugf.settings import load_settings
+import sys; sys.exit(0 if load_settings('.').writes.keep_lagrangian else 1)" && KEEP="-keep-lagrangian"
+
+STOP_AT=""
+if [ -n "$STOP_TRANSITS" ]; then
+    STOP_AT=$($PYTHON -c "from plumetools.cai2012ext import direct_case
+print('%.12g' % (direct_case.derive('.').run.domain_transit_s * float('$STOP_TRANSITS')))") \
+        || die "could not compute $STOP_TRANSITS domain transits"
+    echo "    --stop-at-transits $STOP_TRANSITS: every leg stops by t = $STOP_AT s (NOT a production run)"
+fi
+
+DECOMP_ARGS=""
+if [ "$NP" -gt 1 ] && [ "$NP_EXPLICIT" -eq 1 ] \
+   && [ "$NP" != "$(foam_entry numberOfSubdomains system/decomposeParDict)" ]; then
+    OVERRIDE=system/decomposeParDict.Allrun
+    cp system/decomposeParDict "$OVERRIDE"
+    have foamDictionary || die "foamDictionary is not on PATH, so -np cannot override decomposeParDict"
+    foamDictionary "$OVERRIDE" -entry numberOfSubdomains -set "$NP" >/dev/null 2>&1 \
+        || die "could not set numberOfSubdomains in $OVERRIDE"
+    SPLIT=$($PYTHON -c "from plumetools.cai2012.dictionaries import simple_split
+print('(%d %d %d)' % simple_split($NP))") || die "could not factor $NP subdomains"
+    foamDictionary "$OVERRIDE" -entry coeffs/n -set "$SPLIT" >/dev/null 2>&1 \
+        || die "could not set coeffs/n in $OVERRIDE"
+    DECOMP_ARGS="-decomposeParDict $OVERRIDE"
+fi
+
+echo "### $CASE_NAME: uniGasFoam on $NP rank(s)"
+$PYTHON -m plumetools.cai2012ugf.hpc provenance . >/dev/null \
+    || die "could not write results/provenance-unigas.yaml"
+
+# --------------------------------------------------------------------------- #
+# the legs
+# --------------------------------------------------------------------------- #
+
+PREVIOUS=""
+while true; do
+    RESUME="" PROC_TIME="" PROC_COUNT=0 DECOMPOSE=all RECONSTRUCT_FIRST=0 LEG="" REFUSAL=0
+    PLAN=$($PYTHON -m plumetools.cai2012ugf.hpc resume-plan . --np "$NP") \
+        || die "this case cannot be continued as it is (above)."
+    eval "$PLAN"    # RESUME CASE_TIME PROC_TIME PROC_COUNT DECOMPOSE RECONSTRUCT_FIRST LEG REFUSAL ...
+    if [ "$LEG" = done ]; then
+        echo "    t = ${RESUME}: the sampling leg has reached endTime"
+        break
+    fi
+    if [ -n "$STOP_AT" ] && [ -n "$RESUME" ] && ge "$RESUME" "$STOP_AT"; then
+        echo "    t = $RESUME has reached the --stop-at-transits cap"
+        break
+    fi
+    if [ -n "$PREVIOUS" ] && [ "$RESUME" = "$PREVIOUS" ]; then
+        die "the $LEG leg made no progress from t = $RESUME (see log.uniGasFoam)"
+    fi
+    PREVIOUS=$RESUME
+    echo "    leg $LEG from t = ${RESUME:-0}"
+
+    cp "system/controlDict.$LEG" system/controlDict
+    if [ -n "$STOP_AT" ]; then
+        END=$(foam_entry endTime system/controlDict)
+        if ge "$END" "$STOP_AT"; then
+            have foamDictionary || die "foamDictionary is not on PATH; --stop-at-transits needs it"
+            foamDictionary system/controlDict -entry endTime -set "$STOP_AT" >/dev/null 2>&1 \
+                || die "could not cap endTime in system/controlDict"
+        fi
+    fi
+
+    if [ "$NP" -gt 1 ]; then
+        have decomposePar || die "'decomposePar' is not on PATH"
+        have mpirun || die "'mpirun' is not on PATH (use --serial for one process)"
+        if [ "$DECOMPOSE" = none ]; then
+            echo "    processor0..$((NP - 1)) already hold t = $PROC_TIME"
+        elif [ "$DECOMPOSE" = latest ]; then
+            if [ "$RECONSTRUCT_FIRST" -eq 1 ]; then
+                run reconstructPar.resume reconstructPar -newTimes
+            fi
+            run decomposePar decomposePar -force -latestTime $DECOMP_ARGS
+        else
+            run decomposePar decomposePar -force $DECOMP_ARGS
+        fi
+        solve mpirun -np "$NP" uniGasFoam -parallel $KEEP $DECOMP_ARGS
+    else
+        solve uniGasFoam $KEEP
+    fi
+done
+
+if [ "$NP" -gt 1 ]; then
+    have reconstructPar || die "'reconstructPar' is not on PATH"
+    run reconstructPar reconstructPar -newTimes
+fi
+echo "==> converting fields to the dsmcFoam names"
+$PYTHON -m plumetools.cai2012ugf.convert . || die "field conversion failed (above)"
+
+echo ""
+echo "### $CASE_NAME finished"
+echo "    log:     log.uniGasFoam"
+echo "    next:    ./Allpostugf"
