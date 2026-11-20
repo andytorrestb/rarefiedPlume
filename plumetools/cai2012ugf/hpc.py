@@ -14,14 +14,24 @@ cloud: after each write it deletes the previous write's ``lagrangian/uniGas``
 ranks that finished the new write -- and already deleted their older cloud --
 beside ranks that did not. The planner refuses the partial time and advises
 moving it aside; resuming from the older time would then find no cloud on
-the first kind of rank, and uniGasFoam, finding no ``lagrangian/uniGas``,
-silently re-fills that subdomain from ``uniGasInitialisationDict``.
+the first kind of rank, whose subdomain silently restarts EMPTY.
 
 A rank that holds no particle legitimately writes no cloud (OpenFOAM's
 ``Cloud::writeObject`` writes only when ``size() > 0``), and with the
 near-vacuum start many ranks hold none for a while. So the test is the rank's
 own density: a rank whose ``rhoN_<field>`` is positive at the resume time but
 which has no cloud there has lost it, and the case needs a manual restart.
+
+The restart decision itself
+---------------------------
+uniGasFoam chooses between restarting and initialising from ONE directory:
+``processor0/<t>/lagrangian`` in parallel, ``<t>/lagrangian`` serial
+(``uniGasCloud.C``). If rank 0 holds no particles, it wrote none, and EVERY
+rank takes the initialising branch: collision models reset to USP, sub-cells
+and ``sigmaTcRMax`` reset, the step reset to ``controlDict``'s, the mesh
+re-filled on top of the loaded particles, which never get their fields read.
+:func:`mark_restart` creates that directory (empty) before each resumed run,
+so every rank takes the restart branch; an empty rank simply has no particles.
 """
 
 from __future__ import annotations
@@ -132,6 +142,23 @@ def lost_clouds(case_dir: Path, time: str, *, decomposed: bool) -> list[str]:
         if t.is_dir() and not (t / "lagrangian" / CLOUD).is_dir() and _held_gas(t, field):
             lost.append(base.name if base != case_dir else "the case directory")
     return lost
+
+
+def mark_restart(case_dir: Path, time: str, *, decomposed: bool) -> Path | None:
+    """Make uniGasFoam restart, not re-initialise, from ``time``.
+
+    Creates ``processor0/<time>/lagrangian`` (decomposed) or
+    ``<time>/lagrangian`` (serial) when ``<time>`` exists there without it --
+    the one directory uniGasFoam tests to decide. Empty: no particle is
+    invented. Returns the directory created, or ``None`` when nothing was needed.
+    """
+    base = Path(case_dir) / "processor0" if decomposed else Path(case_dir)
+    time_dir = base / time
+    target = time_dir / "lagrangian"
+    if not time_dir.is_dir() or target.is_dir():
+        return None
+    target.mkdir()
+    return target
 
 
 def cloud_complete(case_dir: Path, time: str, *, decomposed: bool = True) -> bool:
@@ -329,6 +356,10 @@ def main(argv=None) -> int:
     plan.add_argument("--np", type=int, required=True)
     for name in ("finished", "check-build", "provenance"):
         steps.add_parser(name).add_argument("case_dir", type=Path)
+    mark = steps.add_parser("mark-restart")
+    mark.add_argument("case_dir", type=Path)
+    mark.add_argument("--time", required=True)
+    mark.add_argument("--np", type=int, required=True)
     rec = steps.add_parser("record")
     rec.add_argument("case_dir", type=Path)
     rec.add_argument("seconds", type=float)
@@ -348,6 +379,11 @@ def main(argv=None) -> int:
         if problem:
             print(f"check-build: {problem}", file=sys.stderr)
             return 1
+        return 0
+    if args.step == "mark-restart":
+        made = mark_restart(args.case_dir, args.time, decomposed=args.np > 1)
+        if made is not None:
+            print(f"    created {made} so uniGasFoam restarts on every rank")
         return 0
     if args.step == "provenance":
         print(write_provenance(args.case_dir))

@@ -21,6 +21,7 @@ from plumetools.cai2012ugf import dictionaries
 from plumetools.cai2012ugf.hpc import (
     check_build,
     leg_for,
+    mark_restart,
     record,
     resume_plan,
     write_provenance,
@@ -136,6 +137,28 @@ def test_a_rank_that_never_held_particles_is_not_refused(tmp_path):
     case = make_ranks(tmp_path, n=2, times={"0.06": {0: "cloud", 1: "none"}})
     plan = resume_plan(case, 2)
     assert plan.refusal is None and plan.base.resume == "0.06"
+
+
+def test_mark_restart_when_processor0_holds_no_particles(tmp_path):   # Review C1
+    # uniGasFoam decides restart-vs-initialise from processor0/<t>/lagrangian
+    # ALONE: an empty rank 0 (no cloud written) would send every rank down the
+    # fresh-start branch -- re-fill, reset cell types, lose the loaded particles.
+    case = make_ranks(tmp_path, n=2, times={"0.06": {0: "none", 1: "cloud"}})
+    made = mark_restart(case, "0.06", decomposed=True)
+    assert made == case / "processor0" / "0.06" / "lagrangian" and made.is_dir()
+    assert not (made / "uniGas").exists()                       # no particles invented
+    assert (case / "processor1" / "0.06" / "lagrangian" / "uniGas" / "positions").is_file()
+
+
+def test_mark_restart_is_a_noop_when_processor0_has_a_cloud(tmp_path):
+    case = make_ranks(tmp_path, n=2, times={"0.06": {0: "cloud", 1: "none"}})
+    assert mark_restart(case, "0.06", decomposed=True) is None
+
+
+def test_mark_restart_serial(tmp_path):
+    case = make_case(tmp_path)
+    write_time(case, "0.06", "none")
+    assert mark_restart(case, "0.06", decomposed=False) == case / "0.06" / "lagrangian"
 
 
 def test_fresh_case_starts_in_startup(tmp_path):

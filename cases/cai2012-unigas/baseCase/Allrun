@@ -230,6 +230,15 @@ print('%.12g' % aligned_interval($STOP_AT - ${RESUME:-0}, $(foam_entry writeInte
                 mkdir -p "processor$rank/0"
             done
         fi
+    fi
+    # uniGasFoam restarts only if processor0/<t>/lagrangian (serial: <t>/lagrangian)
+    # exists; a rank 0 with no particles writes none, and every rank would then
+    # RE-INITIALISE mid-run. Create it (empty) before every resumed run.
+    if [ -n "$RESUME" ]; then
+        $PYTHON -m plumetools.cai2012ugf.hpc mark-restart . --time "$RESUME" --np "$NP" \
+            || die "could not mark t = $RESUME for a restart"
+    fi
+    if [ "$NP" -gt 1 ]; then
         solve mpirun -np "$NP" uniGasFoam -parallel $KEEP $DECOMP_ARGS
     else
         solve uniGasFoam $KEEP
