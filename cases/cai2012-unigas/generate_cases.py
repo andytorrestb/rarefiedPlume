@@ -48,11 +48,22 @@ def parse_args(argv):
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--regenerate", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--pilot", metavar="KN_NAME",
+                        help="stage only Pilot/<case> for this Kn (e.g. Kn0p001), "
+                             "outside the manifest (spec §8)")
     return parser.parse_args(argv[1:])
 
 
 def main(argv) -> int:
     args = parse_args(argv)
+    if args.pilot:
+        try:
+            path = generation.stage_pilot(HERE, args.pilot)
+        except (generation.GenerationError, StudyError, CaiConfigError, UniGasConfigError) as exc:
+            print(f"generate_cases: {exc}", file=sys.stderr)
+            return 1
+        print(path)
+        return 0
     try:
         states = generation.generate(HERE, dry_run=args.dry_run, refresh=args.refresh,
                                      regenerate=args.regenerate, overwrite=args.overwrite)
