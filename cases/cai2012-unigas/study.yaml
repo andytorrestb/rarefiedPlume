@@ -180,7 +180,7 @@ meta:
   collision_selection: NTC
   solver: uniGasFoam hybrid USP-DSMC
   unigas_branch: dsmc-time-step-limit
-  unigas_commit: pending-task-1   # the fork commit every case is built from (runBuild.sh)
+  unigas_commit: 3cd0e922fe3441c70c5c667adaf358d8e3944577   # the fork commit every case is built from (runBuild.sh)
   numerical_settings_from: >-
     cases/cai2012-health, highest-resolution combination ppc040/s4p5
     (40 parcels per exit cell, 4.5 transits of averaging, 3.536e-4 s writes,
