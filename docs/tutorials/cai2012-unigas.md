@@ -38,6 +38,17 @@ the published behaviour, within run-to-run noise: the random generator is seeded
 from the clock. With the limit on, Δt/τ in DSMC cells stayed at or below 0.11.
 Without it, Δt/τ reached 4.
 
+The branch also fixes a crash, with no key. At every adaptation (each
+`adaptationInterval` steps) uniGasFoam fills empty cells with the smallest
+occupied density and temperature. It took that minimum per processor, so a
+processor holding no particle filled its cells with VGREAT (10³⁰⁰), and the
+collision rate overflowed: a floating-point exception at step 20. Every case
+here starts from near vacuum, so every rank away from the nozzle was empty at the
+first adaptation. The minimum is now taken over all processors, as a serial
+run already took it, and serial runs are unchanged.
+`tests/openfoam/test_cai2012ugf_empty_rank.py` reproduces the crash on two
+ranks.
+
 Build it locally, with OpenFOAM v2512 sourced:
 
 ```bash
@@ -141,7 +152,12 @@ undefined, not judged.
 
 ```bash
 python -m pytest tests/openfoam/test_cai2012ugf_smoke.py -m needs_openfoam
+python -m pytest tests/openfoam/test_cai2012ugf_empty_rank.py -m needs_openfoam
 ```
 
-This runs a ~38k-cell Kn = 0.01 case on two ranks for 0.3 transits, through
-every step above. It checks the plumbing, not the physics.
+The first runs a ~38k-cell Kn = 0.01 case on two ranks for 0.3 transits, through
+every step above. It checks the plumbing, not the physics. The second splits
+the same mesh by hand so that one rank holds no particle at the first
+adaptation, and checks that uniGasFoam runs on past it (the fork fix above).
+Both need the project's Python first on `PATH` (`Allmesh` and `Allrun` call
+`python`).
