@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+# Post-process this case: the four Cai validation outputs.
+#
+#   ./Allpost                post-process the latest time
+#   ./Allpost --time 0.05    a specific time directory
+#   ./Allpost --help
+#
+# Steps:
+#
+#   1. postProcess -func writeCellCentres   -> C, Cx, Cy, Cz
+#   2. postProcess -func writeCellVolumes   -> V
+#   3. postProcess.py                       -> results/
+#
+# Steps 1 and 2 need OpenFOAM; step 3 does not, so a case whose cell centres are
+# already written can be re-post-processed anywhere.
+#
+# The mesh is GRADED, so cell volumes are not optional: an unweighted mean over a
+# centreline tube would let one huge outer cell outvote a hundred core cells.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1   # dirname, not ${0%/*}: works for "./x" and for "bash x"
+
+TIME_ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --time)     shift; TIME_ARGS=("--time" "${1:?"--time needs a value"}") ;;
+        -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+        *)          echo "Allpost: unknown option '$1' (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "" >&2; echo "Allpost: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ -f case.yaml ] || die "no case.yaml here -- is this a cai2012 case?"
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+
+CASE_NAME=${PWD##*/}
+echo "### $CASE_NAME"
+
+LATEST=$(ls -d [0-9]*[.]* [0-9]* 2>/dev/null | grep -v '^0$' | sort -g | tail -1)
+[ -n "$LATEST" ] || die "no time directory past 0; the solver wrote nothing.
+       Run ./Allrun first."
+
+if [ ! -f "$LATEST/C" ] || [ ! -f "$LATEST/V" ]; then
+    have postProcess || die "'postProcess' is not on PATH and $LATEST has no
+       cell centres. Source your OpenFOAM environment, or copy C/Cx/Cy/Cz and V
+       in from a machine that has it."
+    echo "==> postProcess -func writeCellCentres -latestTime"
+    postProcess -func writeCellCentres -latestTime > log.writeCellCentres 2>&1 \
+        || die "writeCellCentres failed; see log.writeCellCentres"
+    echo "==> postProcess -func writeCellVolumes -latestTime"
+    postProcess -func writeCellVolumes -latestTime > log.writeCellVolumes 2>&1 \
+        || die "writeCellVolumes failed; see log.writeCellVolumes"
+fi
+
+echo ""
+$PYTHON postProcess.py "${TIME_ARGS[@]+"${TIME_ARGS[@]}"}" \
+    || die "postProcess.py failed (see above)"
+
+echo ""
+echo "### done. results/ holds centerline.csv, density_plane.csv, metrics.yaml"

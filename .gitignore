@@ -207,3 +207,15 @@ applications/dsmcBoundaryModels/plumeFieldInflow/Make/linux64*/
 
 cases/cai2012-radial-resolution/Cases-local-more-sampling/
 cases/cai2012-radial-resolution/analysis-local-completed-2026-11-08/
+# cai2012-unigas: the kn-extension's cases on uniGasFoam. Generated trees,
+# manifests and staging are reproducible with ./generate_cases.py; so are any
+# dictionaries ./Allmesh writes into baseCase.
+cases/cai2012-unigas/Cases/
+cases/cai2012-unigas/Pilot/
+cases/cai2012-unigas/manifest-unigas.yaml
+cases/cai2012-unigas/manifest-unigas.yaml.tmp
+cases/cai2012-unigas/.staging-*/
+cases/cai2012-unigas/baseCase/system/
+cases/cai2012-unigas/baseCase/constant/
+cases/cai2012-unigas/baseCase/results/
+cases/cai2012-unigas/results/*.lock

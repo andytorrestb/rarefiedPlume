@@ -71,3 +71,7 @@ applications/**/Make/options  text eol=lf
 *.PNG       binary
 *.vtk       binary
 *.asv       binary
+
+# cai2012-unigas scripts without an extension, same reason.
+Allpostugf          text eol=lf
+AllreconstructCases text eol=lf

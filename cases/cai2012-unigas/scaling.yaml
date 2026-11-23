@@ -1,0 +1,49 @@
+# cai2012-unigas scaling configuration: cases/cai2012-kn-extension/scaling.yaml
+# with two keys changed -- no registration file (this family registers its own
+# manifest only) and its own output directory. Fits keep the uniGasFoam
+# stratum separate from dsmcFoam (plumetools/cai2012ugf/scaling.py).
+# Empirical coordinate composition. No density amplitude or Jacobian multiplier.
+schema_version: 1
+registration: null
+output: results/scaling
+resources:
+  # Upper bound on Cai worker processes; keep equal to ppn in runScaling.sh.
+  cores: 64
+  max_input_bytes: 8589934592
+  max_total_input_bytes: 34359738368
+  chunk_size: 64
+  # A full assessment must be requested explicitly with fit --full.
+  smoke_max_points_per_case: 48
+  smoke_max_nfev: 8
+fit:
+  tracks: [F, C]
+  subsets: [exploratory, suitable]
+  families: [baseline, axial, axial_transverse, radial_angular]
+  degree: 1
+  angular_order: 2
+  feature: inverse_kn
+  log_bound: 2.0
+  coefficient_bound: 1.0
+  quadrature_order: 24
+  regularization: 0.0001
+  floor: 1.0e-10
+  angle_edges_deg: [0, 15, 30, 45, 60, 75, 90]
+  radial_bins: 80
+  max_nfev: 100
+  holdout_kn: []
+  block_resamples: 4
+evaluation:
+  n_radial: 48
+  n_azimuthal: 96
+  temperature_transfer: true
+  angular_radii_D: [10.0]
+  # All are deterministic numerical sensitivity experiments, not uncertainty CIs.
+  sensitivity:
+    floors: [1.0e-12, 1.0e-8]
+    angle_bin_factors: [0.5, 2.0]
+    radial_bin_factors: [0.5, 2.0]
+    quadrature_orders: [12, 48]
+    log_bounds: [1.0, 3.0]
+    regularization: [0.0, 0.001]
+    degrees: [2]
+    angular_orders: [0, 1]

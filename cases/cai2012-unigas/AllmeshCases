@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# Run ./Allmesh in every case of manifest-unigas.yaml.
+#
+#   ./AllmeshCases                 dictionaries and mesh, every case
+#   ./AllmeshCases --dict-only     dictionaries only (no OpenFOAM needed)
+#   ./AllmeshCases --help
+#
+# On the cluster, runMeshAll.sh generates, validates and meshes in one job.
+
+set -uo pipefail
+SELF=${0##*/}
+cd "$(dirname "$0")" || exit 1
+case "${1:-}" in
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$SELF"; exit 0 ;;
+    ""|--dict-only) ;;
+    *) echo "AllmeshCases: unknown option '$1' (try --help)" >&2; exit 2 ;;
+esac
+[ -f manifest-unigas.yaml ] || { echo "AllmeshCases: no manifest-unigas.yaml" >&2; exit 1; }
+PYTHON=$(command -v python || command -v python3)
+mapfile -t CASES < <($PYTHON -m plumetools.cai2012ugf.generation cases .)
+for case_path in "${CASES[@]}"; do
+    echo "### $case_path"
+    bash "$case_path/Allmesh" "$@" || exit 1
+done

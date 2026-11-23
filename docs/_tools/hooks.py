@@ -44,6 +44,7 @@ FAMILIES = {
     "legacy": "Legacy source flow (3d-inflow)",
     "cai2012": "cai2012",
     "cai2012ext": "cai2012ext (Kn extension)",
+    "cai2012ugf": "cai2012ugf (Kn sweep on uniGasFoam)",
     "markelov1999": "markelov1999",
     "nozzleplume": "nozzleplume",
     "hybridplume": "hybridplume",
