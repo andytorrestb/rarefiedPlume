@@ -219,11 +219,12 @@ def plot_stationarity(results_dir: Path, frames: list, assessment: dict,
                       banner: str = "") -> list[Path]:
     """Regional n/n0 per frame: running mean and instantaneous, normalised."""
     plt = _pyplot()
-    if plt is None or not frames:
+    # No regions judged (``insufficient-frames``): nothing to draw.
+    names = list(assessment.get("regions") or {})
+    if plt is None or not frames or not names:
         return []
     times = np.array([float(f["time"]) for f in frames])
     elapsed = (times - float(start_s)) / float(transit_s)
-    names = list(assessment.get("regions") or {})
     figure, axes = plt.subplots(len(names), 1, figsize=(7.0, 1.7 * len(names)),
                                 sharex=True, squeeze=False)
     for axis, name in zip(axes[:, 0], names):
