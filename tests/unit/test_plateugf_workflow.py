@@ -163,3 +163,60 @@ def test_leg_after_average_start_is_sampling(case_dir):
     plan = workflow.resume_plan(case_dir, 1)
     assert plan.base.resume == "0.07"
     assert plan.leg == "sampling"
+
+
+POINTS = """FoamFile
+{
+    version 2.0; format ascii; class vectorField; object points;
+}
+6
+(
+(0 0 0)
+(1 3e-05 0)
+(1 -2e-05 1)
+(0 0 1)
+(2 5e-05 0)
+(2 4e-05 1)
+)
+"""
+
+FACES = """FoamFile
+{
+    version 2.0; format ascii; class faceList; object faces;
+}
+2
+(
+4(1 4 5 2)
+4(0 1 2 3)
+)
+"""
+
+SYM_BOUNDARY = """FoamFile
+{
+    version 2.0; format ascii; class polyBoundaryMesh; object boundary;
+}
+1
+(
+    symmetry
+    {
+        type            symmetry;
+        nFaces          1;
+        startFace       1;
+    }
+)
+"""
+
+
+def test_flatten_symmetry_puts_symmetry_points_on_the_plane(tmp_path):
+    from plumetools.mesh.polymesh import read_points_array
+    mesh = tmp_path / "constant" / "polyMesh"
+    mesh.mkdir(parents=True)
+    (mesh / "points").write_text(POINTS, encoding="utf-8")
+    (mesh / "faces").write_text(FACES, encoding="utf-8")
+    (mesh / "boundary").write_text(SYM_BOUNDARY, encoding="utf-8")
+    moved = workflow.flatten_symmetry(tmp_path)
+    points = read_points_array(tmp_path)
+    assert moved == 2
+    assert points[[0, 1, 2, 3], 1].tolist() == [0.0, 0.0, 0.0, 0.0]
+    assert points[4, 1] == 5e-05 and points[5, 1] == 4e-05   # not on the symmetry face
+    assert points[:, 0].tolist() == [0, 1, 1, 0, 2, 2]

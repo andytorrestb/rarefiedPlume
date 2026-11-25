@@ -195,6 +195,51 @@ def smoke_check(case_dir: Path, time: str | None = None) -> list[tuple[str, bool
 
 
 # --------------------------------------------------------------------------- #
+# the symmetry planes, after snappyHexMesh
+# --------------------------------------------------------------------------- #
+
+_COUNT = re.compile(r"^\s*(\d+)\s*\n\s*\(", re.MULTILINE)
+
+
+def flatten_symmetry(case_dir: Path, tolerance_m: float = 1.0e-3) -> int:
+    """Put every point of the symmetry patch within ``tolerance_m`` of y = 0 or
+    z = 0 exactly on that plane; return how many points moved.
+
+    snappyHexMesh nudges boundary points where the plate's edge meets a
+    symmetry plane (54 um on the z/D = 100 prototype), and nozzleplume's mesh
+    verification holds the planes to 1e-3 of the smallest cell. The moves are
+    tens of micrometres in cells of 10 mm or more.
+    """
+    from plumetools.mesh.boundary import read_boundary
+    from plumetools.mesh.polymesh import read_faces_flat, read_points_array
+    case_dir = Path(case_dir)
+    path = case_dir / "constant" / "polyMesh" / "points"
+    points = read_points_array(case_dir)
+    offsets, labels = read_faces_flat(case_dir)
+    on_plane = np.zeros(len(points), dtype=bool)
+    for info in read_boundary(case_dir).values():
+        if info.type not in ("symmetry", "symmetryPlane"):
+            continue
+        start, stop = offsets[info.start_face], offsets[info.start_face + info.n_faces]
+        on_plane[np.asarray(labels[start:stop], dtype=int)] = True
+    before = points.copy()
+    for axis in (1, 2):
+        near = on_plane & (np.abs(points[:, axis]) < tolerance_m)
+        points[near, axis] = 0.0
+    moved = int(np.count_nonzero(np.any(points != before, axis=1)))
+    if moved:
+        text = path.read_text(encoding="utf-8")
+        match = _COUNT.search(text, text.index("}") + 1)
+        if match is None or int(match.group(1)) != len(points):
+            raise FoamDataError(f"{path}: not an ASCII point list this can rewrite")
+        body = "\n".join(f"({x:.17g} {y:.17g} {z:.17g})" for x, y, z in points)
+        path.write_text(text[:match.start()] + f"{len(points)}\n(\n{body}\n)\n\n"
+                        "// ************************************************************************* //\n",
+                        encoding="utf-8", newline="\n")
+    return moved
+
+
+# --------------------------------------------------------------------------- #
 # describe / setup
 # --------------------------------------------------------------------------- #
 
@@ -247,7 +292,7 @@ def setup(case_dir: Path) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m plumetools.plateugf")
     steps = parser.add_subparsers(dest="step", required=True)
-    for name in ("describe", "setup", "finished", "check-build"):
+    for name in ("describe", "setup", "finished", "check-build", "flatten-symmetry"):
         steps.add_parser(name).add_argument("case_dir", type=Path)
     plan = steps.add_parser("resume-plan")
     plan.add_argument("case_dir", type=Path)
@@ -268,6 +313,9 @@ def main(argv=None) -> int:
         return describe(args.case_dir)
     if args.step == "setup":
         return setup(args.case_dir)
+    if args.step == "flatten-symmetry":
+        print(f"    flatten-symmetry: {flatten_symmetry(args.case_dir)} point(s) put on y = 0 / z = 0")
+        return 0
     if args.step == "finished":
         return 0 if finished(args.case_dir) else 1
     if args.step == "check-build":

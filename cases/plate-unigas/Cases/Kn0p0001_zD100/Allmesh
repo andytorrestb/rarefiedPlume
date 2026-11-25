@@ -178,6 +178,9 @@ run createPatch createPatch -overwrite
 # that addresses faces by label is now wrong: the faceSet it was built from, and
 # snappyHexMesh's per-face surfaceIndex. Neither is needed again.
 rm -rf constant/polyMesh/sets constant/polyMesh/surfaceIndex
+# snappyHexMesh nudges points where the plate's edge meets a symmetry plane
+# (tens of micrometres); put them back on y = 0 / z = 0 before verifying.
+$PYTHON -m plumetools.plateugf flatten-symmetry . \n    || die "could not flatten the symmetry planes (above)"
 
 run checkMesh checkMesh
 
