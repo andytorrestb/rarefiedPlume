@@ -123,7 +123,12 @@ def compare(case_dir: Path, time: str | None = None, loads: PlateLoads | None = 
         wall_temperature_K=float(cfg.plate.temperature_K))
     p_sim, tau_sim, q_sim = loads.pressure[up], loads.shear[up], loads.heat_flux[up]
     mult = loads.multiplicity
-    centre = int(np.argmin(np.hypot(centres[:, 1], centres[:, 2]))) if centres.size else 0
+    # The centre as an area-weighted mean over a small disk (5% of the stand-off,
+    # never fewer than the 4 nearest faces): one face is too few hits to read.
+    r = np.hypot(centres[:, 1], centres[:, 2])
+    radius = max(0.05 * float(cfg.plate.standoff_m), float(np.sort(r)[min(3, r.size - 1)]))
+    disk = r <= radius
+    w = areas[disk] / areas[disk].sum()
 
     def ratio(a, b):
         return float(a / b) if b else None
@@ -140,13 +145,18 @@ def compare(case_dir: Path, time: str | None = None, loads: PlateLoads | None = 
             "heat_load_sim_w": heat_sim, "heat_load_cai_w": heat_cai,
             "heat_load_ratio": ratio(heat_sim, heat_cai),
         },
-        "centre_face": {
-            "y_m": float(centres[centre, 1]), "z_m": float(centres[centre, 2]),
-            "p_sim_pa": float(p_sim[centre]), "p_cai_pa": float(cai.pressure[centre]),
-            "p_ratio": ratio(p_sim[centre], cai.pressure[centre]),
+        "centre_disk": {
+            "radius_m": radius, "faces": int(disk.sum()),
+            "p_sim_pa": float((p_sim[disk] * w).sum()),
+            "p_cai_pa": float((cai.pressure[disk] * w).sum()),
+            "p_ratio": ratio((p_sim[disk] * w).sum(), (cai.pressure[disk] * w).sum()),
         },
-        "max_shear": {"sim_pa": float(tau_sim.max()), "cai_pa": float(cai.shear_magnitude.max()),
-                      "ratio": ratio(tau_sim.max(), cai.shear_magnitude.max())},
+        "shear_force": {
+            "sim_n": float((tau_sim * areas).sum()) * mult,
+            "cai_n": float((cai.shear_magnitude * areas).sum()) * mult,
+            "ratio": ratio((tau_sim * areas).sum(), (cai.shear_magnitude * areas).sum()),
+            "note": "area integral of |tau| over the upstream face (the vector sum cancels by symmetry)",
+        },
     }
     table = {
         "y_m": centres[:, 1], "z_m": centres[:, 2], "area_m2": areas,
@@ -305,16 +315,19 @@ def run_post(case_dir: Path, time: str | None = None, allow_startup: bool = Fals
 
 
 def family_table(root: Path) -> list[str]:
-    """One line per case under ``root`` that has ``results/cai_comparison.yaml``."""
-    lines = [f"{'case':<18}{'t [s]':>12}{'p_c sim':>12}{'p_c Cai':>12}{'ratio':>8}"
-             f"{'F sim [N]':>12}{'F Cai [N]':>12}{'ratio':>8}"]
+    """One line per case under ``root`` that has ``results/cai_comparison.yaml``:
+    simulation over Cai for the centre-disk pressure, the normal force, the
+    shear force and the heat load."""
+    lines = [f"{'case':<18}{'leg':>9}{'p centre':>10}{'force':>8}{'shear':>8}{'heat':>8}"
+             f"{'F sim [N]':>12}"]
     for path in sorted(Path(root).glob("*/results/cai_comparison.yaml")):
         s = yaml.safe_load(path.read_text(encoding="utf-8"))
-        c, w = s["centre_face"], s["whole_plate"]
-        lines.append(f"{path.parents[1].name:<18}{float(s['time']):>12.5g}"
-                     f"{c['p_sim_pa']:>12.4g}{c['p_cai_pa']:>12.4g}{(c['p_ratio'] or 0):>8.3f}"
-                     f"{w['normal_force_sim_n']:>12.4g}{w['normal_force_cai_n']:>12.4g}"
-                     f"{(w['normal_force_ratio'] or 0):>8.3f}")
+        w = s["whole_plate"]
+        lines.append(f"{path.parents[1].name:<18}{s.get('leg', '?'):>9}"
+                     f"{(s['centre_disk']['p_ratio'] or 0):>10.3f}"
+                     f"{(w['normal_force_ratio'] or 0):>8.3f}"
+                     f"{(s['shear_force']['ratio'] or 0):>8.3f}"
+                     f"{(w['heat_load_ratio'] or 0):>8.3f}{w['normal_force_sim_n']:>12.4g}")
     return lines
 
 

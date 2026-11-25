@@ -157,3 +157,17 @@ def test_a_sampling_write_records_its_window(case):
     summary = yaml.safe_load((case / "results" / "cai_comparison.yaml").read_text(encoding="utf-8"))
     assert summary["leg"] == "sampling"
     assert summary["averaging_window_s"] == pytest.approx(0.01)
+
+
+def test_centre_metric_is_a_disk_average_not_one_face(case):
+    result = post.compare(case)
+    centre = result["summary"]["centre_disk"]
+    t = result["table"]
+    r = np.hypot(t["y_m"], t["z_m"])
+    inside = r <= centre["radius_m"]
+    assert inside.sum() >= 2                     # never one face alone
+    expected = (t["p_sim_pa"][inside] * t["area_m2"][inside]).sum() / t["area_m2"][inside].sum()
+    assert centre["p_sim_pa"] == pytest.approx(expected)
+    assert centre["faces"] == int(inside.sum())
+    shear = result["summary"]["shear_force"]
+    assert shear["sim_n"] == pytest.approx(4 * (t["tau_sim_pa"] * t["area_m2"]).sum())
