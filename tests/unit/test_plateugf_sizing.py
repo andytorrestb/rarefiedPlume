@@ -71,7 +71,7 @@ def test_regions_nest_and_finest_holds_exit_disk(table):
 
 def test_dense_cones_hug_the_plume(table):
     # The level-6 (10 mm) region at Kn 1e-4 holds ~40 m^3; one enclosing cone
-    # took ~190 m^3. The fitted cones must stay within 1.5x the true volume.
+    # took ~190 m^3. The fitted cones must stay within 2x the true volume.
     x = np.linspace(5e-3, X_LIMIT, 700)
     rho = np.linspace(0.0, RHO_LIMIT, 2100)
     X, R = np.meshgrid(x, rho, indexing="ij")
@@ -80,7 +80,7 @@ def test_dense_cones_hug_the_plume(table):
     fitted = sum(np.pi / 3 * (r["x_max_m"] - r["x_min_m"])
                  * (r["radius1_m"] ** 2 + r["radius1_m"] * r["radius2_m"] + r["radius2_m"] ** 2)
                  for r in regions(table, 1e-4) if r["level"] == 6)
-    assert true <= fitted < 1.5 * true
+    assert true <= fitted < 2.0 * true
 
 
 def test_dense_case_reaches_further_than_rarefied(table):

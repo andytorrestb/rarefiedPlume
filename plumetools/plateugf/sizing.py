@@ -36,6 +36,9 @@ from plumetools.cai2012 import analytical
 X_MIN_M = 5.0e-3
 _RHO_SHIFT = 1.0e-4
 _TINY = 1.0e-300
+#: Cone segments per level. nozzleplume.mesh.estimate_cells is quadratic in
+#: the number of regions, so this trades fit tightness for load time.
+N_SEGMENTS = 5
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ def refinement_regions(table: DensityTable, *, knudsen: float, diameter_m: float
     return out
 
 
-def _segments(x_end: float, cell: float, n: int = 10) -> list[tuple[float, float]]:
+def _segments(x_end: float, cell: float, n: int = N_SEGMENTS) -> list[tuple[float, float]]:
     """Contiguous x intervals [0, x_end]: geometric, none shorter than 4 cells."""
     if x_end <= 8.0 * cell:
         return [(0.0, x_end)]
