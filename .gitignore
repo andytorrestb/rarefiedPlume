@@ -218,4 +218,11 @@ cases/cai2012-unigas/.staging-*/
 cases/cai2012-unigas/baseCase/system/
 cases/cai2012-unigas/baseCase/constant/
 cases/cai2012-unigas/baseCase/results/
-cases/cai2012-unigas/results/*.lock
+# results/ is generated -- EXCEPT cost-model.yaml, the measured wall clock of
+# every run, kept for the same reason as the health and kn-extension families'.
+cases/cai2012-unigas/results/*
+!cases/cai2012-unigas/results/cost-model.yaml
+# Smoke/ holds short test copies of generated cases (runSmoke.sh); sweep/ is the
+# live state, pid and logs of runSweep.sh. Both are run output, not source.
+cases/cai2012-unigas/Smoke/
+cases/cai2012-unigas/sweep/
