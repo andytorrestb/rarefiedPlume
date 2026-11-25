@@ -307,6 +307,9 @@ def main(argv=None) -> int:
     post_step = steps.add_parser("post")
     post_step.add_argument("case_dir", type=Path)
     post_step.add_argument("--time")
+    viz_step = steps.add_parser("viz")
+    viz_step.add_argument("case_dir", type=Path)
+    viz_step.add_argument("--time")
     table_step = steps.add_parser("family-table")
     table_step.add_argument("root", type=Path)
     window = steps.add_parser("stop-at")
@@ -321,6 +324,11 @@ def main(argv=None) -> int:
     if args.step == "post":
         from plumetools.plateugf import post as post_module
         for path in post_module.run_post(args.case_dir, args.time):
+            print(f"    wrote {path}")
+        return 0
+    if args.step == "viz":
+        from plumetools.plateugf import viz as viz_module
+        for path in viz_module.slices(args.case_dir, args.time):
             print(f"    wrote {path}")
         return 0
     if args.step == "family-table":

@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Post-process this plate-unigas case (phase B):
+#
+#   reconstructPar   -> the newest writes, fields only (if the run was parallel)
+#   postProcess      -> C and V (cell centres and volumes) at the newest time
+#   plateugf post    -> results/: plate loads (CSV, YAML, maps, centreline
+#                       profiles) and the comparison with Cai's collisionless
+#                       plate solution (cai_comparison.*, cai-*.png)
+#   plateugf viz     -> results/slice-{n,U,T}-{y0,z0}.png on the symmetry planes
+#
+#   ./Allpost [--time T]
+set -uo pipefail
+cd "$(dirname "$0")" || exit 1
+TIME_ARGS=()
+[ "${1:-}" = "--time" ] && TIME_ARGS=(--time "${2:?--time needs a value}")
+die() { echo "" >&2; echo "Allpost: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+have python && PYTHON=python || { have python3 && PYTHON=python3 || die "no python on PATH"; }
+foam_tool() {
+    if [ -n "${FOAM_APPBIN:-}" ] && [ -x "$FOAM_APPBIN/$1" ]; then echo "$FOAM_APPBIN/$1"; else command -v "$1"; fi
+}
+[ -f case.yaml ] || die "no case.yaml here"
+if [ -d processor0 ]; then
+    RECON=$(foam_tool reconstructPar) || die "'reconstructPar' is not on PATH"
+    echo "==> reconstructPar -newTimes -no-lagrangian (-> log.reconstructPar.post)"
+    "$RECON" -newTimes -no-lagrangian > log.reconstructPar.post 2>&1 || die "reconstructPar failed (log.reconstructPar.post)"
+fi
+LATEST=${TIME_ARGS[1]:-}
+POST_TIME=(-latestTime)
+[ -n "$LATEST" ] && POST_TIME=(-time "$LATEST")
+PP=$(foam_tool postProcess) || die "'postProcess' is not on PATH"
+echo "==> postProcess writeCellCentres, writeCellVolumes"
+"$PP" -func writeCellCentres "${POST_TIME[@]}" > log.writeCellCentres 2>&1 || die "writeCellCentres failed"
+"$PP" -func writeCellVolumes "${POST_TIME[@]}" > log.writeCellVolumes 2>&1 || die "writeCellVolumes failed"
+echo "==> plate loads and the Cai comparison"
+$PYTHON -m plumetools.plateugf post . "${TIME_ARGS[@]}" || die "plate post-processing failed (above)"
+echo "==> slices on the symmetry planes"
+$PYTHON -m plumetools.plateugf viz . "${TIME_ARGS[@]}" || die "slices failed (above)"
+echo ""
+echo "Done: results/"
