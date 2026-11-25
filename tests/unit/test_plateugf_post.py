@@ -116,3 +116,15 @@ def test_run_post_writes_results_and_figures(case):
         assert name in written, name
     summary = yaml.safe_load((case / "results" / "cai_comparison.yaml").read_text(encoding="utf-8"))
     assert summary["whole_plate"]["normal_force_sim_n"] == pytest.approx(4 * 21e-6, rel=1e-9)
+
+
+def test_profiles_survive_snapping_noise(case):
+    # snappyHexMesh leaves face centres micrometres apart: nudge one point of
+    # the z = 0 row so two of its faces sit a little lower than the third.
+    points = case / "constant" / "polyMesh" / "points"
+    text = points.read_text(encoding="utf-8")
+    points.write_text(text.replace(f"({X} 2.0 0.0)", f"({X} 2.0 -1e-05)", 1), encoding="utf-8")
+    loads = post.read_plate(case)
+    prof = post.profiles(loads, {"p": loads.pressure})
+    assert len(prof["along_y"]["y_m"]) == 3
+    assert len(prof["along_z"]["z_m"]) == 2

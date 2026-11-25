@@ -98,10 +98,12 @@ def profiles(loads: PlateLoads, values: dict) -> dict:
     faces nearest z = 0 (``along_y``) and the column nearest y = 0 (``along_z``)."""
     up = upstream(loads)
     y, z = loads.centres[up, 1], loads.centres[up, 2]
+    half = 0.51 * np.sqrt(loads.areas[up])
     out = {}
     for key, across, along in (("along_y", z, y), ("along_z", y, z)):
-        tol = 1e-6 * max(1.0, float(np.ptp(across)) if across.size else 1.0)
-        row = np.flatnonzero(np.abs(across - across.min()) <= tol)
+        # the faces that touch the plane across = 0: centre within half a face
+        # of it. Robust to snappy's micrometre noise and to mixed face sizes.
+        row = np.flatnonzero(np.abs(across) <= half)
         row = row[np.argsort(along[row])]
         out[key] = {"y_m": y[row], "z_m": z[row],
                     **{name: np.asarray(v)[up][row] for name, v in values.items()}}
