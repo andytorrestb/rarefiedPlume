@@ -15,7 +15,11 @@ if [ $# -gt 0 ]; then CASES=("$@"); else CASES=($(ls Cases)); fi
 for case in "${CASES[@]}"; do
     dir=Cases/$case
     [ -f "$dir/case.yaml" ] || { echo "skip $case: no $dir/case.yaml" >&2; continue; }
-    if ls -d "$dir"/processor0/0.[0-9]* "$dir"/processor0/[1-9]* "$dir"/0.[0-9]* "$dir"/[1-9]* >/dev/null 2>&1; then
+    held=0
+    for pattern in "$dir/processor0/0.[0-9]*" "$dir/processor0/[1-9]*" "$dir/0.[0-9]*" "$dir/[1-9]*"; do
+        compgen -G "$pattern" >/dev/null && held=1
+    done
+    if [ "$held" -eq 1 ]; then
         echo "skip $case: it holds results (resume with: cd $dir && qsub runCase.sh)"
         continue
     fi
