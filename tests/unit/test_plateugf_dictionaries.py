@@ -101,3 +101,18 @@ def test_sampling_writes_four_per_transit(case, written):
     startup = (written / "system" / "controlDict.startup").read_text(encoding="utf-8")
     assert float(re.search(r"^endTime\s+([^;]+);", startup, re.M).group(1)) == \
         pytest.approx(case.run.average_start_s, rel=1e-9)
+
+
+def test_inflow_and_deletion_match_cai2012ugf_for_the_same_exit(case):
+    from plumetools.cai2012 import inflow
+    from plumetools.cai2012.config import load_case_config
+    base = ROOT / "cases" / "cai2012-unigas" / "baseCase"
+    first_cfg = load_case_config(base)
+    first = ugf.render_boundaries_dict(first_cfg, inflow.from_config(first_cfg), load_settings(base))
+    ours = dictionaries.render_boundaries_dict(case, load_settings(base))
+    general = lambda text: text.split("uniGasGeneralBoundaries", 1)[1]  # noqa: E731
+    assert general(ours) == general(first)
+    ours_blocks = _boundary_blocks(ours)
+    for patch, entries in _boundary_blocks(first).items():
+        assert ours_blocks[patch] == entries
+    assert set(ours_blocks) - set(_boundary_blocks(first)) == {"plate"}

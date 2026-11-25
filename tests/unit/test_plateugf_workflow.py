@@ -153,3 +153,13 @@ def test_symmetry_check_fails_when_plane_cells_are_empty(case_dir):
     _symmetry_mesh(case_dir, "0 0 5e14")
     results = {n: ok for n, ok, _ in workflow.smoke_check(case_dir, "0.01")}
     assert results["gas_at_symmetry"] is False
+
+
+def test_leg_after_average_start_is_sampling(case_dir):
+    t = case_dir / "0.07"
+    (t / "lagrangian" / "uniGas").mkdir(parents=True)
+    (t / "uniform").mkdir()
+    (t / "uniform" / "time").write_text("deltaT 1e-06;\n", encoding="utf-8")
+    plan = workflow.resume_plan(case_dir, 1)
+    assert plan.base.resume == "0.07"
+    assert plan.leg == "sampling"
