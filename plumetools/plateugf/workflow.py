@@ -325,8 +325,8 @@ def main(argv=None) -> int:
         return 0
     if args.step == "family-table":
         from plumetools.plateugf import post as post_module
-        print("
-".join(post_module.family_table(args.root)))
+        for line in post_module.family_table(args.root):
+            print(line)
         return 0
     if args.step == "flatten-symmetry":
         print(f"    flatten-symmetry: {flatten_symmetry(args.case_dir)} point(s) put on y = 0 / z = 0")
