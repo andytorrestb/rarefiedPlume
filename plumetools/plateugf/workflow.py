@@ -304,6 +304,11 @@ def main(argv=None) -> int:
     smoke = steps.add_parser("smoke-check")
     smoke.add_argument("case_dir", type=Path)
     smoke.add_argument("--time")
+    post_step = steps.add_parser("post")
+    post_step.add_argument("case_dir", type=Path)
+    post_step.add_argument("--time")
+    table_step = steps.add_parser("family-table")
+    table_step.add_argument("root", type=Path)
     window = steps.add_parser("stop-at")
     window.add_argument("case_dir", type=Path)
     window.add_argument("transits", type=float)
@@ -313,6 +318,16 @@ def main(argv=None) -> int:
         return describe(args.case_dir)
     if args.step == "setup":
         return setup(args.case_dir)
+    if args.step == "post":
+        from plumetools.plateugf import post as post_module
+        for path in post_module.run_post(args.case_dir, args.time):
+            print(f"    wrote {path}")
+        return 0
+    if args.step == "family-table":
+        from plumetools.plateugf import post as post_module
+        print("
+".join(post_module.family_table(args.root)))
+        return 0
     if args.step == "flatten-symmetry":
         print(f"    flatten-symmetry: {flatten_symmetry(args.case_dir)} point(s) put on y = 0 / z = 0")
         return 0
