@@ -245,13 +245,41 @@ def _figures(results: Path, result: dict, label: str) -> list[Path]:
     return written
 
 
-def run_post(case_dir: Path, time: str | None = None) -> list[Path]:
+def _window(case_dir: Path, time: str, allow_startup: bool) -> dict:
+    """Which leg ``time`` is in, and how long its mean has been accumulating.
+
+    uniGasFoam writes the plate fields at EVERY write. Before
+    ``average_start_s`` each is a one-interval average of the startup, not the
+    sampled mean, so it is refused unless ``allow_startup``.
+    """
+    from plumetools.plateugf.workflow import run_window
+    try:
+        average_start, _ = run_window(case_dir)
+    except FoamDataError:
+        return {"leg": "unknown", "averaging_window_s": None}
+    t = float(time)
+    if t < average_start * (1.0 - 1.0e-6):
+        if not allow_startup:
+            raise PostError(
+                f"t = {time} s is before averaging starts ({average_start:.8g} s): its "
+                f"plate fields average one write interval of the startup, not the "
+                f"sampling window. Wait for the sampling leg's writes, or pass "
+                f"--allow-startup to draw it anyway (it is labelled 'startup').")
+        return {"leg": "startup", "averaging_window_s": None}
+    return {"leg": "sampling", "averaging_window_s": t - average_start}
+
+
+def run_post(case_dir: Path, time: str | None = None, allow_startup: bool = False) -> list[Path]:
     """Every plate result and figure of one case into ``results/``."""
     case_dir = Path(case_dir)
     cfg, _, es = _setup(case_dir)
     label = str(cfg.meta.get("case_name") or case_dir.resolve().name)
     loads = read_plate(case_dir, time)
+    window = _window(case_dir, loads.time, allow_startup)
+    if window["leg"] == "startup":
+        label += " [STARTUP write: not the sampled mean]"
     result = compare(case_dir, loads=loads)
+    result["summary"].update(window)
     results = case_dir / "results"
     results.mkdir(parents=True, exist_ok=True)
     written = list(write_plate_results(results, loads, es))

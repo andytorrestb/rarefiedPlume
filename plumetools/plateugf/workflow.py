@@ -307,6 +307,7 @@ def main(argv=None) -> int:
     post_step = steps.add_parser("post")
     post_step.add_argument("case_dir", type=Path)
     post_step.add_argument("--time")
+    post_step.add_argument("--allow-startup", action="store_true")
     viz_step = steps.add_parser("viz")
     viz_step.add_argument("case_dir", type=Path)
     viz_step.add_argument("--time")
@@ -323,7 +324,7 @@ def main(argv=None) -> int:
         return setup(args.case_dir)
     if args.step == "post":
         from plumetools.plateugf import post as post_module
-        for path in post_module.run_post(args.case_dir, args.time):
+        for path in post_module.run_post(args.case_dir, args.time, args.allow_startup):
             print(f"    wrote {path}")
         return 0
     if args.step == "viz":

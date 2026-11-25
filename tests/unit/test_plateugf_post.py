@@ -128,3 +128,32 @@ def test_profiles_survive_snapping_noise(case):
     prof = post.profiles(loads, {"p": loads.pressure})
     assert len(prof["along_y"]["y_m"]) == 3
     assert len(prof["along_z"]["z_m"]) == 2
+
+
+def _controls(case: Path, startup_end: float, sampling_end: float) -> None:
+    system = case / "system"
+    system.mkdir(exist_ok=True)
+    for leg, end in (("startup", startup_end), ("sampling", sampling_end)):
+        (system / f"controlDict.{leg}").write_text(f"endTime         {end};\n", encoding="utf-8")
+
+
+def test_a_write_before_averaging_is_refused(case):
+    _controls(case, startup_end=0.1, sampling_end=0.2)
+    with pytest.raises(post.PostError, match="before averaging starts"):
+        post.run_post(case)
+    assert (case / "results" / "cai_comparison.yaml").exists() is False
+
+
+def test_a_startup_write_can_be_drawn_when_asked_and_is_labelled(case):
+    _controls(case, startup_end=0.1, sampling_end=0.2)
+    post.run_post(case, allow_startup=True)
+    summary = yaml.safe_load((case / "results" / "cai_comparison.yaml").read_text(encoding="utf-8"))
+    assert summary["leg"] == "startup"
+
+
+def test_a_sampling_write_records_its_window(case):
+    _controls(case, startup_end=0.04, sampling_end=0.06)
+    post.run_post(case)
+    summary = yaml.safe_load((case / "results" / "cai_comparison.yaml").read_text(encoding="utf-8"))
+    assert summary["leg"] == "sampling"
+    assert summary["averaging_window_s"] == pytest.approx(0.01)
