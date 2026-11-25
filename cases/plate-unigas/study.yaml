@@ -43,3 +43,11 @@ smoke:
   transient_domain_transits: 1.0
   sampling_domain_transits: 1.0
   n_subdomains: 12
+
+# The phase-B prototype runs (laptop): the smoke mesh and weight overrides,
+# longer, lighter, one case per stand-off at Kn_e = 100. Never results.
+prototype:
+  transient_domain_transits: 2.0
+  sampling_domain_transits: 1.0
+  target_particles_per_exit_cell: 10.0
+  n_subdomains: 4

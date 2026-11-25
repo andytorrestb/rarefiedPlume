@@ -199,23 +199,44 @@ def generate(family_root: Path, *, dry_run: bool = False, only: list[str] | None
     return entries
 
 
-def stage_smoke(family_root: Path) -> Path:
-    """Write ``Smoke/<case>``: the coarse, short laptop smoke case (spec §8)."""
+def _stage_coarse(family_root: Path, case: str, dsmc: dict, subdir: str, note: str) -> Path:
+    """The smoke mesh overrides, ``dsmc`` overrides, written to ``<subdir>/<case>``."""
     family_root = Path(family_root)
     study = load_study(family_root)
     smoke = study["smoke"]
     template = yaml.safe_load(yaml.safe_dump(_template(family_root, study)))
     template["mesh"]["background_cell_size_m"] = float(smoke["background_cell_size_m"])
     template["mesh"]["plate_refinement_level"] = int(smoke["plate_refinement_level"])
-    for key in ("transient_domain_transits", "sampling_domain_transits", "n_subdomains"):
-        template["dsmc"][key] = smoke[key]
+    for key, value in dsmc.items():
+        template["dsmc"][key] = value
     template["execution_profile"] = "smoke"
-    planned = {p.name: p for p in plan_cases(study, template)}[smoke["case"]]
+    planned = {p.name: p for p in plan_cases(study, template)}.get(case)
+    if planned is None:
+        raise GenerationError(f"unknown case {case!r}")
     cfg = case_config(template, planned, {
         "floor_m": smoke["floor_m"], "geo_fraction": smoke["geo_fraction"],
         "max_level": smoke["max_level"]})
-    cfg["meta"]["note"] = "LAPTOP SMOKE RUN: coarse and short; proves the chain, not results."
-    return write_case(family_root, family_root / "Smoke" / planned.name, cfg, study)
+    cfg["meta"]["note"] = note
+    return write_case(family_root, family_root / subdir / planned.name, cfg, study)
+
+
+def stage_smoke(family_root: Path) -> Path:
+    """Write ``Smoke/<case>``: the coarse, short laptop smoke case (spec §8)."""
+    smoke = load_study(family_root)["smoke"]
+    return _stage_coarse(
+        family_root, smoke["case"],
+        {k: smoke[k] for k in ("transient_domain_transits", "sampling_domain_transits",
+                               "n_subdomains")},
+        "Smoke", "LAPTOP SMOKE RUN: coarse and short; proves the chain, not results.")
+
+
+def stage_prototype(family_root: Path, case: str) -> Path:
+    """Write ``Prototype/<case>``: a coarse laptop run for building phase B."""
+    proto = load_study(family_root)["prototype"]
+    return _stage_coarse(
+        family_root, case, dict(proto), "Prototype",
+        "LAPTOP PROTOTYPE RUN: coarse, light and short; for building the "
+        "post-processing, never results.")
 
 
 def table(entries: list[CaseEntry]) -> list[str]:

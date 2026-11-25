@@ -73,3 +73,17 @@ def test_smoke_case_is_small(family):
     assert sum(case.plan.cells_by_level.values()) < 200_000
     assert not case.checks().failures
     assert case.cfg.dsmc.n_subdomains == 12
+
+
+@pytest.mark.parametrize("name", ["Kn100_zD25", "Kn100_zD100"])
+def test_prototype_cases_are_short_and_coarse(family, name):
+    path = generation.stage_prototype(family, name)
+    assert path == family / "Prototype" / name
+    case = npw.load(path)
+    assert case.cfg.dsmc.transient_domain_transits == 2.0
+    assert case.cfg.dsmc.sampling_domain_transits == 1.0
+    assert case.cfg.dsmc.target_particles_per_exit_cell == 10.0
+    assert case.cfg.dsmc.n_subdomains == 4
+    assert sum(case.plan.cells_by_level.values()) < 250_000
+    assert case.plan.exit_level == max(r.level for r in case.plan.regions)
+    assert not case.checks().failures

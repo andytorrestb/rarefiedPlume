@@ -5,6 +5,7 @@
     python generate_cases.py                   Cases/<case>/ and manifest-plate.yaml
     python generate_cases.py --only Kn100_zD25 one case (no manifest)
     python generate_cases.py --smoke           Smoke/Kn100_zD25, the laptop smoke run
+    python generate_cases.py --prototype Kn100_zD25 ...   Prototype/<case> laptop runs
     python generate_cases.py --no-estimate     skip the ~30 s-per-case nozzleplume estimate
 
 Nothing here meshes, runs a solver or submits a job.
@@ -27,10 +28,16 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--only", nargs="+")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--prototype", nargs="+", metavar="CASE",
+                        help="stage Prototype/<case> laptop runs (phase B)")
     parser.add_argument("--no-estimate", action="store_true")
     parser.add_argument("--workers", type=int, default=None)
     args = parser.parse_args()
     try:
+        if args.prototype:
+            for case in args.prototype:
+                print(f"wrote {generation.stage_prototype(HERE, case)}")
+            return 0
         if args.smoke:
             print(f"wrote {generation.stage_smoke(HERE)}")
             return 0
