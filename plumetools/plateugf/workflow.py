@@ -169,14 +169,28 @@ def smoke_check(case_dir: Path, time: str | None = None) -> list[tuple[str, bool
     except (OSError, FoamDataError) as exc:
         results.append(("volume_fields", False, f"{rho_path.name}: {exc}"))
 
-    for patch in _symmetry_patches(case_dir):
+    # A symmetry patch writes no value, so look at the cells that own its faces:
+    # an absorbing plane would leave them empty next to the plume axis.
+    symmetry = _symmetry_patches(case_dir)
+    if symmetry:
+        from plumetools.mesh.boundary import read_boundary
+        from plumetools.mesh.polymesh import read_label_list
         try:
-            values = np.asarray(read_patch_field(rho_path, patch), dtype=float)
-            results.append((f"gas_at_{patch}", bool(np.any(values > 0.0)),
-                            f"{int(np.count_nonzero(values > 0))} of {values.size} faces "
-                            f"of '{patch}' see gas"))
+            owner = read_label_list(case_dir / "constant" / "polyMesh" / "owner")
+            rho = read_internal_field(rho_path)
+            patches = read_boundary(case_dir)
         except (OSError, FoamDataError) as exc:
-            results.append((f"gas_at_{patch}", False, str(exc)))
+            owner = None
+            for patch in symmetry:
+                results.append((f"gas_at_{patch}", False, str(exc)))
+        if owner is not None:
+            for patch in symmetry:
+                info = patches[patch]
+                cells = owner[info.start_face:info.start_face + info.n_faces]
+                values = np.asarray(rho, dtype=float)[cells]
+                results.append((f"gas_at_{patch}", bool(np.any(values > 0.0)),
+                                f"{int(np.count_nonzero(values > 0))} of {values.size} cells "
+                                f"beside '{patch}' hold gas"))
     return results
 
 

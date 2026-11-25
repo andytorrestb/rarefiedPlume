@@ -97,3 +97,59 @@ def test_smoke_check_fails_on_unloaded_plate(case_dir):
     _plate_fields(case_dir / "0.01", p_values="0 0 0")
     results = dict((n, ok) for n, ok, _ in workflow.smoke_check(case_dir, "0.01"))
     assert results["plate_loaded"] is False
+
+
+BOUNDARY = """FoamFile
+{
+    version 2.0; format ascii; class polyBoundaryMesh; object boundary;
+}
+2
+(
+    plate
+    {
+        type            wall;
+        nFaces          1;
+        startFace       4;
+    }
+    symmetry
+    {
+        type            symmetry;
+        nFaces          2;
+        startFace       5;
+    }
+)
+"""
+
+OWNER = """FoamFile
+{
+    version 2.0; format ascii; class labelList; object owner;
+}
+7
+(
+0 0 1 1 2 0 1
+)
+"""
+
+
+def _symmetry_mesh(case_dir: Path, rho_values: str) -> None:
+    mesh = case_dir / "constant" / "polyMesh"
+    mesh.mkdir(parents=True, exist_ok=True)
+    (mesh / "boundary").write_text(BOUNDARY, encoding="utf-8")
+    (mesh / "owner").write_text(OWNER, encoding="utf-8")
+    _plate_fields(case_dir / "0.01")
+    text = (case_dir / "0.01" / "rhoN_Ar").read_text(encoding="utf-8")
+    text = text.replace("internalField uniform 1;",
+                        f"internalField nonuniform List<scalar> 3({rho_values});")
+    (case_dir / "0.01" / "rhoN_Ar").write_text(text, encoding="utf-8")
+
+
+def test_symmetry_check_reads_cells_beside_the_plane(case_dir):
+    _symmetry_mesh(case_dir, "1e14 2e14 0")          # symmetry faces 5, 6 -> cells 0, 1
+    results = {n: ok for n, ok, _ in workflow.smoke_check(case_dir, "0.01")}
+    assert results["gas_at_symmetry"] is True
+
+
+def test_symmetry_check_fails_when_plane_cells_are_empty(case_dir):
+    _symmetry_mesh(case_dir, "0 0 5e14")
+    results = {n: ok for n, ok, _ in workflow.smoke_check(case_dir, "0.01")}
+    assert results["gas_at_symmetry"] is False
