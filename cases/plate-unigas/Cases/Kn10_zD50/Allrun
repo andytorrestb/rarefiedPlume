@@ -93,6 +93,26 @@ foam_entry() {
 
 ge() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 >= b+0)}'; }
 
+# decomposeParDict balances <time>/decompositionWeight (plumetools/plateugf/
+# weights.py), which decomposePar reads from the time it decomposes. Allmesh
+# writes it at 0; write it here if it is missing (an Allclean removes 0/), and
+# copy it to a later time being re-decomposed -- it does not depend on time.
+weights_for() {
+    local time=$1
+    if [ ! -f 0/decompositionWeight ]; then
+        have postProcess || die "'postProcess' is not on PATH (needed for 0/decompositionWeight)"
+        mkdir -p 0
+        run writeCellCentres postProcess -func writeCellCentres -time 0
+        run writeCellVolumes postProcess -func writeCellVolumes -time 0
+        $PYTHON -m plumetools.plateugf weights . --time 0 \
+            || die "could not write 0/decompositionWeight (above)"
+        rm -f 0/C 0/Cx 0/Cy 0/Cz 0/V
+    fi
+    if [ "$time" != 0 ] && [ ! -f "$time/decompositionWeight" ]; then
+        cp 0/decompositionWeight "$time/" || die "could not copy the weights to $time/"
+    fi
+}
+
 # The OpenFOAM distribution's own decomposePar/reconstructPar, not whatever is
 # first on PATH: a $FOAM_USER_APPBIN left over from another build (dsmcFoam+,
 # hyStrath) can shadow them with a binary that fails on this mesh. uniGasFoam's
@@ -219,12 +239,14 @@ print('%.12g' % aligned_interval($STOP_AT - ${RESUME:-0}, $(foam_entry writeInte
             if [ "$RECONSTRUCT_FIRST" -eq 1 ]; then
                 run reconstructPar.resume "$RECONSTRUCT_PAR" -newTimes
             fi
+            weights_for "$RESUME"
             run decomposePar "$DECOMPOSE_PAR" -force -latestTime $DECOMP_ARGS
         else
+            weights_for 0
             run decomposePar "$DECOMPOSE_PAR" -force $DECOMP_ARGS
-            # 0/ holds no field (uniGasFoam fills the mesh itself), so
-            # decomposePar writes no processor*/0 -- and uniGasFoam, starting
-            # from latestTime with no time directory, ends without a step.
+            # 0/ holds no solver field (uniGasFoam fills the mesh itself; only
+            # decompositionWeight is there), and uniGasFoam, starting from
+            # latestTime with no time directory, ends without a step: make sure.
             for ((rank = 0; rank < NP; rank++)); do
                 mkdir -p "processor$rank/0"
             done

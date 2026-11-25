@@ -180,7 +180,8 @@ run createPatch createPatch -overwrite
 rm -rf constant/polyMesh/sets constant/polyMesh/surfaceIndex
 # snappyHexMesh nudges points where the plate's edge meets a symmetry plane
 # (tens of micrometres); put them back on y = 0 / z = 0 before verifying.
-$PYTHON -m plumetools.plateugf flatten-symmetry . \n    || die "could not flatten the symmetry planes (above)"
+$PYTHON -m plumetools.plateugf flatten-symmetry . \
+    || die "could not flatten the symmetry planes (above)"
 
 run checkMesh checkMesh
 
@@ -204,6 +205,23 @@ echo "==> verifying the mesh against case.yaml"
 $PYTHON -m plumetools.nozzleplume verify . \
     || die "mesh verification failed (see above). checkMesh says the mesh is
        valid; this says it is not the geometry case.yaml describes."
+
+# --------------------------------------------------------------------------- #
+# 4. decomposition weights
+# --------------------------------------------------------------------------- #
+
+# decomposeParDict balances 0/decompositionWeight (1 + the collisionless
+# particles per cell), not cells: see plumetools/plateugf/weights.py. Allrun
+# writes it the same way if it is missing.
+echo ""
+echo "==> decomposition weights (collisionless plume + plate gas)"
+have postProcess || die "'postProcess' is not on PATH. Source your OpenFOAM environment."
+mkdir -p 0
+run writeCellCentres postProcess -func writeCellCentres -time 0
+run writeCellVolumes postProcess -func writeCellVolumes -time 0
+$PYTHON -m plumetools.plateugf weights . --time 0 \
+    || die "could not write the decomposition weights (above)"
+rm -f 0/C 0/Cx 0/Cy 0/Cz 0/V
 
 echo ""
 echo "Done. Next:  ./Allrun"

@@ -317,17 +317,23 @@ def run_post(case_dir: Path, time: str | None = None, allow_startup: bool = Fals
 def family_table(root: Path) -> list[str]:
     """One line per case under ``root`` that has ``results/cai_comparison.yaml``:
     simulation over Cai for the centre-disk pressure, the normal force, the
-    shear force and the heat load."""
+    shear force and the heat load; and, once ``viz`` has run, the gas in front of
+    the plate over the collisionless density's (``n front``)."""
     lines = [f"{'case':<18}{'leg':>9}{'p centre':>10}{'force':>8}{'shear':>8}{'heat':>8}"
-             f"{'F sim [N]':>12}"]
+             f"{'n front':>9}{'F sim [N]':>12}"]
     for path in sorted(Path(root).glob("*/results/cai_comparison.yaml")):
         s = yaml.safe_load(path.read_text(encoding="utf-8"))
         w = s["whole_plate"]
+        density = path.with_name("cai_density.yaml")
+        front = "-"
+        if density.is_file():
+            ratio = yaml.safe_load(density.read_text(encoding="utf-8"))["regions"]["before_plate"]["ratio"]
+            front = f"{ratio:.3f}" if ratio is not None else "-"
         lines.append(f"{path.parents[1].name:<18}{s.get('leg', '?'):>9}"
                      f"{(s['centre_disk']['p_ratio'] or 0):>10.3f}"
                      f"{(w['normal_force_ratio'] or 0):>8.3f}"
                      f"{(s['shear_force']['ratio'] or 0):>8.3f}"
-                     f"{(w['heat_load_ratio'] or 0):>8.3f}{w['normal_force_sim_n']:>12.4g}")
+                     f"{(w['heat_load_ratio'] or 0):>8.3f}{front:>9}{w['normal_force_sim_n']:>12.4g}")
     return lines
 
 

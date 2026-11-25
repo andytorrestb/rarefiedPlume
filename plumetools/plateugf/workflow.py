@@ -289,7 +289,8 @@ def setup(case_dir: Path) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line of ``python -m plumetools.plateugf`` (the case scripts call it)."""
     parser = argparse.ArgumentParser(prog="python -m plumetools.plateugf")
     steps = parser.add_subparsers(dest="step", required=True)
     for name in ("describe", "setup", "finished", "check-build", "flatten-symmetry"):
@@ -316,7 +317,14 @@ def main(argv=None) -> int:
     window = steps.add_parser("stop-at")
     window.add_argument("case_dir", type=Path)
     window.add_argument("transits", type=float)
-    args = parser.parse_args(argv)
+    weights_step = steps.add_parser("weights")
+    weights_step.add_argument("case_dir", type=Path)
+    weights_step.add_argument("--time", default="0")
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
 
     if args.step == "describe":
         return describe(args.case_dir)
@@ -331,6 +339,14 @@ def main(argv=None) -> int:
         from plumetools.plateugf import viz as viz_module
         for path in viz_module.slices(args.case_dir, args.time):
             print(f"    wrote {path}")
+        return 0
+    if args.step == "weights":
+        from plumetools.plateugf import weights as weights_module
+        try:
+            weights_module.write_weights(args.case_dir, args.time)
+        except weights_module.WeightError as exc:
+            print(f"weights: {exc}", file=sys.stderr)
+            return 1
         return 0
     if args.step == "family-table":
         from plumetools.plateugf import post as post_module

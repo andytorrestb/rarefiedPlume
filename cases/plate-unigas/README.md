@@ -62,6 +62,14 @@ expected to need resubmission.
 * **Mesh:** octree levels of a 0.64 m background, regions fitted as cone
   segments to where the target cell is smaller than each level
   (`plumetools/plateugf/sizing.py`); the plate at level 3 (0.08 m).
+* **Decomposition:** scotch balancing `0/decompositionWeight` = 1 + the
+  collisionless particles per cell (Cai's plume shadowed by the plate, plus the
+  gas the plate re-emits at 300 K; `plumetools/plateugf/collisionless.py`,
+  `weights.py`), not cells. `Allmesh` writes it; `Allrun` rewrites it if it is
+  missing. Balancing cells put 90% of the smoke run's particles on one rank;
+  on the Kn_e = 100 prototype mesh the weighted split is as even as one from
+  the measured particle counts (busiest rank 1.31× the mean at 12 ranks,
+  against 8.7× balancing cells).
 
 ## Post-processing (phase B)
 
@@ -75,10 +83,15 @@ reconstructs the newest writes, writes cell centres and volumes, then fills
 | `plate_profiles.csv`, `plate-{pressure,shear,heat-flux}.png` | the upstream face: maps and the two centreline profiles |
 | `cai_comparison.{csv,yaml}`, `cai-profiles.png`, `cai-ratio-maps.png` | simulation vs Cai's collisionless plate solution (`plumetools/plateugf/caiplate.py`: the exit Maxwellian integrated over the nozzle disk, diffuse 300 K re-emission) |
 | `slice-{n,U,T}-{y0,z0}.png` | density/exit, speed, temperature on the two symmetry planes, fixed colour ranges |
+| `slice-ncai-{y0,z0}.png`, `slice-nratio-{y0,z0}.png` | the collisionless density (Cai's plume + the plate's re-emitted gas) on the same scale, and simulated ÷ collisionless |
+| `cai_density.yaml` | simulated ÷ collisionless gas (molecules) near the nozzle, mid-plume, before the plate and beside/behind it (fractions of the stand-off) |
 
 `python -m plumetools.plateugf family-table Cases` tabulates the comparison
-over every post-processed case. Maps are normalised by the exit static pressure
-p0 = n0 k T0, so all 21 cases share one colour scale.
+over every post-processed case (`n front`: the gas before the plate over the
+collisionless). Maps are normalised by the exit static pressure p0 = n0 k T0,
+so all 21 cases share one colour scale. The collisionless density has no
+collisions by design: at Kn_e = 100 the ratio should sit near 1, and its
+departures at lower Kn_e are the collisional effects.
 
 At Kn_e = 100 the simulation should approach the collisionless solution. On
 the laptop smoke run (Kn100_zD25, coarse and short) the whole-plate force was

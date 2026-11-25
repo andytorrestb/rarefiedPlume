@@ -110,6 +110,22 @@ def render_boundaries_dict(case, settings) -> str:
     return ugf._text(lines)
 
 
+def render_decompose_par_dict(cfg) -> str:
+    """nozzleplume's decomposeParDict, balancing ``decompositionWeight``
+    (:mod:`plumetools.plateugf.weights`) instead of cells."""
+    from plumetools.plateugf.weights import FIELD
+    out = []
+    for line in npd.render_decompose_par_dict(cfg).splitlines():
+        out.append(line)
+        if line.startswith("method"):
+            out += ["",
+                    "// Balance the expected particles (+1 per cell), not the cells: the",
+                    "// collisionless plume-plus-plate-gas count per cell, written to 0/ by",
+                    "// Allmesh (python -m plumetools.plateugf weights).",
+                    f"weightField         {FIELD};"]
+    return "\n".join(out) + "\n"
+
+
 def write_case_dictionaries(case, settings) -> list[Path]:
     """Write the mesh setup and every uniGasFoam dictionary of ``case``."""
     case_dir = Path(case.case_dir)
@@ -127,7 +143,7 @@ def write_case_dictionaries(case, settings) -> list[Path]:
         system / "controlDict.startup": startup,
         system / "controlDict.sampling": ugf.render_control_dict(cfg_view, run_view, settings, "sampling"),
         system / "controlDict": startup,
-        system / "decomposeParDict": npd.render_decompose_par_dict(case.cfg),
+        system / "decomposeParDict": render_decompose_par_dict(case.cfg),
         system / "fvSchemes": ugf.render_fv_schemes(),
         system / "fvSolution": ugf.render_fv_solution(),
     }
